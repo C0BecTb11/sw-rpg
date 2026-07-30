@@ -1,0 +1,40 @@
+#site-banner {
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  aspect-ratio: 21 / 9;
+  background: linear-gradient(135deg, #0d1119 0%, #161b24 50%, #0d1119 100%);
+  background-image: url('assets/ui/banner.jpg');
+  background-size: cover;
+  background-position: center;
+  position: relative;
+  overflow: hidden;
+  border-bottom: 1px solid #1c2530;
+}
+
+/* фолбэк для браузеров без aspect-ratio (на старых мобилках) */
+@supports not (aspect-ratio: 21 / 9) {
+  #site-banner {
+    height: 0;
+    padding-top: 42.85%; /* 9/21 */
+  }
+}
+
+#site-banner-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 10px;
+  background: linear-gradient(to top, rgba(5,6,10,0.75) 0%, rgba(5,6,10,0) 55%);
+}
+
+#site-banner-title {
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: #cfd8dc;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+}
