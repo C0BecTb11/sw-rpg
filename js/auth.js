@@ -60,6 +60,13 @@ function handleSubmit() {
         showMessage(res.error.message, true);
         return;
       }
+      // Supabase не всегда возвращает явную ошибку на повторную регистрацию —
+      // если identities пустой массив, значит аккаунт с этим email уже существует
+      var identities = res.data.user && res.data.user.identities;
+      if (identities && identities.length === 0) {
+        showMessage('Этот email уже зарегистрирован. Попробуй войти.', true);
+        return;
+      }
       showMessage('Аккаунт создан! Входим...', false);
       if (res.data.session) {
         showSession(res.data.user);
