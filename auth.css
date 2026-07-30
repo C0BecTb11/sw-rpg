@@ -1,0 +1,125 @@
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+body {
+  margin: 0;
+  background: #0a0d14;
+  font-family: 'Courier New', monospace;
+  color: #cfd8dc;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+#box {
+  width: 100%;
+  max-width: 360px;
+}
+
+h1 {
+  font-size: 14px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #8fa8c4;
+  text-align: center;
+  margin: 0 0 24px 0;
+  font-weight: normal;
+}
+
+.tabs {
+  display: flex;
+  margin-bottom: 20px;
+  border: 1px solid #1c2530;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: 10px;
+  cursor: pointer;
+  color: #55606c;
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.tab.active {
+  background: #161b24;
+  color: #4a90d9;
+}
+
+label {
+  display: block;
+  font-size: 11px;
+  color: #55606c;
+  margin-bottom: 4px;
+  margin-top: 14px;
+}
+
+input {
+  width: 100%;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  color: #cfd8dc;
+  padding: 10px;
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
+  border-radius: 2px;
+}
+
+input:focus {
+  outline: none;
+  border-color: #4a90d9;
+}
+
+button {
+  width: 100%;
+  margin-top: 20px;
+  padding: 12px;
+  background: #4a90d9;
+  border: none;
+  color: #0a0d14;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  font-weight: bold;
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+button:disabled {
+  background: #2a3644;
+  color: #55606c;
+}
+
+#message {
+  margin-top: 14px;
+  font-size: 12px;
+  text-align: center;
+  min-height: 16px;
+}
+
+#message.error { color: #d94a4a; }
+#message.success { color: #6bbf7a; }
+
+#session-box {
+  display: none;
+  text-align: center;
+}
+
+#session-box p {
+  color: #8fa8c4;
+  font-size: 13px;
+}
+
+#session-box .email {
+  color: #4a90d9;
+}
+
+#logout-btn {
+  background: #2a3644;
+  color: #cfd8dc;
+  margin-top: 30px;
+}
