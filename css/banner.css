@@ -3,10 +3,10 @@
   max-width: 480px;
   margin: 0 auto;
   aspect-ratio: 21 / 9;
-  background: linear-gradient(135deg, #0d1119 0%, #161b24 50%, #0d1119 100%);
-  background-image: url('assets/ui/banner.jpg');
-  background-size: cover;
-  background-position: center;
+  background-image: url('assets/ui/banner.jpg'), linear-gradient(135deg, #0d1119 0%, #161b24 50%, #0d1119 100%);
+  background-size: cover, cover;
+  background-position: center, center;
+  background-repeat: no-repeat, no-repeat;
   position: relative;
   overflow: hidden;
   border-bottom: 1px solid #1c2530;
