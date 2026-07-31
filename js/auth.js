@@ -69,7 +69,7 @@ function handleSubmit() {
       }
       showMessage('Аккаунт создан! Входим...', false);
       if (res.data.session) {
-        showSession(res.data.user);
+        window.location.href = 'game/galaxy-map.html';
       }
     });
   } else {
@@ -79,7 +79,7 @@ function handleSubmit() {
         showMessage(res.error.message, true);
         return;
       }
-      showSession(res.data.user);
+      window.location.href = 'game/galaxy-map.html';
     });
   }
 }

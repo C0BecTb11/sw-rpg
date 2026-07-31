@@ -60,8 +60,8 @@
     if (res.data.session) {
       statusEl.textContent = 'Вошёл как ' + res.data.session.user.email;
       linksEl.innerHTML =
-        '<a href="character-create.html">Создать персонажа</a>' +
-        '<a href="auth.html" class="secondary">Управление аккаунтом</a>';
+        '<a href="game/galaxy-map.html">Войти в галактику</a>' +
+        '<a href="character-create.html" class="secondary">Создать персонажа</a>';
     } else {
       statusEl.textContent = 'Ты не авторизован';
       linksEl.innerHTML =
