@@ -3,14 +3,11 @@
 html, body {
   margin: 0;
   min-height: 100%;
+  overflow-x: hidden;
 }
 
 body {
   background-color: #000;
-  background-image: url('../assets/ui/galaxy-bg.png');
-  background-size: cover;
-  background-position: center;
-  background-attachment: fixed;
   font-family: 'Courier New', monospace;
   color: #cfd8dc;
 }
@@ -36,10 +33,22 @@ body {
   color: #55606c;
 }
 
+#map-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
 #map-area {
   position: relative;
+  width: 220vw;
   min-height: calc(100vh - 50px);
   overflow: hidden;
+  background-image: url('../assets/ui/galaxy-bg-tile.png');
+  background-repeat: repeat-x;
+  background-size: auto 100%;
+  background-position: left center;
 }
 
 #galaxy-layer {

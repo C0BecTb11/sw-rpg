@@ -1,15 +1,16 @@
 // Модуль отрисовки маленьких вращающихся планет на галакарте.
 // Каждая планета — canvas с текстурой, сферическое сжатие по краям (через asin),
 // затемнение тёмной стороны, лёгкая тень.
+//
+// Данные о планетах (позиция, фракция, текстура) берутся из таблицы systems
+// в Supabase, а не хранятся статически в коде — так владение фракцией можно
+// менять в БД после захвата планеты в бою, и все игроки увидят актуальную
+// карту без необходимости обновлять код на GitHub Pages.
 
-// Конфиг планет: позиции в процентах от контейнера карты (left/top),
-// подобраны по относительному расположению на канонической карте галактики
-// (Корусант — Ядро/центр, Набу и Утапау — Внутреннее Кольцо восточнее, Утапау дальше).
-var PLANETS_CONFIG = [
-  { id: 'coruscant', texture: 'assets/planets/coruscant.png', left: 38, top: 60, radius: 16, speed: 0.0006 },
-  { id: 'naboo',      texture: 'assets/planets/naboo.png',      left: 68, top: 40, radius: 14, speed: 0.0012 },
-  { id: 'utapau',     texture: 'assets/planets/utapau.png',     left: 88, top: 35, radius: 14, speed: 0.0009 }
-];
+var FACTION_COLORS = {
+  republic: '#4a90d9', // синий
+  cis:      '#d94a4a'  // красный
+};
 
 function renderRotatingPlanet(canvas, tex, radius, speed) {
   var ctx = canvas.getContext('2d');
@@ -80,25 +81,90 @@ function renderRotatingPlanet(canvas, tex, radius, speed) {
   if (tex.complete && tex.naturalWidth > 0) { draw(); }
 }
 
+// Ссылки на DOM-элементы уже отрисованных планет (id -> {labelEl}),
+// чтобы Realtime-подписка могла точечно обновить цвет при смене владельца,
+// не перерисовывая всю карту заново.
+var planetElements = {};
+
 function initPlanets() {
   var layer = document.getElementById('galaxy-layer');
   if (!layer) return;
 
-  PLANETS_CONFIG.forEach(function(planet) {
-    var canvas = document.createElement('canvas');
-    canvas.className = 'planet-icon';
-    canvas.style.position = 'absolute';
-    canvas.style.left = planet.left + '%';
-    canvas.style.top = planet.top + '%';
-    canvas.style.transform = 'translate(-50%, -50%)';
-    canvas.style.cursor = 'pointer';
-    canvas.setAttribute('data-planet-id', planet.id);
-    layer.appendChild(canvas);
+  supabase.from('systems').select('*').then(function(res) {
+    if (res.error) {
+      console.error('Не удалось загрузить системы:', res.error);
+      return;
+    }
 
-    var tex = new Image();
-    tex.src = planet.texture;
-    renderRotatingPlanet(canvas, tex, planet.radius, planet.speed);
+    var systems = res.data;
+
+    systems.forEach(function(planet) {
+      var wrapper = document.createElement('div');
+      wrapper.className = 'planet-wrapper';
+      wrapper.style.position = 'absolute';
+      wrapper.style.left = planet.left_pct + '%';
+      wrapper.style.top = planet.top_pct + '%';
+      wrapper.style.transform = 'translate(-50%, -50%)';
+      wrapper.style.display = 'flex';
+      wrapper.style.flexDirection = 'column';
+      wrapper.style.alignItems = 'center';
+      wrapper.setAttribute('data-planet-id', planet.id);
+      layer.appendChild(wrapper);
+
+      var canvas = document.createElement('canvas');
+      canvas.className = 'planet-icon';
+      canvas.style.cursor = 'pointer';
+      wrapper.appendChild(canvas);
+
+      var label = document.createElement('div');
+      label.className = 'planet-label';
+      label.textContent = planet.name;
+      label.style.color = FACTION_COLORS[planet.faction] || '#8fa8c4';
+      label.style.fontSize = '9px';
+      label.style.fontFamily = "'Courier New', monospace";
+      label.style.marginTop = '2px';
+      label.style.whiteSpace = 'nowrap';
+      label.style.textShadow = '0 1px 3px rgba(0,0,0,0.9)';
+      label.style.pointerEvents = 'none';
+      label.style.transition = 'color 0.6s ease';
+      wrapper.appendChild(label);
+
+      planetElements[planet.id] = { labelEl: label, wrapperEl: wrapper };
+
+      var tex = new Image();
+      // texture в БД хранится от корня сайта, а страница галакарты — в подпапке game/,
+      // поэтому добавляем ../ при подстановке пути
+      tex.src = '../' + planet.texture;
+      renderRotatingPlanet(canvas, tex, planet.radius, planet.speed);
+    });
+
+    subscribeToSystemChanges();
   });
+}
+
+// Realtime-подписка: когда faction планеты меняется в БД (захват в бою),
+// подпись у всех открытых карт перекрашивается сама, без перезагрузки страницы.
+// Требует, чтобы таблица systems была добавлена в публикацию supabase_realtime
+// (см. sql/enable_realtime.sql).
+function subscribeToSystemChanges() {
+  supabase
+    .channel('systems-changes')
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'systems' }, function(payload) {
+      var updated = payload.new;
+      var els = planetElements[updated.id];
+      if (!els) return;
+
+      var newColor = FACTION_COLORS[updated.faction] || '#8fa8c4';
+      els.labelEl.style.color = newColor;
+
+      // краткая вспышка, чтобы смена владельца была заметна визуально
+      els.wrapperEl.style.filter = 'brightness(1.8)';
+      setTimeout(function() {
+        els.wrapperEl.style.transition = 'filter 1.2s ease';
+        els.wrapperEl.style.filter = 'brightness(1)';
+      }, 50);
+    })
+    .subscribe();
 }
 
 document.addEventListener('DOMContentLoaded', initPlanets);
