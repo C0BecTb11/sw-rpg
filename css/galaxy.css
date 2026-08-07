@@ -159,6 +159,220 @@ body {
   font-weight: bold;
 }
 
+/* Нижняя панель — зафиксирована снизу экрана поверх карты,
+   не зависит от скролла самой галакарты. Сворачивается вниз,
+   оставляя только кнопку-переключатель на виду. */
+#bottom-panel {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transition: transform 0.25s ease;
+}
+
+#bottom-panel.collapsed {
+  transform: translateY(calc(100% - 26px));
+}
+
+#bottom-panel-toggle {
+  width: 56px;
+  height: 22px;
+  background: rgba(5,6,10,0.85);
+  border: 1px solid rgba(28,37,48,0.9);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+#bottom-panel-toggle-icon {
+  color: #8fa8c4;
+  font-size: 12px;
+  transition: transform 0.25s ease;
+}
+
+#bottom-panel.collapsed #bottom-panel-toggle-icon {
+  transform: rotate(180deg);
+}
+
+#bottom-panel-content {
+  width: 100%;
+  background: rgba(5,6,10,0.9);
+  border-top: 1px solid rgba(28,37,48,0.9);
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 14px;
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
+}
+
+.panel-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  color: #cfd8dc;
+  padding: 6px 16px;
+  cursor: pointer;
+  font-family: 'Courier New', monospace;
+}
+
+.panel-item-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  background: #161b24;
+  border: 1px solid #2a3644;
+}
+
+.panel-item-label {
+  font-size: 10px;
+  color: #8fa8c4;
+  white-space: nowrap;
+}
+
+/* Экран армии — полноэкранный оверлей поверх карты */
+#army-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 1800;
+  background: rgba(5,6,10,0.97);
+  overflow-y: auto;
+  padding: 16px;
+}
+
+#army-screen-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #1c2530;
+}
+
+.army-screen-title {
+  font-size: 14px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #cfd8dc;
+}
+
+#army-screen-close {
+  background: none;
+  border: 1px solid #2a3644;
+  color: #8fa8c4;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.army-section {
+  margin-bottom: 24px;
+}
+
+.army-section-title {
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #55606c;
+  margin-bottom: 10px;
+}
+
+.army-empty {
+  font-size: 12px;
+  color: #3d4652;
+  padding: 12px 0;
+}
+
+.army-unit-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid #161b24;
+}
+
+.army-unit-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  background: #161b24;
+  border: 1px solid #2a3644;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.army-unit-name {
+  flex: 1;
+  font-size: 12px;
+  color: #cfd8dc;
+}
+
+.army-unit-count {
+  font-size: 12px;
+  color: #8fa8c4;
+}
+
+.commander-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  margin-bottom: 6px;
+  border-radius: 4px;
+  border: 1px solid #1c2530;
+  background: #0a0d14;
+}
+
+.commander-row.locked {
+  opacity: 0.45;
+}
+
+.commander-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  background: #161b24;
+  border: 1px solid #2a3644;
+  flex-shrink: 0;
+}
+
+.commander-info {
+  flex: 1;
+}
+
+.commander-name {
+  font-size: 12px;
+  color: #cfd8dc;
+}
+
+.commander-status {
+  font-size: 10px;
+  color: #55606c;
+  margin-top: 2px;
+}
+
 #map-scroll {
   width: 100%;
   height: 100vh;

@@ -36,10 +36,47 @@
   </div>
 </div>
 
+<div id="bottom-panel">
+  <div id="bottom-panel-toggle">
+    <span id="bottom-panel-toggle-icon">▾</span>
+  </div>
+  <div id="bottom-panel-content">
+    <button class="panel-item" id="panel-item-faction">
+      <div class="panel-item-icon" id="faction-emblem">⬡</div>
+      <span class="panel-item-label" id="faction-label">Фракция</span>
+    </button>
+    <button class="panel-item" id="panel-item-army">
+      <div class="panel-item-icon">⚔</div>
+      <span class="panel-item-label">Армия</span>
+    </button>
+  </div>
+</div>
+
+<div id="army-screen" style="display:none;">
+  <div id="army-screen-header">
+    <span class="army-screen-title">Армия</span>
+    <button id="army-screen-close">✕</button>
+  </div>
+
+  <div class="army-section">
+    <div class="army-section-title">Юниты</div>
+    <div id="army-units-list">
+      <div class="army-empty">Пока нет созданных юнитов</div>
+    </div>
+  </div>
+
+  <div class="army-section">
+    <div class="army-section-title">Командиры</div>
+    <div id="army-commanders-list"></div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../js/supabase-client.js"></script>
 <script src="../js/galaxy.js"></script>
 <script src="../js/profile.js"></script>
+<script src="../js/bottom-panel.js"></script>
+<script src="../js/army.js"></script>
 <script src="../js/planets.js"></script>
 </body>
 </html>

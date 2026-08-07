@@ -1,4 +1,4 @@
-// Модуль отрисовки маленьких вращающихся планет на галакарте.
+// Модуль отрисовки маленьких вращающихся планет на галакарте + маркеров командиров.
 // Каждая планета — canvas с текстурой, сферическое сжатие по краям (через asin),
 // затемнение тёмной стороны, лёгкая тень.
 //
@@ -11,6 +11,11 @@ var FACTION_COLORS = {
   republic: '#4a90d9', // синий
   cis:      '#d94a4a'  // красный
 };
+
+var OWN_COMMANDER_COLOR = '#5fd968';  // зелёный — свой командир
+var ALLY_COMMANDER_COLOR = '#4a90d9'; // синий — союзный командир
+
+var currentUserId = null;
 
 function renderRotatingPlanet(canvas, tex, radius, speed) {
   var ctx = canvas.getContext('2d');
@@ -81,79 +86,100 @@ function renderRotatingPlanet(canvas, tex, radius, speed) {
   if (tex.complete && tex.naturalWidth > 0) { draw(); }
 }
 
-// Ссылки на DOM-элементы уже отрисованных планет (id -> {labelEl}),
-// чтобы Realtime-подписка могла точечно обновить цвет при смене владельца,
-// не перерисовывая всю карту заново.
+// Ссылки на DOM-элементы уже отрисованных планет (id -> {labelEl, wrapperEl, markerBoxEl}),
+// чтобы Realtime-подписки могли точечно обновлять карту, не перерисовывая всё заново.
 var planetElements = {};
 
 function initPlanets() {
   var layer = document.getElementById('galaxy-layer');
   if (!layer) return;
 
-  Promise.all([
-    supabase.from('systems').select('*'),
-    supabase.from('hyperlanes').select('*')
-  ]).then(function(results) {
-    var systemsRes = results[0];
-    var lanesRes = results[1];
+  supabase.auth.getSession().then(function(sessionRes) {
+    currentUserId = sessionRes.data.session ? sessionRes.data.session.user.id : null;
 
-    if (systemsRes.error) {
-      console.error('Не удалось загрузить системы:', systemsRes.error);
-      return;
-    }
+    Promise.all([
+      supabase.from('systems').select('*'),
+      supabase.from('hyperlanes').select('*'),
+      supabase.from('commanders').select('*').eq('unlocked', true)
+    ]).then(function(results) {
+      var systemsRes = results[0];
+      var lanesRes = results[1];
+      var commandersRes = results[2];
 
-    var systems = systemsRes.data;
-    var lanes = lanesRes.error ? [] : lanesRes.data;
+      if (systemsRes.error) {
+        console.error('Не удалось загрузить системы:', systemsRes.error);
+        return;
+      }
 
-    // словарь id -> позиция, чтобы рисовать линии между планетами
-    var positions = {};
-    systems.forEach(function(s) {
-      positions[s.id] = { left: s.left_pct, top: s.top_pct };
+      var systems = systemsRes.data;
+      var lanes = lanesRes.error ? [] : lanesRes.data;
+      var commanders = commandersRes.error ? [] : commandersRes.data;
+
+      // словарь id -> позиция, чтобы рисовать линии между планетами
+      var positions = {};
+      systems.forEach(function(s) {
+        positions[s.id] = { left: s.left_pct, top: s.top_pct };
+      });
+
+      drawHyperlanes(layer, lanes, positions);
+
+      systems.forEach(function(planet) {
+        var wrapper = document.createElement('div');
+        wrapper.className = 'planet-wrapper';
+        wrapper.style.position = 'absolute';
+        wrapper.style.left = planet.left_pct + '%';
+        wrapper.style.top = planet.top_pct + '%';
+        wrapper.style.transform = 'translate(-50%, -50%)';
+        wrapper.style.display = 'flex';
+        wrapper.style.flexDirection = 'column';
+        wrapper.style.alignItems = 'center';
+        wrapper.setAttribute('data-planet-id', planet.id);
+        layer.appendChild(wrapper);
+
+        var canvas = document.createElement('canvas');
+        canvas.className = 'planet-icon';
+        canvas.style.cursor = 'pointer';
+        wrapper.appendChild(canvas);
+
+        var label = document.createElement('div');
+        label.className = 'planet-label';
+        label.textContent = planet.name;
+        label.style.color = FACTION_COLORS[planet.faction] || '#8fa8c4';
+        label.style.fontSize = '9px';
+        label.style.fontFamily = "'Courier New', monospace";
+        label.style.marginTop = '2px';
+        label.style.whiteSpace = 'nowrap';
+        label.style.textShadow = '0 1px 3px rgba(0,0,0,0.9)';
+        label.style.pointerEvents = 'none';
+        label.style.transition = 'color 0.6s ease';
+        wrapper.appendChild(label);
+
+        // Контейнер для маркеров командиров — позиционируется в углу планеты.
+        // wrapper сам position:absolute, поэтому это работает как система координат
+        // для дочерних position:absolute элементов.
+        var markerBox = document.createElement('div');
+        markerBox.className = 'commander-marker-box';
+        markerBox.style.position = 'absolute';
+        markerBox.style.top = '-6px';
+        markerBox.style.right = '-8px';
+        markerBox.style.display = 'flex';
+        markerBox.style.gap = '2px';
+        markerBox.style.pointerEvents = 'none';
+        wrapper.appendChild(markerBox);
+
+        planetElements[planet.id] = { labelEl: label, wrapperEl: wrapper, markerBoxEl: markerBox };
+
+        var tex = new Image();
+        // texture в БД хранится от корня сайта, а страница галакарты — в подпапке game/,
+        // поэтому добавляем ../ при подстановке пути
+        tex.src = '../' + planet.texture;
+        renderRotatingPlanet(canvas, tex, planet.radius, planet.speed);
+      });
+
+      renderCommanderMarkers(commanders);
+      subscribeToSystemChanges();
+      subscribeToCommanderChanges();
     });
-
-    drawHyperlanes(layer, lanes, positions);
-
-    systems.forEach(function(planet) {
-      var wrapper = document.createElement('div');
-      wrapper.className = 'planet-wrapper';
-      wrapper.style.position = 'absolute';
-      wrapper.style.left = planet.left_pct + '%';
-      wrapper.style.top = planet.top_pct + '%';
-      wrapper.style.transform = 'translate(-50%, -50%)';
-      wrapper.style.display = 'flex';
-      wrapper.style.flexDirection = 'column';
-      wrapper.style.alignItems = 'center';
-      wrapper.setAttribute('data-planet-id', planet.id);
-      layer.appendChild(wrapper);
-
-      var canvas = document.createElement('canvas');
-      canvas.className = 'planet-icon';
-      canvas.style.cursor = 'pointer';
-      wrapper.appendChild(canvas);
-
-      var label = document.createElement('div');
-      label.className = 'planet-label';
-      label.textContent = planet.name;
-      label.style.color = FACTION_COLORS[planet.faction] || '#8fa8c4';
-      label.style.fontSize = '9px';
-      label.style.fontFamily = "'Courier New', monospace";
-      label.style.marginTop = '2px';
-      label.style.whiteSpace = 'nowrap';
-      label.style.textShadow = '0 1px 3px rgba(0,0,0,0.9)';
-      label.style.pointerEvents = 'none';
-      label.style.transition = 'color 0.6s ease';
-      wrapper.appendChild(label);
-
-      planetElements[planet.id] = { labelEl: label, wrapperEl: wrapper };
-
-      var tex = new Image();
-      // texture в БД хранится от корня сайта, а страница галакарты — в подпапке game/,
-      // поэтому добавляем ../ при подстановке пути
-      tex.src = '../' + planet.texture;
-      renderRotatingPlanet(canvas, tex, planet.radius, planet.speed);
-    });
-
-    subscribeToSystemChanges();
   });
 }
 
@@ -187,6 +213,72 @@ function drawHyperlanes(layer, lanes, positions) {
   layer.appendChild(svg);
 }
 
+// Отрисовывает маркеры командиров у планет: зелёный кружок с "♟" — свои
+// командиры (с числом, если больше одного), синий — союзные (той же фракции,
+// но другого игрока). Полностью перерисовывает все markerBox разом —
+// проще и надёжнее, чем точечно диффать при небольшом масштабе игры.
+function renderCommanderMarkers(commanders) {
+  // сначала очищаем все существующие маркеры
+  Object.keys(planetElements).forEach(function(systemId) {
+    planetElements[systemId].markerBoxEl.innerHTML = '';
+  });
+
+  // группируем по системе: { systemId: { own: count, allyCount: count } }
+  var bySystem = {};
+  commanders.forEach(function(c) {
+    if (!c.current_system) return;
+    if (!bySystem[c.current_system]) {
+      bySystem[c.current_system] = { own: 0, ally: 0 };
+    }
+    if (c.user_id === currentUserId) {
+      bySystem[c.current_system].own += 1;
+    } else {
+      bySystem[c.current_system].ally += 1;
+    }
+  });
+
+  Object.keys(bySystem).forEach(function(systemId) {
+    var els = planetElements[systemId];
+    if (!els) return;
+
+    var counts = bySystem[systemId];
+
+    if (counts.own > 0) {
+      els.markerBoxEl.appendChild(makeCommanderMarker(counts.own, OWN_COMMANDER_COLOR));
+    }
+    if (counts.ally > 0) {
+      els.markerBoxEl.appendChild(makeCommanderMarker(counts.ally, ALLY_COMMANDER_COLOR));
+    }
+  });
+}
+
+function makeCommanderMarker(count, color) {
+  var marker = document.createElement('div');
+  marker.style.display = 'flex';
+  marker.style.alignItems = 'center';
+  marker.style.gap = '1px';
+  marker.style.background = 'rgba(5,6,10,0.85)';
+  marker.style.border = '1px solid ' + color;
+  marker.style.borderRadius = '8px';
+  marker.style.padding = '1px 4px';
+  marker.style.fontSize = '9px';
+  marker.style.fontFamily = "'Courier New', monospace";
+  marker.style.color = color;
+  marker.style.lineHeight = '1';
+
+  var icon = document.createElement('span');
+  icon.textContent = '♟';
+  marker.appendChild(icon);
+
+  if (count > 1) {
+    var countEl = document.createElement('span');
+    countEl.textContent = 'x' + count;
+    marker.appendChild(countEl);
+  }
+
+  return marker;
+}
+
 // Realtime-подписка: когда faction планеты меняется в БД (захват в бою),
 // подпись у всех открытых карт перекрашивается сама, без перезагрузки страницы.
 // Требует, чтобы таблица systems была добавлена в публикацию supabase_realtime
@@ -208,6 +300,20 @@ function subscribeToSystemChanges() {
         els.wrapperEl.style.transition = 'filter 1.2s ease';
         els.wrapperEl.style.filter = 'brightness(1)';
       }, 50);
+    })
+    .subscribe();
+}
+
+// Realtime-подписка на командиров: при появлении/перемещении/разблокировке
+// командира любым игроком — карта у всех перерисовывает маркеры заново.
+function subscribeToCommanderChanges() {
+  supabase
+    .channel('commanders-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'commanders' }, function() {
+      supabase.from('commanders').select('*').eq('unlocked', true).then(function(res) {
+        if (res.error) return;
+        renderCommanderMarkers(res.data);
+      });
     })
     .subscribe();
 }
