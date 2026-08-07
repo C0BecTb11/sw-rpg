@@ -373,6 +373,62 @@ body {
   margin-top: 2px;
 }
 
+/* Небольшая накладка с информацией о планете — не на весь экран,
+   компактная карточка поверх карты */
+#planet-info-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5,6,10,0.5);
+  padding: 20px;
+}
+
+#planet-info-box {
+  position: relative;
+  width: 100%;
+  max-width: 260px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 6px;
+  padding: 16px;
+  text-align: center;
+}
+
+#planet-info-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: none;
+  border: 1px solid #2a3644;
+  color: #8fa8c4;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+#planet-info-name {
+  font-size: 14px;
+  color: #cfd8dc;
+  letter-spacing: 1px;
+  margin-bottom: 10px;
+}
+
+#planet-info-faction {
+  font-size: 11px;
+  color: #8fa8c4;
+  margin-bottom: 4px;
+}
+
+#planet-info-controller {
+  font-size: 11px;
+  color: #55606c;
+}
+
 #map-scroll {
   width: 100%;
   height: 100vh;

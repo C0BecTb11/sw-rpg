@@ -58,11 +58,21 @@ function loadUnits(userId) {
 function loadCommanders(userId) {
   var listEl = document.getElementById('army-commanders-list');
 
-  supabase.from('commanders').select('*').eq('user_id', userId).order('slot_index').then(function(res) {
-    if (res.error || !res.data) return;
+  Promise.all([
+    supabase.from('commanders').select('*').eq('user_id', userId).order('slot_index'),
+    supabase.from('systems').select('id, name')
+  ]).then(function(results) {
+    var commandersRes = results[0];
+    var systemsRes = results[1];
+    if (commandersRes.error || !commandersRes.data) return;
+
+    var systemNames = {};
+    (systemsRes.data || []).forEach(function(s) {
+      systemNames[s.id] = s.name;
+    });
 
     listEl.innerHTML = '';
-    res.data.forEach(function(commander) {
+    commandersRes.data.forEach(function(commander) {
       var row = document.createElement('div');
       row.className = 'commander-row' + (commander.unlocked ? '' : ' locked');
 
@@ -83,8 +93,9 @@ function loadCommanders(userId) {
 
       var status = document.createElement('div');
       status.className = 'commander-status';
+      var systemName = commander.current_system ? (systemNames[commander.current_system] || commander.current_system) : '—';
       status.textContent = commander.unlocked
-        ? ('В системе: ' + (commander.current_system || '—'))
+        ? ('В системе: ' + systemName)
         : 'Заблокирован';
       info.appendChild(status);
 

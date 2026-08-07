@@ -16,6 +16,7 @@ var OWN_COMMANDER_COLOR = '#5fd968';  // зелёный — свой коман�
 var ALLY_COMMANDER_COLOR = '#4a90d9'; // синий — союзный командир
 
 var currentUserId = null;
+var currentUserFaction = null;
 
 function renderRotatingPlanet(canvas, tex, radius, speed) {
   var ctx = canvas.getContext('2d');
@@ -97,11 +98,20 @@ function initPlanets() {
   supabase.auth.getSession().then(function(sessionRes) {
     currentUserId = sessionRes.data.session ? sessionRes.data.session.user.id : null;
 
-    Promise.all([
-      supabase.from('systems').select('*'),
-      supabase.from('hyperlanes').select('*'),
-      supabase.from('commanders').select('*').eq('unlocked', true)
-    ]).then(function(results) {
+    var factionQuery = currentUserId
+      ? supabase.from('profiles').select('faction').eq('id', currentUserId).maybeSingle()
+      : Promise.resolve({ data: null, error: null });
+
+    factionQuery.then(function(profileRes) {
+      currentUserFaction = profileRes.data ? profileRes.data.faction : null;
+
+      Promise.all([
+        supabase.from('systems').select('*'),
+        supabase.from('hyperlanes').select('*'),
+        currentUserFaction
+          ? supabase.from('commanders').select('*').eq('unlocked', true).eq('faction', currentUserFaction)
+          : Promise.resolve({ data: [], error: null })
+      ]).then(function(results) {
       var systemsRes = results[0];
       var lanesRes = results[1];
       var commandersRes = results[2];
@@ -134,6 +144,7 @@ function initPlanets() {
         wrapper.style.flexDirection = 'column';
         wrapper.style.alignItems = 'center';
         wrapper.setAttribute('data-planet-id', planet.id);
+        wrapper.style.cursor = 'pointer';
         layer.appendChild(wrapper);
 
         var canvas = document.createElement('canvas');
@@ -169,6 +180,12 @@ function initPlanets() {
 
         planetElements[planet.id] = { labelEl: label, wrapperEl: wrapper, markerBoxEl: markerBox };
 
+        wrapper.addEventListener('click', function() {
+          if (typeof openPlanetInfo === 'function') {
+            openPlanetInfo(planet.id);
+          }
+        });
+
         var tex = new Image();
         // texture в БД хранится от корня сайта, а страница галакарты — в подпапке game/,
         // поэтому добавляем ../ при подстановке пути
@@ -179,7 +196,8 @@ function initPlanets() {
       renderCommanderMarkers(commanders);
       subscribeToSystemChanges();
       subscribeToCommanderChanges();
-    });
+      }); // конец Promise.all
+    }); // конец factionQuery.then
   });
 }
 
@@ -310,7 +328,8 @@ function subscribeToCommanderChanges() {
   supabase
     .channel('commanders-changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'commanders' }, function() {
-      supabase.from('commanders').select('*').eq('unlocked', true).then(function(res) {
+      if (!currentUserFaction) return;
+      supabase.from('commanders').select('*').eq('unlocked', true).eq('faction', currentUserFaction).then(function(res) {
         if (res.error) return;
         renderCommanderMarkers(res.data);
       });
