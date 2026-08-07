@@ -12,29 +12,156 @@ body {
   color: #cfd8dc;
 }
 
-#top-bar {
+/* Значок профиля — зафиксирован в углу экрана поверх карты,
+   не зависит от скролла/зума самой галакарты */
+#profile-badge {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 1000;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px;
-  background: rgba(5,6,10,0.55);
-  border-bottom: 1px solid rgba(28,37,48,0.8);
+  gap: 8px;
+  background: rgba(5,6,10,0.7);
+  border: 1px solid rgba(28,37,48,0.9);
+  border-radius: 20px;
+  padding: 6px 14px 6px 6px;
 }
 
-#top-bar .title {
+#profile-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #4a90d9, #2a3644);
+  border: 1px solid rgba(143,168,196,0.4);
+  flex-shrink: 0;
+}
+
+#profile-nickname {
   font-size: 12px;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  color: #8fa8c4;
+  color: #cfd8dc;
+  white-space: nowrap;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-#top-bar .user-email {
-  font-size: 11px;
+/* Форма создания ника — показывается только если у аккаунта нет профиля
+   (например, аккаунт был создан до появления никнеймов) */
+#nickname-prompt {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(5,6,10,0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+#nickname-prompt-box {
+  width: 100%;
+  max-width: 320px;
+  text-align: center;
+}
+
+#nickname-prompt-box p {
+  font-size: 13px;
+  color: #8fa8c4;
+  margin-bottom: 16px;
+}
+
+#nickname-prompt-input {
+  width: 100%;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  color: #cfd8dc;
+  padding: 10px;
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
+  border-radius: 2px;
+}
+
+#nickname-prompt-input:focus {
+  outline: none;
+  border-color: #4a90d9;
+}
+
+#nickname-prompt-save {
+  width: 100%;
+  margin-top: 14px;
+  padding: 12px;
+  background: #4a90d9;
+  border: none;
+  color: #0a0d14;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  font-weight: bold;
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+#nickname-prompt-save:disabled {
+  background: #2a3644;
   color: #55606c;
+}
+
+#nickname-prompt-message {
+  margin-top: 10px;
+  font-size: 12px;
+  min-height: 16px;
+  color: #d94a4a;
+}
+
+/* Экран ожидания назначения фракции — блокирует доступ к карте,
+   пока администратор не назначит фракцию вручную в БД */
+#faction-waiting {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  background: rgba(5,6,10,0.97);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+#faction-waiting-box {
+  width: 100%;
+  max-width: 340px;
+  text-align: center;
+}
+
+.faction-waiting-title {
+  font-size: 14px;
+  letter-spacing: 1px;
+  color: #cfd8dc;
+  margin-bottom: 10px;
+}
+
+.faction-waiting-text {
+  font-size: 12px;
+  color: #8fa8c4;
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+
+#access-code-value {
+  font-size: 28px;
+  letter-spacing: 6px;
+  color: #4a90d9;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  padding: 16px;
+  border-radius: 4px;
+  font-weight: bold;
 }
 
 #map-scroll {
   width: 100%;
+  height: 100vh;
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
@@ -43,7 +170,7 @@ body {
 #map-area {
   position: relative;
   width: 220vw;
-  min-height: calc(100vh - 50px);
+  min-height: 100vh;
   overflow: hidden;
   background-image: url('../assets/ui/galaxy-bg-tile.png');
   background-repeat: repeat-x;

@@ -8,9 +8,26 @@
 </head>
 <body>
 
-<div id="top-bar">
-  <span class="title">Галактическая карта</span>
-  <span class="user-email" id="user-email"></span>
+<div id="profile-badge">
+  <div id="profile-avatar"></div>
+  <span id="profile-nickname">...</span>
+</div>
+
+<div id="nickname-prompt" style="display:none;">
+  <div id="nickname-prompt-box">
+    <p>У этого аккаунта ещё нет игрового ника</p>
+    <input type="text" id="nickname-prompt-input" placeholder="придумай ник">
+    <button id="nickname-prompt-save">Сохранить</button>
+    <div id="nickname-prompt-message"></div>
+  </div>
+</div>
+
+<div id="faction-waiting" style="display:none;">
+  <div id="faction-waiting-box">
+    <p class="faction-waiting-title">Ожидание распределения по фракции</p>
+    <p class="faction-waiting-text">Сообщи этот код администратору — он назначит тебе фракцию, и игра откроется автоматически.</p>
+    <div id="access-code-value">------</div>
+  </div>
 </div>
 
 <div id="map-scroll">
@@ -22,6 +39,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../js/supabase-client.js"></script>
 <script src="../js/galaxy.js"></script>
+<script src="../js/profile.js"></script>
 <script src="../js/planets.js"></script>
 </body>
 </html>

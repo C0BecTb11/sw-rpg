@@ -90,13 +90,28 @@ function initPlanets() {
   var layer = document.getElementById('galaxy-layer');
   if (!layer) return;
 
-  supabase.from('systems').select('*').then(function(res) {
-    if (res.error) {
-      console.error('Не удалось загрузить системы:', res.error);
+  Promise.all([
+    supabase.from('systems').select('*'),
+    supabase.from('hyperlanes').select('*')
+  ]).then(function(results) {
+    var systemsRes = results[0];
+    var lanesRes = results[1];
+
+    if (systemsRes.error) {
+      console.error('Не удалось загрузить системы:', systemsRes.error);
       return;
     }
 
-    var systems = res.data;
+    var systems = systemsRes.data;
+    var lanes = lanesRes.error ? [] : lanesRes.data;
+
+    // словарь id -> позиция, чтобы рисовать линии между планетами
+    var positions = {};
+    systems.forEach(function(s) {
+      positions[s.id] = { left: s.left_pct, top: s.top_pct };
+    });
+
+    drawHyperlanes(layer, lanes, positions);
 
     systems.forEach(function(planet) {
       var wrapper = document.createElement('div');
@@ -140,6 +155,36 @@ function initPlanets() {
 
     subscribeToSystemChanges();
   });
+}
+
+// Рисует линии гиперпространственных маршрутов между связанными системами.
+// SVG вставляется первым в galaxy-layer, поэтому оказывается визуально
+// позади планет (которые добавляются следом как div'ы).
+function drawHyperlanes(layer, lanes, positions) {
+  var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('height', '100%');
+  svg.style.position = 'absolute';
+  svg.style.inset = '0';
+  svg.style.pointerEvents = 'none';
+
+  lanes.forEach(function(lane) {
+    var a = positions[lane.system_a];
+    var b = positions[lane.system_b];
+    if (!a || !b) return;
+
+    var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', a.left + '%');
+    line.setAttribute('y1', a.top + '%');
+    line.setAttribute('x2', b.left + '%');
+    line.setAttribute('y2', b.top + '%');
+    line.setAttribute('stroke', 'rgba(120,170,200,0.35)');
+    line.setAttribute('stroke-width', '1');
+    line.setAttribute('stroke-dasharray', '3,3');
+    svg.appendChild(line);
+  });
+
+  layer.appendChild(svg);
 }
 
 // Realtime-подписка: когда faction планеты меняется в БД (захват в бою),

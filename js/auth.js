@@ -4,6 +4,7 @@
 var mode = 'login'; // 'login' или 'signup'
 
 var tabLogin, tabSignup, submitBtn, messageEl, emailInput, passwordInput;
+var nicknameLabel, nicknameInput;
 var authBox, sessionBox, userEmailEl, logoutBtn;
 
 function setMode(newMode) {
@@ -12,10 +13,14 @@ function setMode(newMode) {
     tabLogin.className = 'tab active';
     tabSignup.className = 'tab';
     submitBtn.textContent = 'Войти';
+    nicknameLabel.style.display = 'none';
+    nicknameInput.style.display = 'none';
   } else {
     tabLogin.className = 'tab';
     tabSignup.className = 'tab active';
     submitBtn.textContent = 'Создать аккаунт';
+    nicknameLabel.style.display = 'block';
+    nicknameInput.style.display = 'block';
   }
   messageEl.textContent = '';
   messageEl.className = '';
@@ -37,10 +42,20 @@ function showAuthForm() {
   sessionBox.style.display = 'none';
 }
 
+// Создаёт запись профиля (никнейм) для только что зарегистрированного пользователя.
+function createProfile(userId, nickname) {
+  return supabase.from('profiles').insert({ id: userId, nickname: nickname });
+}
+
 function handleSubmit() {
   var email = emailInput.value.trim();
   var password = passwordInput.value;
+  var nickname = nicknameInput.value.trim();
 
+  if (mode === 'signup' && !nickname) {
+    showMessage('Введи игровой ник', true);
+    return;
+  }
   if (!email || !password) {
     showMessage('Заполни email и пароль', true);
     return;
@@ -55,8 +70,8 @@ function handleSubmit() {
 
   if (mode === 'signup') {
     supabase.auth.signUp({ email: email, password: password }).then(function(res) {
-      submitBtn.disabled = false;
       if (res.error) {
+        submitBtn.disabled = false;
         showMessage(res.error.message, true);
         return;
       }
@@ -64,13 +79,26 @@ function handleSubmit() {
       // если identities пустой массив, значит аккаунт с этим email уже существует
       var identities = res.data.user && res.data.user.identities;
       if (identities && identities.length === 0) {
+        submitBtn.disabled = false;
         showMessage('Этот email уже зарегистрирован. Попробуй войти.', true);
         return;
       }
-      showMessage('Аккаунт создан! Входим...', false);
-      if (res.data.session) {
-        window.location.href = 'game/galaxy-map.html';
+
+      if (!res.data.session) {
+        submitBtn.disabled = false;
+        showMessage('Аккаунт создан, но сессия не открылась. Попробуй войти.', true);
+        return;
       }
+
+      // аккаунт создан и сессия открыта — сразу создаём профиль с ником
+      createProfile(res.data.user.id, nickname).then(function(profileRes) {
+        submitBtn.disabled = false;
+        if (profileRes.error) {
+          showMessage('Аккаунт создан, но профиль не сохранился: ' + profileRes.error.message, true);
+          return;
+        }
+        window.location.href = 'game/galaxy-map.html';
+      });
     });
   } else {
     supabase.auth.signInWithPassword({ email: email, password: password }).then(function(res) {
@@ -89,6 +117,7 @@ function handleLogout() {
     showAuthForm();
     emailInput.value = '';
     passwordInput.value = '';
+    nicknameInput.value = '';
   });
 }
 
@@ -99,6 +128,8 @@ function initAuthPage() {
   messageEl = document.getElementById('message');
   emailInput = document.getElementById('email');
   passwordInput = document.getElementById('password');
+  nicknameLabel = document.getElementById('nickname-label');
+  nicknameInput = document.getElementById('nickname');
   authBox = document.getElementById('auth-box');
   sessionBox = document.getElementById('session-box');
   userEmailEl = document.getElementById('user-email');
