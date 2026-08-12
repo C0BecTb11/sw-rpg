@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Наземное сражение — Star Wars: Global Conflict</title>
+<link rel="stylesheet" href="../css/ground-battle.css">
+</head>
+<body>
+
+<button id="ground-back-btn">← Галактика</button>
+
+<div id="ground-viewport">
+  <canvas id="ground-canvas"></canvas>
+</div>
+
+<div id="build-panel" style="display:none;">
+  <div id="build-panel-box">
+    <button id="build-panel-close">✕</button>
+    <div class="build-panel-title">Выбери постройку</div>
+    <div id="build-panel-list"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../js/supabase-client.js"></script>
+<script src="../js/ground-battle.js"></script>
+</body>
+</html>

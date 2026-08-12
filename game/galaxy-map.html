@@ -77,7 +77,37 @@
     <div id="planet-info-name">—</div>
     <div id="planet-info-faction">—</div>
     <div id="planet-info-controller">—</div>
+    <button id="planet-info-space-btn">Космическое пространство</button>
+    <button id="planet-info-ground-btn">Наземное сражение</button>
+    <button id="planet-info-build-btn" style="display:none;">Строительство</button>
   </div>
+</div>
+
+<div id="faction-screen" style="display:none;">
+  <div id="faction-screen-box">
+    <button id="faction-screen-close">✕</button>
+    <div id="faction-screen-name">—</div>
+
+    <div class="faction-section">
+      <div class="faction-section-title">Планеты</div>
+      <div id="faction-screen-planets" class="faction-screen-text">—</div>
+    </div>
+
+    <div class="faction-section">
+      <div class="faction-section-title">Лидер фракции</div>
+      <div id="faction-screen-leader" class="faction-screen-text">—</div>
+    </div>
+
+    <button id="faction-control-open-btn" style="display:none;">Панель управления фракции</button>
+  </div>
+</div>
+
+<div id="faction-control-screen" style="display:none;">
+  <div id="faction-control-header">
+    <span class="faction-control-title">Панель управления фракции</span>
+    <button id="faction-control-close">✕</button>
+  </div>
+  <div id="faction-control-list"></div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -87,6 +117,8 @@
 <script src="../js/bottom-panel.js"></script>
 <script src="../js/army.js"></script>
 <script src="../js/planet-info.js"></script>
+<script src="../js/faction-panel.js"></script>
+<script src="../js/faction-control.js"></script>
 <script src="../js/planets.js"></script>
 </body>
 </html>
