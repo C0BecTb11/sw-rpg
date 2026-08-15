@@ -62,7 +62,65 @@ function openPlanetInfo(systemId) {
       if (viewerId && controllerId === viewerId) {
         buildBtn.style.display = 'block';
       }
+
+      updateMoveButton(viewerId, systemId);
     });
+  });
+}
+
+// Кнопка отправки командира появляется, только если у игрока есть свободный
+// командир в системе, напрямую связанной нитью с этой. Один прыжок за раз —
+// поэтому пролететь «насквозь» через непокорённую вражескую систему нельзя.
+function updateMoveButton(viewerId, targetSystemId) {
+  var moveBtn = document.getElementById('planet-info-move-btn');
+  if (!moveBtn || !viewerId) return;
+
+  moveBtn.style.display = 'none';
+  moveBtn.disabled = false;
+  moveBtn.textContent = 'Отправить командира';
+
+  Promise.all([
+    supabase.from('commanders').select('*').eq('user_id', viewerId).eq('unlocked', true),
+    supabase.from('hyperlanes').select('*')
+  ]).then(function(results) {
+    var commandersRes = results[0];
+    var lanesRes = results[1];
+    if (commandersRes.error || !commandersRes.data) return;
+
+    var lanes = lanesRes.error ? [] : lanesRes.data;
+
+    function connected(a, b) {
+      return lanes.some(function(l) {
+        return (l.system_a === a && l.system_b === b) || (l.system_b === a && l.system_a === b);
+      });
+    }
+
+    var candidate = commandersRes.data.filter(function(c) {
+      if (c.moving_to) return false;               // уже в пути
+      if (!c.current_system) return false;
+      if (c.current_system === targetSystemId) return false;
+      return connected(c.current_system, targetSystemId);
+    })[0];
+
+    if (!candidate) return;
+
+    moveBtn.style.display = 'block';
+    moveBtn.onclick = function() {
+      moveBtn.disabled = true;
+      moveBtn.textContent = 'Отправляем...';
+      supabase.rpc('start_commander_move', {
+        p_commander_id: candidate.id,
+        p_target_system: targetSystemId
+      }).then(function(res) {
+        if (res.error) {
+          moveBtn.disabled = false;
+          moveBtn.textContent = 'Отправить командира';
+          alert('Не удалось отправить: ' + res.error.message);
+          return;
+        }
+        closePlanetInfo();
+      });
+    };
   });
 }
 
@@ -98,7 +156,8 @@ document.addEventListener('DOMContentLoaded', function() {
   if (buildBtn) {
     buildBtn.addEventListener('click', function() {
       if (!currentPlanetInfoSystemId) return;
-      window.location.href = 'ground-battle.html?system=' + currentPlanetInfoSystemId;
+      // mode=build включает показ пустых слотов и переключатель карт
+      window.location.href = 'ground-battle.html?system=' + currentPlanetInfoSystemId + '&mode=build';
     });
   }
 });

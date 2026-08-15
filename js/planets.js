@@ -18,6 +18,16 @@ var ALLY_COMMANDER_COLOR = '#4a90d9'; // синий — союзный кома�
 var currentUserId = null;
 var currentUserFaction = null;
 
+// Позиции систем в процентах — нужны, чтобы считать траекторию полёта
+var systemPositions = {};
+// Разница между часами устройства и сервером: у игроков время может врать,
+// поэтому один раз сверяемся и дальше считаем прогресс полёта с поправкой.
+var serverTimeOffsetMs = 0;
+var flightLayer = null;
+var activeFlights = [];
+var flightAnimationRunning = false;
+var flightPollTimer = null;
+
 function renderRotatingPlanet(canvas, tex, radius, speed) {
   var ctx = canvas.getContext('2d');
   var size = radius * 2 + 8;
@@ -131,7 +141,15 @@ function initPlanets() {
         positions[s.id] = { left: s.left_pct, top: s.top_pct };
       });
 
+      systemPositions = positions;
       drawHyperlanes(layer, lanes, positions);
+
+      flightLayer = document.createElement('div');
+      flightLayer.id = 'flight-layer';
+      flightLayer.style.position = 'absolute';
+      flightLayer.style.inset = '0';
+      flightLayer.style.pointerEvents = 'none';
+      layer.appendChild(flightLayer);
 
       systems.forEach(function(planet) {
         var wrapper = document.createElement('div');
@@ -194,6 +212,9 @@ function initPlanets() {
       });
 
       renderCommanderMarkers(commanders);
+      syncServerTime(function() {
+        renderFlights(commanders);
+      });
       subscribeToSystemChanges();
       subscribeToCommanderChanges();
       }); // конец Promise.all
@@ -245,6 +266,7 @@ function renderCommanderMarkers(commanders) {
   var bySystem = {};
   commanders.forEach(function(c) {
     if (!c.current_system) return;
+    if (c.moving_to) return; // он сейчас в полёте — рисуется ракетой, а не фишкой
     if (!bySystem[c.current_system]) {
       bySystem[c.current_system] = { own: 0, ally: 0 };
     }
@@ -332,9 +354,145 @@ function subscribeToCommanderChanges() {
       supabase.from('commanders').select('*').eq('unlocked', true).eq('faction', currentUserFaction).then(function(res) {
         if (res.error) return;
         renderCommanderMarkers(res.data);
+        renderFlights(res.data);
       });
     })
     .subscribe();
 }
 
 document.addEventListener('DOMContentLoaded', initPlanets);
+
+// ===== Перелёты командиров =====
+// Позиция ракеты вычисляется из времени вылета/прибытия, а не хранится в БД:
+// так на весь полёт приходится два запроса вместо сотен, и у всех игроков
+// ракета идёт синхронно, потому что время серверное.
+
+function syncServerTime(callback) {
+  supabase.rpc('get_server_time').then(function(res) {
+    if (!res.error && res.data) {
+      serverTimeOffsetMs = new Date(res.data).getTime() - Date.now();
+    }
+    if (callback) callback();
+  });
+}
+
+function serverNow() {
+  return Date.now() + serverTimeOffsetMs;
+}
+
+// Перечитывает командиров и полностью обновляет карту.
+// Нужна отдельно от realtime: события могут не дойти (realtime тоже
+// проверяет RLS-политики), поэтому после прибытия обновляемся сами.
+function reloadCommanders() {
+  if (!currentUserFaction) return;
+  supabase.from('commanders').select('*').eq('unlocked', true).eq('faction', currentUserFaction).then(function(res) {
+    if (res.error) {
+      console.error('Не удалось перечитать командиров:', res.error);
+      return;
+    }
+    renderCommanderMarkers(res.data);
+    renderFlights(res.data);
+  });
+}
+
+function renderFlights(commanders) {
+  if (!flightLayer) return;
+
+  flightLayer.innerHTML = '';
+  activeFlights = [];
+
+  commanders.forEach(function(c) {
+    if (!c.moving_to || !c.moving_from || !c.arrives_at || !c.departed_at) return;
+
+    var from = systemPositions[c.moving_from];
+    var to = systemPositions[c.moving_to];
+    if (!from || !to) return;
+
+    var el = document.createElement('img');
+    el.className = 'flight-rocket';
+    el.src = '../assets/ui/rocket.png';
+    el.style.position = 'absolute';
+    el.style.width = '9px';
+    el.style.transformOrigin = '50% 50%';
+    // свои — зелёная подсветка, союзные — синяя (как и фишки командиров)
+    var glow = (c.user_id === currentUserId) ? OWN_COMMANDER_COLOR : ALLY_COMMANDER_COLOR;
+    el.style.filter = 'drop-shadow(0 0 4px ' + glow + ')';
+    flightLayer.appendChild(el);
+
+    activeFlights.push({
+      el: el,
+      commanderId: c.id,
+      from: from,
+      to: to,
+      startMs: new Date(c.departed_at).getTime(),
+      endMs: new Date(c.arrives_at).getTime(),
+      finishRequested: false
+    });
+  });
+
+  if (activeFlights.length > 0 && !flightAnimationRunning) {
+    flightAnimationRunning = true;
+    requestAnimationFrame(animateFlights);
+  }
+
+  // Пока в небе есть чужие корабли, раз в 10 секунд сверяемся с БД —
+  // на случай если realtime-событие о чужом прибытии не дошло.
+  if (activeFlights.length > 0) {
+    if (!flightPollTimer) {
+      flightPollTimer = setInterval(reloadCommanders, 10000);
+    }
+  } else if (flightPollTimer) {
+    clearInterval(flightPollTimer);
+    flightPollTimer = null;
+  }
+}
+
+function animateFlights() {
+  if (activeFlights.length === 0) {
+    flightAnimationRunning = false;
+    return;
+  }
+
+  var mapArea = document.getElementById('map-area');
+  var w = mapArea ? mapArea.clientWidth : 1;
+  var h = mapArea ? mapArea.clientHeight : 1;
+  var now = serverNow();
+
+  activeFlights.forEach(function(f) {
+    var total = f.endMs - f.startMs;
+    var progress = total > 0 ? (now - f.startMs) / total : 1;
+    if (progress < 0) progress = 0;
+    if (progress > 1) progress = 1;
+
+    var leftPct = f.from.left + (f.to.left - f.from.left) * progress;
+    var topPct = f.from.top + (f.to.top - f.from.top) * progress;
+
+    f.el.style.left = leftPct + '%';
+    f.el.style.top = topPct + '%';
+
+    // Угол считаем в пикселях, а не в процентах: карта шире, чем выше,
+    // поэтому в процентах направление получилось бы искажённым.
+    var dxPx = (f.to.left - f.from.left) / 100 * w;
+    var dyPx = (f.to.top - f.from.top) / 100 * h;
+    // Ракета на картинке смотрит вверх, поэтому +90°, чтобы нос шёл по курсу.
+    var angleDeg = Math.atan2(dyPx, dxPx) * 180 / Math.PI + 90;
+
+    f.el.style.transform = 'translate(-50%, -50%) rotate(' + angleDeg + 'deg)';
+
+    if (progress >= 1 && !f.finishRequested) {
+      f.finishRequested = true;
+      // Время вышло — просим сервер зафиксировать прибытие. Функция сама
+      // сверяет время, поэтому вызвать её раньше срока бесполезно.
+      supabase.rpc('finish_commander_move', { p_commander_id: f.commanderId }).then(function(res) {
+        if (res.error) {
+          console.error('Не удалось завершить перелёт:', res.error);
+          return;
+        }
+        // Не ждём realtime-события — обновляем карту сразу сами.
+        reloadCommanders();
+      });
+    }
+  });
+
+  requestAnimationFrame(animateFlights);
+}

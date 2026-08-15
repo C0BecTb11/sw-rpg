@@ -34,16 +34,101 @@ html, body {
 }
 
 /* Сама сетка — один большой div с линиями через repeating-linear-gradient.
-   100x100 клеток по 40px = поле 4000x4000px. Так не нужно создавать
+   130x130 клеток по 40px = поле 5200x5200px. Так не нужно создавать
    10000 отдельных DOM-элементов/клеток — просто два градиента на слой. */
 #space-grid {
   position: absolute;
   top: 0;
   left: 0;
-  width: 4000px;
-  height: 4000px;
+  width: 5200px;
+  height: 5200px;
   transform-origin: 0 0;
   background-image:
     repeating-linear-gradient(to right, rgba(120,170,220,0.12) 0, rgba(120,170,220,0.12) 1px, transparent 1px, transparent 40px),
     repeating-linear-gradient(to bottom, rgba(120,170,220,0.12) 0, rgba(120,170,220,0.12) 1px, transparent 1px, transparent 40px);
+}
+
+/* Панель космической станции */
+#station-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 1600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5,6,10,0.6);
+  padding: 20px;
+}
+
+#station-panel-box {
+  position: relative;
+  width: 100%;
+  max-width: 280px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 8px;
+  padding: 20px;
+  text-align: center;
+}
+
+#station-panel-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: none;
+  border: 1px solid #2a3644;
+  color: #8fa8c4;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+#station-panel-title {
+  font-size: 14px;
+  color: #cfd8dc;
+  letter-spacing: 1px;
+  margin-bottom: 10px;
+}
+
+#station-panel-text {
+  font-size: 11px;
+  color: #8fa8c4;
+  margin-bottom: 16px;
+}
+
+#station-build-btn {
+  width: 100%;
+  padding: 11px;
+  background: #4a90d9;
+  border: none;
+  color: #0a0d14;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  font-weight: bold;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+#station-demolish-btn {
+  width: 100%;
+  padding: 11px;
+  background: #a83a3a;
+  border: none;
+  color: #f0dede;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  font-weight: bold;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+#station-build-btn:disabled,
+#station-demolish-btn:disabled {
+  opacity: 0.5;
 }

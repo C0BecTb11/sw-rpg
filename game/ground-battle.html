@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Наземное сражение — Star Wars: Global Conflict</title>
 <link rel="stylesheet" href="../css/ground-battle.css">
+<link rel="stylesheet" href="../css/shared-ui.css">
 </head>
 <body>
 
@@ -22,8 +23,31 @@
   </div>
 </div>
 
+<div id="building-info-panel" style="display:none;">
+  <div id="building-info-box">
+    <button id="building-info-close">✕</button>
+    <div id="building-info-name">—</div>
+    <div id="building-info-refund"></div>
+    <button id="building-info-demolish">Снести</button>
+  </div>
+</div>
+
+<div id="unit-panel" style="display:none;">
+  <div id="unit-panel-box">
+    <div id="unit-panel-header">
+      <span id="unit-panel-title">Производство</span>
+      <button id="unit-panel-close">✕</button>
+    </div>
+    <div id="unit-panel-capacity" class="unit-panel-capacity"></div>
+    <div id="unit-panel-list"></div>
+  </div>
+</div>
+
+<div id="order-queue" style="display:none;"></div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../js/supabase-client.js"></script>
+<script src="../js/credits-bar.js"></script>
 <script src="../js/ground-battle.js"></script>
 </body>
 </html>

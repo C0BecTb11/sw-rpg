@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Космическое пространство — Star Wars: Global Conflict</title>
 <link rel="stylesheet" href="../css/space-battle.css">
+<link rel="stylesheet" href="../css/shared-ui.css">
 </head>
 <body>
 
@@ -14,8 +15,19 @@
   <div id="space-grid"></div>
 </div>
 
+<div id="station-panel" style="display:none;">
+  <div id="station-panel-box">
+    <button id="station-panel-close">✕</button>
+    <div id="station-panel-title">—</div>
+    <div id="station-panel-text"></div>
+    <button id="station-build-btn" style="display:none;">Построить станцию</button>
+    <button id="station-demolish-btn" style="display:none;">Снести станцию</button>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../js/supabase-client.js"></script>
+<script src="../js/credits-bar.js"></script>
 <script src="../js/space-battle.js"></script>
 </body>
 </html>
