@@ -109,37 +109,43 @@ function loadCommanders(userId) {
   });
 }
 
-// Войска по планетам: свои гарнизоны сгруппированы по системе,
-// каждая строка разворачивается тапом.
+// Войска по планетам. Читаем реальные позиции юнитов на картах и группируем
+// по системе: один боец — одна строка в БД, поэтому количество считаем сами.
 function loadGarrisons(userId) {
   var listEl = document.getElementById('army-garrisons-list');
   if (!listEl) return;
 
   Promise.all([
-    supabase.from('garrisons').select('*, unit_types(name, image)').eq('owner_user_id', userId).gt('quantity', 0),
-    supabase.from('systems').select('id, name')
+    supabase.from('unit_positions').select('system_id, unit_type').eq('owner_user_id', userId),
+    supabase.from('systems').select('id, name'),
+    supabase.from('unit_types').select('id, name, image')
   ]).then(function(results) {
-    var garrRes = results[0];
+    var unitsRes = results[0];
     var systemsRes = results[1];
+    var typesRes = results[2];
 
     var systemNames = {};
     (systemsRes.data || []).forEach(function(s) { systemNames[s.id] = s.name; });
 
-    if (garrRes.error || !garrRes.data || garrRes.data.length === 0) {
+    var typeById = {};
+    (typesRes.data || []).forEach(function(t) { typeById[t.id] = t; });
+
+    if (unitsRes.error || !unitsRes.data || unitsRes.data.length === 0) {
       listEl.innerHTML = '<div class="army-empty">Войск на планетах пока нет</div>';
       return;
     }
 
+    // { system_id: { unit_type: количество } }
     var bySystem = {};
-    garrRes.data.forEach(function(g) {
-      if (!bySystem[g.system_id]) bySystem[g.system_id] = [];
-      bySystem[g.system_id].push(g);
+    unitsRes.data.forEach(function(u) {
+      if (!bySystem[u.system_id]) bySystem[u.system_id] = {};
+      bySystem[u.system_id][u.unit_type] = (bySystem[u.system_id][u.unit_type] || 0) + 1;
     });
 
     listEl.innerHTML = '';
     Object.keys(bySystem).forEach(function(sysId) {
-      var rows = bySystem[sysId];
-      var total = rows.reduce(function(a, r) { return a + r.quantity; }, 0);
+      var counts = bySystem[sysId];
+      var total = Object.keys(counts).reduce(function(a, k) { return a + counts[k]; }, 0);
 
       var block = document.createElement('div');
       block.className = 'garrison-block';
@@ -157,8 +163,8 @@ function loadGarrisons(userId) {
 
       var grid = document.createElement('div');
       grid.className = 'inventory-grid';
-      rows.forEach(function(r) {
-        grid.appendChild(makeUnitChip(r.unit_types, r.quantity));
+      Object.keys(counts).forEach(function(typeId) {
+        grid.appendChild(makeUnitChip(typeById[typeId], counts[typeId]));
       });
       body.appendChild(grid);
       block.appendChild(body);

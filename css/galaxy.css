@@ -727,18 +727,25 @@ body {
 }
 
 .unit-chip-thumb {
-  width: 26px;
-  height: 34px;
-  border-radius: 4px;
+  position: relative;
+  width: 38px;
+  height: 38px;
+  border-radius: 5px;
   overflow: hidden;
   background: #05070b;
+  border: 1px solid #22303f;
   flex-shrink: 0;
 }
 
+/* Исходник — фигура в полный рост 1:2. В миниатюре 38 пикселей она
+   превращается в неразличимое пятно, поэтому показываем не всю фигуру,
+   а увеличенный фрагмент с головой и торсом — так юнит узнаётся. */
 .unit-chip-thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  position: absolute;
+  width: 190%;
+  height: auto;
+  left: -45%;
+  top: -7%;
   display: block;
 }
 

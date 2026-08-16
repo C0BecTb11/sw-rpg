@@ -210,21 +210,13 @@ function generateBuildSlots(seed) {
 
 // Зона высадки живёт в нижней части карты, а слоты построек — в верхней,
 // поэтому пересечься они не могут в принципе, отдельная проверка не нужна.
-// Две зоны у самого верхнего края — выше полосы построек, поэтому наложиться
-// на здания они не могут. По углам не ставим: сдвинуты к центру от краёв.
-function generateDeployZones(seed) {
-  var rand = mulberry32(seed ^ 0x27D4EB2F);
-  var y = 2 + Math.floor(rand() * 2);
-
-  var leftMin = Math.floor(GRID_SIZE * 0.15);
-  var leftMax = Math.floor(GRID_SIZE * 0.32);
-  var rightMin = Math.floor(GRID_SIZE * 0.60);
-  var rightMax = Math.floor(GRID_SIZE * 0.78);
-
-  return [
-    { x: leftMin + Math.floor(rand() * (leftMax - leftMin)), y: y },
-    { x: rightMin + Math.floor(rand() * (rightMax - rightMin)), y: y }
-  ];
+// Зоны приходят из БД — там же их проверяет сервер при размещении войск,
+// поэтому клиент их не выдумывает, а только рисует.
+function loadDeployZones() {
+  return supabase.from('deploy_zones').select('*').eq('system_id', systemId).then(function(res) {
+    deployZones = (res.error || !res.data) ? [] : res.data;
+    showDeployZones = deployZones.length > 0;
+  });
 }
 
 var TERRAIN_COLORS = {
@@ -260,6 +252,8 @@ function drawScene(grid) {
 
   drawBuildSlots();
   drawDeployZone();
+  drawPlacementCells();
+  drawUnits();
 }
 
 // Зоны высадки — тактическая информация, поэтому видны только своей фракции.
@@ -269,7 +263,7 @@ function drawDeployZone() {
   deployZones.forEach(function(zone) {
     var px = zone.x * CELL_PX;
     var py = zone.y * CELL_PX;
-    var size = DEPLOY_SIZE * CELL_PX;
+    var size = (zone.size || DEPLOY_SIZE) * CELL_PX;
 
     ctx.fillStyle = 'rgba(95,217,104,0.10)';
     ctx.fillRect(px, py, size, size);
@@ -562,6 +556,22 @@ function handleTap(clientX, clientY) {
   var cellX = Math.floor(gridPxX / CELL_PX);
   var cellY = Math.floor(gridPxY / CELL_PX);
 
+  if (placingOrder) {
+    handlePlacementTap(cellX, cellY);
+    return;
+  }
+
+  // Тап по своему юниту показывает его радиус обзора
+  var tappedUnit = unitsOnMap.filter(function(u) {
+    return u.x === cellX && u.y === cellY;
+  })[0];
+  if (tappedUnit) {
+    selectedUnit = (selectedUnit && selectedUnit.id === tappedUnit.id) ? null : tappedUnit;
+    redrawScene();
+    return;
+  }
+  if (selectedUnit) { selectedUnit = null; redrawScene(); }
+
   for (var i = 0; i < buildSlots.length; i++) {
     var slot = buildSlots[i];
     if (cellX >= slot.x && cellX < slot.x + SLOT_SIZE &&
@@ -801,6 +811,9 @@ function subscribeToGroundChanges() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'buildings', filter: 'system_id=eq.' + systemId }, function() {
       loadBuildings();
     })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'unit_positions', filter: 'system_id=eq.' + systemId }, function() {
+      loadUnits();
+    })
     .subscribe();
 }
 
@@ -836,7 +849,6 @@ function initGroundBattle() {
 
     var slotSeed = hashStringToSeed(systemId);
     buildSlots = generateBuildSlots(slotSeed);
-    deployZones = generateDeployZones(slotSeed);
 
     Promise.all([
       supabase.from('building_types').select('*').then(function(res2) {
@@ -844,7 +856,10 @@ function initGroundBattle() {
       }),
       checkBuildRights()
     ]).then(function() {
-      showDeployZones = (currentUserFaction && systemFaction === currentUserFaction);
+      loadDeployZones().then(function() {
+        loadUnits();
+        redrawScene();
+      });
       loadBuildings();
       loadUnitOrders();
       setInterval(loadUnitOrders, 5000);
@@ -928,8 +943,8 @@ function buildUnitCard(unit) {
   stats.className = 'unit-card-stats';
   stats.appendChild(makeStat('❤', 'Прочность', unit.max_hp));
   stats.appendChild(makeStat('⚔', 'Урон', unit.damage));
-  stats.appendChild(makeStat('➔', 'Манёвр', unit.move_range));
-  stats.appendChild(makeStat('◉', 'Обзор', unit.vision_range));
+  stats.appendChild(makeStat('➔', 'Манёвр', unit.move_range + ' кл.'));
+  stats.appendChild(makeStat('◉', 'Обзор', unit.vision_range + ' кл.'));
   body.appendChild(stats);
 
   if (unit.is_relay) {
@@ -978,23 +993,8 @@ function buildUnitCard(unit) {
 
   order.addEventListener('click', function() {
     var n = parseInt(val.textContent, 10);
-    order.disabled = true;
-    order.textContent = 'Заказываем...';
-    supabase.rpc('order_unit', {
-      p_building_id: unitPanelBuilding.id,
-      p_unit_type: unit.id,
-      p_quantity: n
-    }).then(function(res) {
-      order.disabled = false;
-      updatePrice();
-      if (res.error) {
-        alert('Не удалось нанять: ' + res.error.message);
-        updateDeployCounter();
-        return;
-      }
-      closeUnitPanel();
-      loadUnitOrders();
-    });
+    // Сначала выбираем место на карте, заказ уходит после выбора клетки.
+    startPlacement(unit.id, n);
   });
 
   body.appendChild(footer);
@@ -1016,7 +1016,7 @@ function updateDeployCounter() {
   if (!el || !currentUserId) return;
 
   Promise.all([
-    supabase.rpc('deploy_used', { p_system_id: systemId, p_user_id: currentUserId }),
+    supabase.rpc('deploy_used', { p_system_id: systemId }),
     supabase.from('game_settings').select('value').eq('key', 'deploy_capacity').maybeSingle()
   ]).then(function(r) {
     var used = (!r[0].error && typeof r[0].data === 'number') ? r[0].data : 0;
@@ -1054,4 +1054,180 @@ function loadUnitOrders() {
         bar.appendChild(item);
       });
     });
+}
+
+// ===== Юниты на карте и выбор места при заказе =====
+
+var unitsOnMap = [];
+var unitTypeById = {};
+var unitImages = {};   // путь -> Image
+
+function getUnitImage(path) {
+  if (!path) return null;
+  if (unitImages[path]) return unitImages[path];
+  var img = new Image();
+  img.src = '../' + path;
+  img.onload = function() { redrawScene(); };
+  img.onerror = function() { img.failed = true; };
+  unitImages[path] = img;
+  return img;
+}
+var placingOrder = null;   // {unitId, quantity} — ждём выбор клетки
+
+function loadUnits() {
+  Promise.all([
+    supabase.from('unit_positions').select('*').eq('system_id', systemId).eq('layer', 'ground'),
+    supabase.from('unit_types').select('*')
+  ]).then(function(r) {
+    unitsOnMap = (r[0].error || !r[0].data) ? [] : r[0].data;
+    unitTypeById = {};
+    (r[1].data || []).forEach(function(t) { unitTypeById[t.id] = t; });
+    redrawScene();
+  });
+}
+
+// Юнит занимает одну клетку. Свои — зелёные, союзные — синие,
+// вражеские сюда просто не приходят: их отсекает туман войны в БД.
+function drawUnits() {
+  unitsOnMap.forEach(function(u) {
+    var px = u.x * CELL_PX;
+    var py = u.y * CELL_PX;
+    var mine = u.owner_user_id === currentUserId;
+    var color = mine ? '#5fd968' : '#4a90d9';
+    var type = unitTypeById[u.unit_type];
+    var img = type ? getUnitImage(type.image) : null;
+
+    var inset = 2;
+    var box = CELL_PX - inset * 2;
+
+    ctx.fillStyle = 'rgba(5,6,10,0.85)';
+    ctx.fillRect(px + inset, py + inset, box, box);
+
+    if (img && img.complete && !img.failed && img.naturalWidth > 0) {
+      // Исходник вытянутый 1:2, а клетка квадратная. Берём из кадра
+      // квадратный кусок с головой и торсом — так юнит узнаётся даже
+      // на иконке в 32 пикселя, и фигура не сплющивается.
+      var sw = img.naturalWidth * 0.70;
+      var sx = (img.naturalWidth - sw) / 2;
+      var sy = img.naturalHeight * 0.07;
+      var sh = sw;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(px + inset, py + inset, box, box);
+      ctx.clip();
+      ctx.drawImage(img, sx, sy, sw, sh, px + inset, py + inset, box, box);
+      ctx.restore();
+    } else {
+      ctx.fillStyle = color;
+      ctx.font = Math.round(CELL_PX * 0.5) + 'px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('⛊', px + CELL_PX / 2, py + CELL_PX / 2 + 1);
+    }
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(px + inset, py + inset, box, box);
+  });
+
+  // Радиус обзора выбранного юнита показываем кругом — так видно,
+  // сколько клеток он реально просматривает.
+  // Карта клеточная, поэтому дальности считаем в клетках: зона —
+  // квадрат вокруг юнита, а не круг. Обзор зелёным, ход синим.
+  if (selectedUnit) {
+    var t = unitTypeById[selectedUnit.unit_type];
+    if (t) {
+      drawCellRange(selectedUnit, t.vision_range, 'rgba(95,217,104,0.55)');
+      drawCellRange(selectedUnit, t.move_range, 'rgba(74,144,217,0.55)');
+    }
+  }
+}
+
+function drawCellRange(unit, range, color) {
+  if (!range) return;
+  var x0 = (unit.x - range) * CELL_PX;
+  var y0 = (unit.y - range) * CELL_PX;
+  var side = (range * 2 + 1) * CELL_PX;
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 6]);
+  ctx.strokeRect(x0, y0, side, side);
+  ctx.setLineDash([]);
+}
+
+var selectedUnit = null;
+
+// Режим выбора клетки: подсвечиваем свободные места в зонах.
+function startPlacement(unitTypeId, quantity) {
+  placingOrder = { unitType: unitTypeId, quantity: quantity };
+  closeUnitPanel();
+
+  var hint = document.getElementById('placement-hint');
+  var t = unitTypeById[unitTypeId];
+  hint.innerHTML = '<span>Выбери клетку в зоне высадки для: ' +
+                   ((t && t.name) || 'юнита') + ' ×' + quantity + '</span>' +
+                   '<button id="placement-cancel">Отмена</button>';
+  hint.style.display = 'flex';
+  document.getElementById('placement-cancel').addEventListener('click', cancelPlacement);
+
+  redrawScene();
+}
+
+function cancelPlacement() {
+  placingOrder = null;
+  document.getElementById('placement-hint').style.display = 'none';
+  redrawScene();
+}
+
+function drawPlacementCells() {
+  if (!placingOrder) return;
+
+  var occupied = {};
+  unitsOnMap.forEach(function(u) { occupied[u.x + ':' + u.y] = true; });
+
+  deployZones.forEach(function(zone) {
+    var size = zone.size || DEPLOY_SIZE;
+    for (var dx = 0; dx < size; dx++) {
+      for (var dy = 0; dy < size; dy++) {
+        var cx = zone.x + dx, cy = zone.y + dy;
+        if (occupied[cx + ':' + cy]) continue;
+        ctx.fillStyle = 'rgba(95,217,104,0.25)';
+        ctx.fillRect(cx * CELL_PX + 3, cy * CELL_PX + 3, CELL_PX - 6, CELL_PX - 6);
+      }
+    }
+  });
+}
+
+// Тап в режиме размещения: отправляем заказ с выбранной точкой.
+function handlePlacementTap(cellX, cellY) {
+  var inZone = deployZones.some(function(z) {
+    var size = z.size || DEPLOY_SIZE;
+    return cellX >= z.x && cellX < z.x + size && cellY >= z.y && cellY < z.y + size;
+  });
+
+  if (!inZone) return;
+
+  var taken = unitsOnMap.some(function(u) { return u.x === cellX && u.y === cellY; });
+  if (taken) {
+    alert('Клетка занята');
+    return;
+  }
+
+  var order = placingOrder;
+  cancelPlacement();
+
+  supabase.rpc('order_unit', {
+    p_building_id: unitPanelBuilding.id,
+    p_unit_type: order.unitType,
+    p_quantity: order.quantity,
+    p_target_x: cellX,
+    p_target_y: cellY
+  }).then(function(res) {
+    if (res.error) {
+      alert('Не удалось нанять: ' + res.error.message);
+      return;
+    }
+    loadUnitOrders();
+  });
 }

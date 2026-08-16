@@ -303,8 +303,8 @@ html, body {
 }
 
 .unit-card-media {
-  width: 86px;
-  height: 132px;
+  width: 84px;
+  height: 168px;
   flex-shrink: 0;
   border-radius: 8px;
   overflow: hidden;
@@ -312,10 +312,12 @@ html, body {
   border: 1px solid #22303f;
 }
 
+/* contain вместо cover: cover обрезал кадр по ширине и срезал голову,
+   потому что исходник вытянутый 1:2, а контейнер был почти квадратным */
 .unit-card-media img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
 }
 
@@ -450,4 +452,35 @@ html, body {
 
 .unit-panel-capacity.full {
   color: #d94a4a;
+}
+
+
+#placement-hint {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 16px;
+  z-index: 1500;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(5,6,10,0.92);
+  border: 1px solid #5fd968;
+  border-radius: 22px;
+  padding: 10px 12px 10px 18px;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: #cfd8dc;
+  max-width: 92vw;
+}
+
+#placement-cancel {
+  background: #2a3644;
+  border: none;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  padding: 6px 12px;
+  border-radius: 14px;
+  cursor: pointer;
 }
