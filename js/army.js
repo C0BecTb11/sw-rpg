@@ -53,6 +53,7 @@ function loadCommanders(userId) {
     (systemsRes.data || []).forEach(function(s) { systemNames[s.id] = s.name; });
 
     listEl.innerHTML = '';
+
     commandersRes.data.forEach(function(c) {
       var row = document.createElement('div');
       row.className = 'commander-row' + (c.unlocked ? '' : ' locked');
@@ -99,23 +100,69 @@ function loadCommanders(userId) {
       listEl.appendChild(row);
     });
 
-    // Корабли, ещё не переданные никакому командиру, показываем отдельно —
-    // иначе построенный Венатор просто пропал бы из виду.
+    // Гарнизоны идут после командиров: командиры — главные действующие
+    // лица, а гарнизон это фон. Каждая система свёрнута, иначе при трёх
+    // кораблях на пяти планетах экран превращается в простыню.
     var free = shipsByCommander['free'] || [];
     if (free.length > 0) {
-      var freeBlock = document.createElement('div');
-      freeBlock.className = 'commander-row';
+      var bySystem = {};
+      free.forEach(function(sh) {
+        if (!bySystem[sh.system_id]) bySystem[sh.system_id] = [];
+        bySystem[sh.system_id].push(sh);
+      });
 
-      var freeHead = document.createElement('div');
-      freeHead.className = 'commander-head';
-      freeHead.innerHTML = '<div class="commander-icon" style="color:#4a90d9;border-color:#4a90d9">⬢</div>' +
-        '<div class="commander-info"><div class="commander-name">Корабли без командира</div>' +
-        '<div class="commander-status">Стоят в системах, ждут назначения</div></div>';
-      freeBlock.appendChild(freeHead);
-      freeBlock.appendChild(makeFleetSection(free, cargoByShip, systemNames));
+      var sectionTitle = document.createElement('div');
+      sectionTitle.className = 'garrison-section-title';
+      sectionTitle.textContent = 'Гарнизоны';
+      listEl.appendChild(sectionTitle);
 
-      listEl.appendChild(freeBlock);
+      Object.keys(bySystem).sort(function(a, b) {
+        return (systemNames[a] || a).localeCompare(systemNames[b] || b);
+      }).forEach(function(sysId) {
+        var group = bySystem[sysId];
+
+        // Состав словами: «Венатор ×2, Тантив» — понятно, что стоит
+        // в системе, не раскрывая список
+        var counts = {};
+        group.forEach(function(sh) {
+          var nm = (sh.ship_types && sh.ship_types.name) || sh.ship_type;
+          counts[nm] = (counts[nm] || 0) + 1;
+        });
+        var parts = Object.keys(counts).map(function(nm) {
+          return counts[nm] > 1 ? nm + ' ×' + counts[nm] : nm;
+        });
+
+        var block = document.createElement('div');
+        block.className = 'commander-row garrison-row';
+
+        var head = document.createElement('button');
+        head.className = 'commander-head garrison-head';
+        head.innerHTML =
+          '<span class="garrison-arrow">▸</span>' +
+          '<div class="commander-info">' +
+            '<div class="commander-name">' + (systemNames[sysId] || sysId) +
+              '<span class="garrison-count">' + group.length + '</span></div>' +
+            '<div class="commander-status">' + parts.join(', ') + '</div>' +
+          '</div>';
+        block.appendChild(head);
+
+        var section = makeFleetSection(group, cargoByShip, systemNames);
+        // Заголовок «Флот» внутри лишний: система уже названа сверху
+        var inner = section.querySelector('.inventory-title');
+        if (inner) inner.parentNode.removeChild(inner);
+        section.style.display = 'none';
+        block.appendChild(section);
+
+        head.addEventListener('click', function() {
+          var open = section.style.display !== 'none';
+          section.style.display = open ? 'none' : 'block';
+          head.querySelector('.garrison-arrow').textContent = open ? '▸' : '▾';
+        });
+
+        listEl.appendChild(block);
+      });
     }
+
   });
 }
 

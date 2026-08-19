@@ -272,3 +272,97 @@
   height: 22px;
   object-fit: contain;
 }
+
+/* Гарнизоны в списке армии */
+.garrison-section-title {
+  margin: 18px 0 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #55606c;
+}
+
+.garrison-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.garrison-head .garrison-arrow {
+  flex: none;
+  width: 12px;
+  color: #4a90d9;
+  font-size: 11px;
+}
+
+.garrison-head .commander-status {
+  color: #8fa8c4;
+}
+
+.garrison-count {
+  display: inline-block;
+  margin-left: 7px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #4a90d9;
+  color: #0a0d14;
+  font-size: 10px;
+  font-weight: bold;
+}
+
+/* Блок командира в HUD корабля */
+#sc-cmd {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #1c2530;
+}
+
+.sc-cmd-title {
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #55606c;
+  margin-bottom: 5px;
+}
+
+.sc-cmd-state {
+  font-size: 10px;
+  color: #8fa8c4;
+  margin-bottom: 7px;
+}
+
+.sc-cmd-state.assigned { color: #5fd968; }
+
+.sc-cmd-select {
+  width: 100%;
+  padding: 9px 32px 9px 10px;
+  background: #0a0d14;
+  border: 1px solid #2a3644;
+  border-radius: 8px;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, #8fa8c4 50%),
+                    linear-gradient(135deg, #8fa8c4 50%, transparent 50%);
+  background-position: calc(100% - 17px) calc(50% + 1px),
+                       calc(100% - 12px) calc(50% + 1px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+.sc-cmd-select option { background: #0d1119; color: #cfd8dc; }
+
+.sc-cmd-hint {
+  margin-top: 5px;
+  font-size: 10px;
+  color: #55606c;
+}

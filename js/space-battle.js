@@ -198,6 +198,66 @@ function loadStation() {
   });
 }
 
+// Полоса гиперпространства. Своя видна целиком, чужой на карте просто
+// нет — её и не должно быть видно, за это же отвечает RLS в базе.
+var ZONE_HEIGHT = 14;
+var myZoneSide = null;
+
+function loadHyperspaceZone() {
+  return supabase.auth.getSession().then(function(res) {
+    if (!res.data.session) return;
+
+    return Promise.all([
+      supabase.from('profiles').select('faction').eq('id', res.data.session.user.id).maybeSingle(),
+      supabase.from('systems').select('faction').eq('id', systemId).maybeSingle(),
+      supabase.from('game_settings').select('key, value')
+    ]).then(function(r) {
+      var myFaction = (r[0].data && r[0].data.faction) || null;
+      var sysFaction = (r[1].data && r[1].data.faction) || null;
+
+      (r[2].data || []).forEach(function(row) {
+        if (row.key === 'hyperspace_zone_height') ZONE_HEIGHT = parseInt(row.value, 10) || 14;
+      });
+
+      if (!myFaction) return;
+
+      // Та же логика, что в hyperspace_side на сервере: хозяин системы
+      // обороняется сверху, пришедший заходит снизу. У ничейной системы
+      // стороны закреплены за фракциями, иначе враги делили бы одну полосу.
+      if (!sysFaction) {
+        myZoneSide = (myFaction === 'republic') ? 'top' : 'bottom';
+      } else {
+        myZoneSide = (sysFaction === myFaction) ? 'top' : 'bottom';
+      }
+
+      renderHyperspaceZone();
+    });
+  });
+}
+
+function renderHyperspaceZone() {
+  var old = grid.querySelector('.hyperspace-zone');
+  if (old) old.parentNode.removeChild(old);
+  if (!myZoneSide) return;
+
+  var band = document.createElement('div');
+  band.className = 'hyperspace-zone ' + myZoneSide;
+  band.style.left = '0px';
+  band.style.width = (GRID_CELLS * CELL_PX) + 'px';
+  band.style.height = (ZONE_HEIGHT * CELL_PX) + 'px';
+  band.style.top = (myZoneSide === 'top'
+    ? 0
+    : (GRID_CELLS - ZONE_HEIGHT) * CELL_PX) + 'px';
+
+  var label = document.createElement('span');
+  label.className = 'hyperspace-zone-label';
+  label.textContent = 'Зона гиперпространства';
+  band.appendChild(label);
+
+  // Полоса должна лежать под кораблями, иначе перехватит тапы по ним
+  grid.insertBefore(band, grid.firstChild);
+}
+
 function checkStationRights() {
   return supabase.auth.getSession().then(function(res) {
     if (!res.data.session) return;
@@ -461,7 +521,7 @@ function initSpaceBattle() {
     }
     if (!systemId) return;
 
-    Promise.all([loadStationSlot(), checkStationRights()]).then(function() {
+    Promise.all([loadStationSlot(), checkStationRights(), loadHyperspaceZone()]).then(function() {
       loadStation();
       loadShips();
       centerGridInitially();
@@ -510,9 +570,11 @@ function loadShips() {
 // ship_box_w / ship_box_h на сервере — расхождение здесь означало бы,
 // что игрок видит одно, а база считает другое.
 function shipBoxCells(type, facing) {
-  return (facing === 90 || facing === 270)
-    ? { w: type.height_cells, h: type.width_cells }
-    : { w: type.width_cells, h: type.height_cells };
+  var w = type.width_cells, h = type.height_cells;
+  if (facing === 0 || facing === 180) return { w: w, h: h };
+  if (facing === 90 || facing === 270) return { w: h, h: w };
+  var d = Math.ceil((w + h) / Math.SQRT2);
+  return { w: d, h: d };
 }
 
 // Корабли рисуем элементами поверх сетки: спрайт занимает ровно тот

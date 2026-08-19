@@ -14,6 +14,8 @@ var scTimeOffset = 0;      // серверное время минус лока�
 var scSettings = { cooldown: 30, apMax: 2 };
 var scTicker = null;
 var scRangeEl = null;
+var scGhostEl = null;
+var scPreview = null;      // {x, y, dist} — куда встанет корабль
 
 // Четыре положения: нос вверх, вправо, вниз, влево. Этого хватает,
 // чтобы подставить врагу нос, корму или борт.
@@ -84,11 +86,16 @@ function scEnsureHud() {
       '<button id="sc-close">✕</button>' +
     '</div>' +
     '<div id="sc-bars"></div>' +
+    '<div id="sc-cmd"></div>' +
     '<div id="sc-ap"><div id="sc-ap-dots"></div><div id="sc-ap-text"></div></div>' +
     '<div id="sc-actions">' +
       '<button class="sc-btn" id="sc-move">Ход</button>' +
       '<button class="sc-btn" id="sc-rotate">Разворот</button>' +
       '<button class="sc-btn sc-btn-ghost" id="sc-abilities" disabled>Способности</button>' +
+    '</div>' +
+    '<div id="sc-confirm">' +
+      '<button class="sc-btn sc-btn-go" id="sc-go">Идти</button>' +
+      '<button class="sc-btn" id="sc-cancel">Отмена</button>' +
     '</div>' +
     '<div id="sc-dial"></div>' +
     '<div id="sc-hint"></div>';
@@ -102,6 +109,8 @@ function scEnsureHud() {
   document.getElementById('sc-rotate').addEventListener('click', function() {
     scSetMode(scMode === 'rotate' ? null : 'rotate');
   });
+  document.getElementById('sc-go').addEventListener('click', scConfirmMove);
+  document.getElementById('sc-cancel').addEventListener('click', scCancelAim);
 
   var dial = document.getElementById('sc-dial');
   SC_FACINGS.forEach(function(f) {
@@ -156,8 +165,92 @@ function scRenderHud() {
   }
 
   document.getElementById('sc-bars').innerHTML = html;
+  scRenderCommander();
   scRenderAp();
   scRenderMode();
+}
+
+// Командир нужен только для перелётов между планетами. Корабль без
+// командира — это не забытый корабль, а гарнизон: он остаётся оборонять
+// систему. Поэтому здесь нейтральная формулировка, а не предупреждение.
+var scCommandersCache = null;
+
+function scRenderCommander() {
+  var box = document.getElementById('sc-cmd');
+  if (!box || !scShip) return;
+
+  box.innerHTML = '<div class="sc-cmd-title">Командир</div>' +
+    '<div class="sc-cmd-state">…</div>';
+
+  var fill = function(list) {
+    var here = list.filter(function(c) {
+      return c.unlocked && !c.moving_to && c.current_system === scShip.system_id;
+    });
+
+    var current = null;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === scShip.commander_id) { current = list[i]; break; }
+    }
+
+    box.innerHTML = '<div class="sc-cmd-title">Командир</div>';
+
+    var state = document.createElement('div');
+    state.className = 'sc-cmd-state' + (current ? ' assigned' : '');
+    state.textContent = current
+      ? 'ведёт ' + current.name + ' — уйдёт вместе с ним'
+      : 'в обороне системы — остаётся на месте';
+    box.appendChild(state);
+
+    var sel = document.createElement('select');
+    sel.className = 'sc-cmd-select';
+
+    var none = document.createElement('option');
+    none.value = '';
+    none.textContent = '— оставить в обороне —';
+    sel.appendChild(none);
+
+    // Командир, который уже ведёт корабль, может быть не в этой системе
+    // (например, флот ещё не догнал его) — держим его в списке, иначе
+    // выбор молча сбросился бы
+    if (current && here.indexOf(current) === -1) here.unshift(current);
+
+    here.forEach(function(c) {
+      var opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.name;
+      if (scShip.commander_id === c.id) opt.selected = true;
+      sel.appendChild(opt);
+    });
+
+    sel.addEventListener('change', function() {
+      sel.disabled = true;
+      supabase.rpc('assign_ship', {
+        p_ship_id: scShip.id,
+        p_commander_id: sel.value || null
+      }).then(function(r) {
+        sel.disabled = false;
+        if (r.error) { scFail(r.error.message); return; }
+        loadShips();
+      });
+    });
+
+    box.appendChild(sel);
+
+    if (here.length === 0) {
+      var hint = document.createElement('div');
+      hint.className = 'sc-cmd-hint';
+      hint.textContent = 'Свободных командиров в этой системе нет';
+      box.appendChild(hint);
+    }
+  };
+
+  if (scCommandersCache) { fill(scCommandersCache); return; }
+
+  supabase.from('commanders').select('*').eq('user_id', currentUserId)
+    .then(function(res) {
+      scCommandersCache = res.error ? [] : (res.data || []);
+      fill(scCommandersCache);
+    });
 }
 
 function scRenderAp() {
@@ -199,8 +292,16 @@ function scRenderMode() {
   moveBtn.classList.toggle('active', scMode === 'move');
   rotBtn.classList.toggle('active', scMode === 'rotate');
 
-  if (scMode === 'move') {
-    hint.textContent = 'Коснись клетки, куда идти';
+  var confirmBox = document.getElementById('sc-confirm');
+  confirmBox.style.display = (scMode === 'move' && scPreview) ? 'flex' : 'none';
+  document.getElementById('sc-actions').style.display =
+    (scMode === 'move' && scPreview) ? 'none' : 'flex';
+
+  if (scMode === 'move' && scPreview) {
+    hint.textContent = 'Пройдёт ' + scPreview.dist + ' из ' + scType.move_range +
+      ' кл. · можно ткнуть в другую клетку';
+  } else if (scMode === 'move') {
+    hint.textContent = 'Коснись клетки — корабль встанет на неё серединой';
   } else if (scMode === 'rotate') {
     hint.textContent = 'Стрелка — направление носа';
   } else {
@@ -210,22 +311,69 @@ function scRenderMode() {
   scRenderRange();
 }
 
-// Полупрозрачный квадрат — куда можно дойти за один ход
+// Якорь корабля — клетка, в которую игрок целится пальцем.
+// Совпадает с тем, как сервер считает дальность, поэтому нарисованная
+// зона и реальная всегда совпадают.
+function scAnchor(ship, type) {
+  var box = scBox(type, ship.facing);
+  return {
+    x: ship.x + Math.floor(box.w / 2),
+    y: ship.y + Math.floor(box.h / 2)
+  };
+}
+
+// Зона хода — множество клеток, куда можно поставить якорь.
+// Раньше я рисовал габарит корабля, раздутый на дальность: выглядело
+// щедрее, чем есть, и тап у края давал «слишком далеко».
 function scRenderRange() {
   if (scRangeEl && scRangeEl.parentNode) scRangeEl.parentNode.removeChild(scRangeEl);
   scRangeEl = null;
   if (scMode !== 'move' || !scShip || !scType) return;
 
-  var box = scBox(scType, scShip.facing);
+  var a = scAnchor(scShip, scType);
   var r = scType.move_range;
+
   var el = document.createElement('div');
   el.className = 'sc-range';
-  el.style.left = ((scShip.x - r) * CELL_PX) + 'px';
-  el.style.top = ((scShip.y - r) * CELL_PX) + 'px';
-  el.style.width = ((box.w + r * 2) * CELL_PX) + 'px';
-  el.style.height = ((box.h + r * 2) * CELL_PX) + 'px';
+  el.style.left = ((a.x - r) * CELL_PX) + 'px';
+  el.style.top = ((a.y - r) * CELL_PX) + 'px';
+  el.style.width = ((r * 2 + 1) * CELL_PX) + 'px';
+  el.style.height = ((r * 2 + 1) * CELL_PX) + 'px';
   grid.appendChild(el);
   scRangeEl = el;
+}
+
+// Призрак: корабль в натуральную величину на будущем месте.
+// С крупной посудиной без него приходится угадывать, какой угол
+// куда встанет.
+function scRenderGhost() {
+  if (scGhostEl && scGhostEl.parentNode) scGhostEl.parentNode.removeChild(scGhostEl);
+  scGhostEl = null;
+  if (!scPreview || !scShip || !scType) return;
+
+  var box = scBox(scType, scShip.facing);
+
+  var el = document.createElement('div');
+  el.className = 'sc-ghost';
+  el.style.left = (scPreview.x * CELL_PX) + 'px';
+  el.style.top = (scPreview.y * CELL_PX) + 'px';
+  el.style.width = (box.w * CELL_PX) + 'px';
+  el.style.height = (box.h * CELL_PX) + 'px';
+
+  if (scType.image) {
+    var im = document.createElement('img');
+    im.src = '../' + scType.image;
+    im.style.width = (scType.width_cells * CELL_PX) + 'px';
+    im.style.height = (scType.height_cells * CELL_PX) + 'px';
+    im.style.position = 'absolute';
+    im.style.left = '50%';
+    im.style.top = '50%';
+    im.style.transform = 'translate(-50%, -50%) rotate(' + (scShip.facing || 0) + 'deg)';
+    el.appendChild(im);
+  }
+
+  grid.appendChild(el);
+  scGhostEl = el;
 }
 
 // ===== выбор корабля =====
@@ -241,6 +389,8 @@ function scDeselect() {
   scShip = null;
   scType = null;
   scMode = null;
+  scPreview = null;
+  scRenderGhost();
   var hud = document.getElementById('ship-hud');
   if (hud) hud.style.display = 'none';
   scRenderRange();
@@ -248,6 +398,8 @@ function scDeselect() {
 
 function scSetMode(mode) {
   scMode = mode;
+  if (mode !== 'move') scPreview = null;
+  scRenderGhost();
   scRenderMode();
 }
 
@@ -283,22 +435,58 @@ function scDoRotate(deg) {
   });
 }
 
-function scDoMove(cx, cy) {
+// Тап не ходит сразу, а ставит призрака. Ход стоит действия, которое
+// копится 30 секунд, — промахнуться пальцем и потерять его обидно.
+function scAimAt(cx, cy) {
   if (!scShip || !scType) return;
-  // Целимся центром корабля в выбранную клетку — так привычнее пальцем
+
+  var a = scAnchor(scShip, scType);
+  var r = scType.move_range;
+
+  // Тап за пределом дальности не отбрасываем, а прижимаем к пределу:
+  // игрок хотел «туда, максимально далеко», и получает ровно это,
+  // а не ошибку и не ход на клетку короче
+  var ax = Math.max(a.x - r, Math.min(a.x + r, cx));
+  var ay = Math.max(a.y - r, Math.min(a.y + r, cy));
+
   var box = scBox(scType, scShip.facing);
-  var tx = cx - Math.floor(box.w / 2);
-  var ty = cy - Math.floor(box.h / 2);
+  var tx = ax - Math.floor(box.w / 2);
+  var ty = ay - Math.floor(box.h / 2);
+
+  // Корпус не должен свеситься за край карты
+  tx = Math.max(0, Math.min(tx, GRID_CELLS - box.w));
+  ty = Math.max(0, Math.min(ty, GRID_CELLS - box.h));
+
+  scPreview = {
+    x: tx,
+    y: ty,
+    dist: Math.max(Math.abs(tx - scShip.x), Math.abs(ty - scShip.y))
+  };
+
+  scRenderGhost();
+  scRenderMode();
+}
+
+function scConfirmMove() {
+  if (!scPreview) return;
+  var target = scPreview;
 
   scBusy(true);
   supabase.rpc('move_ship', {
-    p_ship_id: scShip.id, p_x: tx, p_y: ty, p_facing: null
+    p_ship_id: scShip.id, p_x: target.x, p_y: target.y, p_facing: null
   }).then(function(res) {
     scBusy(false);
     if (res.error) { scFail(res.error.message); return; }
+    scCancelAim();
     scMode = null;
     loadShips();
   });
+}
+
+function scCancelAim() {
+  scPreview = null;
+  scRenderGhost();
+  scRenderMode();
 }
 
 function scFail(msg) {
@@ -330,7 +518,7 @@ function scInitFieldTap() {
     var rect = viewport.getBoundingClientRect();
     var gx = (e.clientX - rect.left - panX) / scale;
     var gy = (e.clientY - rect.top - panY) / scale;
-    scDoMove(Math.floor(gx / CELL_PX), Math.floor(gy / CELL_PX));
+    scAimAt(Math.floor(gx / CELL_PX), Math.floor(gy / CELL_PX));
   });
 }
 

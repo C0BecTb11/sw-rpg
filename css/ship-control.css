@@ -211,11 +211,69 @@
 
 #sc-hint.error { color: #d94a4a; }
 
-/* Зона досягаемости хода на карте */
+
+/* Зона гиперпространства. Видна только своя — чужой полосы на карте
+   просто нет, за этим следит и клиент, и RLS в базе. */
+.hyperspace-zone {
+  position: absolute;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(74,144,217,0.10) 0px,
+    rgba(74,144,217,0.10) 14px,
+    rgba(74,144,217,0.04) 14px,
+    rgba(74,144,217,0.04) 28px
+  );
+}
+
+.hyperspace-zone.top { border-bottom: 2px dashed rgba(74,144,217,0.55); }
+.hyperspace-zone.bottom { border-top: 2px dashed rgba(74,144,217,0.55); }
+
+.hyperspace-zone-label {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'Courier New', monospace;
+  font-size: 34px;
+  letter-spacing: 12px;
+  text-transform: uppercase;
+  color: rgba(74,144,217,0.35);
+  white-space: nowrap;
+}
+
+.hyperspace-zone.top .hyperspace-zone-label { bottom: 10px; }
+.hyperspace-zone.bottom .hyperspace-zone-label { top: 10px; }
+
+/* Подтверждение хода */
+#sc-confirm {
+  display: none;
+  gap: 6px;
+}
+
+.sc-btn-go {
+  background: #5fd968;
+  border-color: #5fd968;
+  color: #0a0d14;
+  font-weight: bold;
+}
+
+/* Призрак корабля на будущей позиции */
+.sc-ghost {
+  position: absolute;
+  pointer-events: none;
+  opacity: 0.5;
+  border: 2px dashed rgba(95,217,104,0.9);
+  border-radius: 3px;
+  background: rgba(95,217,104,0.10);
+}
+
+.sc-ghost img { opacity: 0.75; }
+
+/* Зона хода: множество клеток, куда можно поставить корабль */
 .sc-range {
   position: absolute;
   pointer-events: none;
-  border: 2px dashed rgba(95,217,104,0.5);
-  background: rgba(95,217,104,0.07);
+  border: 2px dashed rgba(95,217,104,0.45);
+  background: rgba(95,217,104,0.06);
   border-radius: 4px;
 }
