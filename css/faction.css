@@ -1,0 +1,274 @@
+/* Окно фракции и панель управления фракции.
+   Держим тот же язык, что и в cargo/shipcargo: тёмная подложка,
+   моноширинный шрифт, рамки #1c2530, акцент #4a90d9. */
+
+/* ---------- Окно фракции ---------- */
+
+#faction-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 2200;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(3,5,9,0.78);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+
+#faction-screen-box {
+  position: relative;
+  width: 100%;
+  max-width: 460px;
+  max-height: 86vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 18px 18px calc(20px + env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, #0d1119 0%, #080b11 100%);
+  border: 1px solid #1c2530;
+  border-bottom: none;
+  border-radius: 14px 14px 0 0;
+  box-shadow: 0 -8px 40px rgba(0,0,0,0.65);
+  animation: faction-rise 0.18s ease-out;
+}
+
+@keyframes faction-rise {
+  from { transform: translateY(14px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+#faction-screen-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 26px;
+  height: 26px;
+  background: none;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  color: #8fa8c4;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+#faction-screen-name {
+  font-family: 'Courier New', monospace;
+  font-size: 15px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: #4a90d9;
+  padding-right: 34px;
+  margin-bottom: 4px;
+}
+
+/* Тонкая линия под названием — граница блока управления, а не украшение */
+#faction-screen-name::after {
+  content: '';
+  display: block;
+  width: 42px;
+  height: 2px;
+  margin-top: 10px;
+  background: #4a90d9;
+  opacity: 0.55;
+}
+
+.faction-section {
+  margin-top: 18px;
+}
+
+.faction-section-title {
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #55606c;
+  margin-bottom: 6px;
+}
+
+.faction-screen-text {
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  color: #cfd8dc;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 8px;
+  padding: 10px 12px;
+  word-break: break-word;
+}
+
+/* Планеты чипами: список через запятую нечитаем уже на десятке систем */
+.faction-planet-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.faction-planet-chip {
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: #cfd8dc;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-left: 2px solid #4a90d9;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.faction-planet-count {
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #55606c;
+  margin-top: 8px;
+}
+
+#faction-control-open-btn {
+  display: block;
+  width: 100%;
+  margin-top: 20px;
+  padding: 12px;
+  background: #4a90d9;
+  border: none;
+  border-radius: 8px;
+  color: #0a0d14;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+#faction-control-open-btn:active {
+  background: #3b7ab8;
+}
+
+/* ---------- Панель управления фракции ---------- */
+
+#faction-control-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 2300;
+  background: #080b11;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+#faction-control-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  background: #0d1119;
+  border-bottom: 1px solid #1c2530;
+}
+
+.faction-control-title {
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #4a90d9;
+}
+
+#faction-control-close {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  background: none;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  color: #8fa8c4;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+#faction-control-list {
+  padding: 14px 14px calc(24px + env(safe-area-inset-bottom));
+}
+
+.faction-control-row {
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.faction-control-planet-name {
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  color: #cfd8dc;
+  margin-bottom: 9px;
+}
+
+.faction-control-select {
+  width: 100%;
+  padding: 11px 34px 11px 12px;
+  background: #0a0d14;
+  border: 1px solid #2a3644;
+  border-radius: 8px;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  /* Своя стрелка: системная в тёмной теме Android почти не видна */
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, #8fa8c4 50%),
+                    linear-gradient(135deg, #8fa8c4 50%, transparent 50%);
+  background-position: calc(100% - 18px) calc(50% + 2px),
+                       calc(100% - 13px) calc(50% + 2px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+.faction-control-select:focus {
+  outline: none;
+  border-color: #4a90d9;
+}
+
+.faction-control-select option {
+  background: #0d1119;
+  color: #cfd8dc;
+}
+
+.faction-control-status {
+  min-height: 14px;
+  margin-top: 7px;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #5fd968;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #faction-screen-box { animation: none; }
+}
+
+/* Эмблема фракции в нижней панели вместо символа-заглушки */
+.faction-emblem-img {
+  width: 22px;
+  height: 22px;
+  display: block;
+  object-fit: contain;
+}
+
+/* Эмблема фракции перед названием планеты в карточке системы */
+#pi-name {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.pi-name-emblem {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}

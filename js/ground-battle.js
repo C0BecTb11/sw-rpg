@@ -866,6 +866,7 @@ function initGroundBattle() {
       centerGridInitially();
       initPanAndZoom();
       initBuildSwitcher();
+      initBuildToggle(false);
       subscribeToGroundChanges();
     });
   });
@@ -1229,5 +1230,22 @@ function handlePlacementTap(cellX, cellY) {
       return;
     }
     loadUnitOrders();
+  });
+}
+
+// Переключатель режима стройки прямо на карте: осмотр и наём войск —
+// в обычном режиме, а слоты и постройка зданий — по этой кнопке.
+function initBuildToggle(isSpace) {
+  if (!isController) return;
+
+  var btn = document.createElement('button');
+  btn.id = 'build-toggle';
+  btn.textContent = buildMode ? 'Выйти из стройки' : 'Строительство';
+  if (buildMode) btn.classList.add('active');
+  document.body.appendChild(btn);
+
+  btn.addEventListener('click', function() {
+    var page = isSpace ? 'space-battle.html' : 'ground-battle.html';
+    window.location.href = page + '?system=' + systemId + (buildMode ? '' : '&mode=build');
   });
 }

@@ -6,6 +6,7 @@
 <title>Космическое пространство — Star Wars: Global Conflict</title>
 <link rel="stylesheet" href="../css/space-battle.css">
 <link rel="stylesheet" href="../css/shared-ui.css">
+<link rel="stylesheet" href="../css/ship-control.css">
 </head>
 <body>
 
@@ -21,13 +22,36 @@
     <div id="station-panel-title">—</div>
     <div id="station-panel-text"></div>
     <button id="station-build-btn" style="display:none;">Построить станцию</button>
+    <button id="station-shipyard-btn" style="display:none;">Верфь</button>
     <button id="station-demolish-btn" style="display:none;">Снести станцию</button>
   </div>
 </div>
+
+<div id="shipyard-panel" style="display:none;">
+  <div id="shipyard-box">
+    <div id="shipyard-header">
+      <span id="shipyard-title">Верфь</span>
+      <button id="shipyard-close">✕</button>
+    </div>
+    <div id="shipyard-list"></div>
+  </div>
+</div>
+
+<div id="ship-info" style="display:none;">
+  <div id="ship-info-box">
+    <button id="ship-info-close">✕</button>
+    <div id="ship-info-name"></div>
+    <div id="ship-info-stats"></div>
+    <div id="ship-info-commander"></div>
+  </div>
+</div>
+
+<div id="ship-queue" style="display:none;"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../js/supabase-client.js"></script>
 <script src="../js/credits-bar.js"></script>
 <script src="../js/space-battle.js"></script>
+<script src="../js/ship-control.js"></script>
 </body>
 </html>

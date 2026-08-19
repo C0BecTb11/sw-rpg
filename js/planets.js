@@ -28,73 +28,122 @@ var activeFlights = [];
 var flightAnimationRunning = false;
 var flightPollTimer = null;
 
+// Все планеты крутит один общий цикл, а не двадцать отдельных: так браузер
+// собирает кадр за один проход. Частота намеренно снижена — вращение медленное,
+// разницы на глаз нет, а нагрузка падает втрое.
+var planetAnimations = [];
+var planetLoopRunning = false;
+var PLANET_FPS = 20;
+var planetsPaused = false;   // на время перетаскивания и зума вращение стоит
+
 function renderRotatingPlanet(canvas, tex, radius, speed) {
-  var ctx = canvas.getContext('2d');
   var size = radius * 2 + 8;
   canvas.width = size;
   canvas.height = size;
 
-  var offsetFrac = Math.random(); // случайный старт, чтобы планеты не крутились синхронно
+  var entry = {
+    canvas: canvas,
+    ctx: canvas.getContext('2d'),
+    tex: tex,
+    radius: radius,
+    speed: speed,
+    size: size,
+    offsetFrac: Math.random(),  // случайный старт, чтобы не крутились синхронно
+    ready: false
+  };
 
-  function draw() {
-    var cx = size / 2;
-    var cy = size / 2;
-    var r = radius;
+  tex.onload = function() { entry.ready = true; };
+  if (tex.complete && tex.naturalWidth > 0) entry.ready = true;
 
-    ctx.clearRect(0, 0, size, size);
+  planetAnimations.push(entry);
+  startPlanetLoop();
+}
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.closePath();
-    ctx.clip();
+function drawPlanet(p) {
+  var ctx = p.ctx;
+  var cx = p.size / 2;
+  var cy = p.size / 2;
+  var r = p.radius;
 
-    var texH = r * 2;
-    var sliceDestW = 1;
+  ctx.clearRect(0, 0, p.size, p.size);
 
-    for (var dx = 0; dx < r * 2; dx += sliceDestW) {
-      var nx = (dx - r) / r;
-      if (nx < -0.999) nx = -0.999;
-      if (nx > 0.999) nx = 0.999;
-      var phi = Math.asin(nx);
-      var uFrac = phi / (2 * Math.PI);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.closePath();
+  ctx.clip();
 
-      var srcUFrac = offsetFrac + 0.5 + uFrac;
-      srcUFrac = srcUFrac - Math.floor(srcUFrac);
+  var texH = r * 2;
+  // Полоска шириной 2 пикселя вместо одного: вдвое меньше вызовов отрисовки
+  // при том же результате — на таком размере разницы не видно.
+  var sliceDestW = 2;
 
-      var srcX = srcUFrac * tex.width;
-      var srcSliceW = 3;
+  for (var dx = 0; dx < r * 2; dx += sliceDestW) {
+    var nx = (dx - r) / r;
+    if (nx < -0.999) nx = -0.999;
+    if (nx > 0.999) nx = 0.999;
+    var phi = Math.asin(nx);
+    var uFrac = phi / (2 * Math.PI);
 
-      ctx.drawImage(
-        tex,
-        srcX, 0, srcSliceW, tex.height,
-        cx - r + dx, cy - r, sliceDestW, texH
-      );
-    }
+    var srcUFrac = p.offsetFrac + 0.5 + uFrac;
+    srcUFrac = srcUFrac - Math.floor(srcUFrac);
 
-    var shadeGrad = ctx.createLinearGradient(cx - r, 0, cx + r, 0);
-    shadeGrad.addColorStop(0, 'rgba(0,0,0,0.6)');
-    shadeGrad.addColorStop(0.45, 'rgba(0,0,0,0)');
-    shadeGrad.addColorStop(1, 'rgba(0,0,0,0.08)');
-    ctx.fillStyle = shadeGrad;
-    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
-
-    var edgeGrad = ctx.createRadialGradient(cx, cy, r * 0.7, cx, cy, r);
-    edgeGrad.addColorStop(0, 'rgba(0,0,0,0)');
-    edgeGrad.addColorStop(1, 'rgba(0,0,0,0.5)');
-    ctx.fillStyle = edgeGrad;
-    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
-
-    ctx.restore();
-
-    offsetFrac += speed;
-    if (offsetFrac > 1) offsetFrac -= 1;
-
-    requestAnimationFrame(draw);
+    ctx.drawImage(
+      p.tex,
+      srcUFrac * p.tex.width, 0, 3, p.tex.height,
+      cx - r + dx, cy - r, sliceDestW, texH
+    );
   }
 
-  tex.onload = function() { draw(); };
-  if (tex.complete && tex.naturalWidth > 0) { draw(); }
+  var shadeGrad = ctx.createLinearGradient(cx - r, 0, cx + r, 0);
+  shadeGrad.addColorStop(0, 'rgba(0,0,0,0.6)');
+  shadeGrad.addColorStop(0.45, 'rgba(0,0,0,0)');
+  shadeGrad.addColorStop(1, 'rgba(0,0,0,0.08)');
+  ctx.fillStyle = shadeGrad;
+  ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+
+  var edgeGrad = ctx.createRadialGradient(cx, cy, r * 0.7, cx, cy, r);
+  edgeGrad.addColorStop(0, 'rgba(0,0,0,0)');
+  edgeGrad.addColorStop(1, 'rgba(0,0,0,0.5)');
+  ctx.fillStyle = edgeGrad;
+  ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+
+  ctx.restore();
+}
+
+function startPlanetLoop() {
+  if (planetLoopRunning) return;
+  planetLoopRunning = true;
+
+  var last = 0;
+  var interval = 1000 / PLANET_FPS;
+
+  function tick(now) {
+    requestAnimationFrame(tick);
+    if (planetsPaused) return;
+    if (now - last < interval) return;
+    last = now;
+
+    // Планеты за пределами экрана не перерисовываем: при зуме это снимает
+    // почти всю нагрузку, ведь видно от силы несколько систем.
+    var vw = window.innerWidth;
+    var vh = window.innerHeight;
+
+    for (var i = 0; i < planetAnimations.length; i++) {
+      var p = planetAnimations[i];
+      if (!p.ready) continue;
+
+      p.offsetFrac += p.speed * (60 / PLANET_FPS);
+      if (p.offsetFrac > 1) p.offsetFrac -= 1;
+
+      var box = p.canvas.getBoundingClientRect();
+      if (box.right < -40 || box.left > vw + 40 || box.bottom < -40 || box.top > vh + 40) continue;
+
+      drawPlanet(p);
+    }
+  }
+
+  requestAnimationFrame(tick);
 }
 
 // Ссылки на DOM-элементы уже отрисованных планет (id -> {labelEl, wrapperEl, markerBoxEl}),
@@ -136,9 +185,15 @@ function initPlanets() {
       var commanders = commandersRes.error ? [] : commandersRes.data;
 
       // словарь id -> позиция, чтобы рисовать линии между планетами
+      // Координаты берём в пикселях мира: тогда расширение карты не двигает
+      // существующие планеты. Проценты оставлены как запасной вариант для
+      // систем, которые ещё не пересчитаны.
       var positions = {};
       systems.forEach(function(s) {
-        positions[s.id] = { left: s.left_pct, top: s.top_pct };
+        positions[s.id] = {
+          x: (s.world_x !== null && typeof s.world_x !== 'undefined') ? s.world_x : s.left_pct * 26,
+          y: (s.world_y !== null && typeof s.world_y !== 'undefined') ? s.world_y : s.top_pct * 15
+        };
       });
 
       systemPositions = positions;
@@ -155,8 +210,9 @@ function initPlanets() {
         var wrapper = document.createElement('div');
         wrapper.className = 'planet-wrapper';
         wrapper.style.position = 'absolute';
-        wrapper.style.left = planet.left_pct + '%';
-        wrapper.style.top = planet.top_pct + '%';
+        var pos = positions[planet.id];
+        wrapper.style.left = pos.x + 'px';
+        wrapper.style.top = pos.y + 'px';
         wrapper.style.transform = 'translate(-50%, -50%)';
         wrapper.style.display = 'flex';
         wrapper.style.flexDirection = 'column';
@@ -239,10 +295,10 @@ function drawHyperlanes(layer, lanes, positions) {
     if (!a || !b) return;
 
     var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    line.setAttribute('x1', a.left + '%');
-    line.setAttribute('y1', a.top + '%');
-    line.setAttribute('x2', b.left + '%');
-    line.setAttribute('y2', b.top + '%');
+    line.setAttribute('x1', a.x);
+    line.setAttribute('y1', a.y);
+    line.setAttribute('x2', b.x);
+    line.setAttribute('y2', b.y);
     line.setAttribute('stroke', 'rgba(120,170,200,0.35)');
     line.setAttribute('stroke-width', '1');
     line.setAttribute('stroke-dasharray', '3,3');
@@ -464,16 +520,14 @@ function animateFlights() {
     if (progress < 0) progress = 0;
     if (progress > 1) progress = 1;
 
-    var leftPct = f.from.left + (f.to.left - f.from.left) * progress;
-    var topPct = f.from.top + (f.to.top - f.from.top) * progress;
+    var px = f.from.x + (f.to.x - f.from.x) * progress;
+    var py = f.from.y + (f.to.y - f.from.y) * progress;
 
-    f.el.style.left = leftPct + '%';
-    f.el.style.top = topPct + '%';
+    f.el.style.left = px + 'px';
+    f.el.style.top = py + 'px';
 
-    // Угол считаем в пикселях, а не в процентах: карта шире, чем выше,
-    // поэтому в процентах направление получилось бы искажённым.
-    var dxPx = (f.to.left - f.from.left) / 100 * w;
-    var dyPx = (f.to.top - f.from.top) / 100 * h;
+    var dxPx = f.to.x - f.from.x;
+    var dyPx = f.to.y - f.from.y;
     // Ракета на картинке смотрит вверх, поэтому +90°, чтобы нос шёл по курсу.
     var angleDeg = Math.atan2(dyPx, dxPx) * 180 / Math.PI + 90;
 
@@ -496,3 +550,157 @@ function animateFlights() {
 
   requestAnimationFrame(animateFlights);
 }
+
+// ===== Панорамирование и зум галактической карты =====
+// Карта — мир фиксированного размера, экран лишь окно в него. За счёт этого
+// добавление новых планет не растягивает картинку: меняются только координаты
+// внутри мира, а фон бесшовно повторяется на любом масштабе.
+
+var galaxyScale = 1;
+var galaxyPanX = 0;
+var galaxyPanY = 0;
+var galaxyViewport = null;
+var galaxyWorld = null;
+
+function applyGalaxyTransform() {
+  galaxyWorld.style.transform =
+    'translate(' + galaxyPanX + 'px, ' + galaxyPanY + 'px) scale(' + galaxyScale + ')';
+}
+
+function clampGalaxyPan() {
+  var vw = galaxyViewport.clientWidth;
+  var vh = galaxyViewport.clientHeight;
+  var w = galaxyWorld.offsetWidth * galaxyScale;
+  var h = galaxyWorld.offsetHeight * galaxyScale;
+
+  if (w <= vw) galaxyPanX = (vw - w) / 2;
+  else galaxyPanX = Math.min(0, Math.max(vw - w, galaxyPanX));
+
+  if (h <= vh) galaxyPanY = (vh - h) / 2;
+  else galaxyPanY = Math.min(0, Math.max(vh - h, galaxyPanY));
+}
+
+function initGalaxyPanZoom() {
+  galaxyViewport = document.getElementById('map-scroll');
+  galaxyWorld = document.getElementById('map-area');
+  if (!galaxyViewport || !galaxyWorld) return;
+
+  // Размер мира задаётся в настройках: расширить карту можно одной строкой
+  // в БД, не трогая ни код, ни координаты планет.
+  supabase.from('game_settings').select('key, value')
+    .in('key', ['world_width', 'world_height']).then(function(res) {
+      if (res.error || !res.data) return;
+      res.data.forEach(function(row) {
+        if (row.key === 'world_width') galaxyWorld.style.width = row.value + 'px';
+        if (row.key === 'world_height') galaxyWorld.style.height = row.value + 'px';
+      });
+      clampGalaxyPan();
+      applyGalaxyTransform();
+    });
+
+  // Стартуем так, чтобы мир вписался по высоте экрана
+  var vh = galaxyViewport.clientHeight;
+  galaxyScale = Math.max(0.35, Math.min(1, vh / galaxyWorld.offsetHeight));
+  galaxyPanX = 0;
+  galaxyPanY = 0;
+  clampGalaxyPan();
+  applyGalaxyTransform();
+
+  var dragging = false, moved = false;
+  var startX = 0, startY = 0, baseX = 0, baseY = 0;
+  var pinchDist = 0, pinchScale = 1, anchorX = 0, anchorY = 0;
+
+  function dist(a, b) {
+    var dx = a.clientX - b.clientX, dy = a.clientY - b.clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  galaxyViewport.addEventListener('touchstart', function(e) {
+    planetsPaused = true;   // во время жеста браузеру хватает и одной карты
+    if (e.touches.length === 1) {
+      dragging = true; moved = false;
+      startX = e.touches[0].clientX; startY = e.touches[0].clientY;
+      baseX = galaxyPanX; baseY = galaxyPanY;
+    } else if (e.touches.length === 2) {
+      dragging = false;
+      pinchDist = dist(e.touches[0], e.touches[1]);
+      pinchScale = galaxyScale;
+      var r = galaxyViewport.getBoundingClientRect();
+      var mx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - r.left;
+      var my = (e.touches[0].clientY + e.touches[1].clientY) / 2 - r.top;
+      anchorX = (mx - galaxyPanX) / galaxyScale;
+      anchorY = (my - galaxyPanY) / galaxyScale;
+    }
+  }, { passive: true });
+
+  galaxyViewport.addEventListener('touchmove', function(e) {
+    if (e.touches.length === 1 && dragging) {
+      var dx = e.touches[0].clientX - startX;
+      var dy = e.touches[0].clientY - startY;
+      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) moved = true;
+      galaxyPanX = baseX + dx;
+      galaxyPanY = baseY + dy;
+      clampGalaxyPan();
+      applyGalaxyTransform();
+    } else if (e.touches.length === 2) {
+      var nd = dist(e.touches[0], e.touches[1]);
+      galaxyScale = Math.min(2.5, Math.max(0.3, pinchScale * (nd / pinchDist)));
+      var r = galaxyViewport.getBoundingClientRect();
+      var mx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - r.left;
+      var my = (e.touches[0].clientY + e.touches[1].clientY) / 2 - r.top;
+      galaxyPanX = mx - anchorX * galaxyScale;
+      galaxyPanY = my - anchorY * galaxyScale;
+      clampGalaxyPan();
+      applyGalaxyTransform();
+    }
+  }, { passive: true });
+
+  // Тап по планете не должен срабатывать после перетаскивания карты
+  galaxyViewport.addEventListener('touchend', function(e) {
+    if (e.touches.length === 0) {
+      dragging = false;
+      // Возобновляем не сразу: палец часто отрывается на долю секунды
+      // между движениями, и мигание вращения было бы заметно.
+      setTimeout(function() { planetsPaused = false; }, 180);
+    }
+  });
+
+  galaxyWorld.addEventListener('click', function(e) {
+    if (moved) { e.stopPropagation(); moved = false; }
+  }, true);
+
+  var mouseDown = false;
+  galaxyViewport.addEventListener('mousedown', function(e) {
+    planetsPaused = true;
+    mouseDown = true; moved = false;
+    startX = e.clientX; startY = e.clientY;
+    baseX = galaxyPanX; baseY = galaxyPanY;
+  });
+  window.addEventListener('mousemove', function(e) {
+    if (!mouseDown) return;
+    var dx = e.clientX - startX, dy = e.clientY - startY;
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) moved = true;
+    galaxyPanX = baseX + dx; galaxyPanY = baseY + dy;
+    clampGalaxyPan(); applyGalaxyTransform();
+  });
+  window.addEventListener('mouseup', function() {
+    mouseDown = false;
+    setTimeout(function() { planetsPaused = false; }, 180);
+  });
+
+  galaxyViewport.addEventListener('wheel', function(e) {
+    e.preventDefault();
+    var r = galaxyViewport.getBoundingClientRect();
+    var mx = e.clientX - r.left, my = e.clientY - r.top;
+    var wx = (mx - galaxyPanX) / galaxyScale;
+    var wy = (my - galaxyPanY) / galaxyScale;
+    galaxyScale = Math.min(2.5, Math.max(0.3, galaxyScale * (e.deltaY < 0 ? 1.12 : 0.89)));
+    galaxyPanX = mx - wx * galaxyScale;
+    galaxyPanY = my - wy * galaxyScale;
+    clampGalaxyPan(); applyGalaxyTransform();
+  }, { passive: false });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  setTimeout(initGalaxyPanZoom, 60);
+});

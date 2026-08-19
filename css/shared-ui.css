@@ -66,3 +66,26 @@ html {
   color: #0a0d14;
   font-weight: bold;
 }
+
+/* Кнопка входа в режим стройки — на самих картах, а не в карточке планеты */
+#build-toggle {
+  position: fixed;
+  right: 12px;
+  bottom: 14px;
+  z-index: 1000;
+  background: rgba(5,6,10,0.9);
+  border: 1px solid #d9a940;
+  color: #d9a940;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  padding: 10px 16px;
+  border-radius: 20px;
+  cursor: pointer;
+}
+
+#build-toggle.active {
+  background: #d9a940;
+  color: #0a0d14;
+  font-weight: bold;
+}

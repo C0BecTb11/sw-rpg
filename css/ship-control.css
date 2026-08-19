@@ -1,0 +1,221 @@
+/* HUD корабля: шторка снизу, как остальные панели в игре */
+
+#ship-hud {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2050;
+  max-width: 460px;
+  margin: 0 auto;
+  padding: 14px 16px calc(16px + env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, #0d1119 0%, #080b11 100%);
+  border: 1px solid #1c2530;
+  border-bottom: none;
+  border-radius: 14px 14px 0 0;
+  box-shadow: 0 -8px 40px rgba(0,0,0,0.65);
+  font-family: 'Courier New', monospace;
+}
+
+#sc-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+#sc-name {
+  font-size: 13px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #4a90d9;
+}
+
+#sc-sub {
+  font-size: 10px;
+  color: #55606c;
+  margin-top: 3px;
+}
+
+#sc-close {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  background: none;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  color: #8fa8c4;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* ---------- полосы корпуса и щитов ---------- */
+
+#sc-bars { margin-top: 12px; }
+
+.sc-bar, .sc-arc {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: #8fa8c4;
+  margin-bottom: 6px;
+}
+
+.sc-bar span, .sc-arc span {
+  flex: none;
+  width: 52px;
+  letter-spacing: 1px;
+}
+
+.sc-bar b, .sc-arc b {
+  flex: none;
+  width: 38px;
+  text-align: right;
+  color: #cfd8dc;
+  font-size: 10px;
+}
+
+.sc-track {
+  flex: 1;
+  height: 6px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.sc-track i {
+  display: block;
+  height: 100%;
+  background: #5fd968;
+}
+
+.sc-track-shield i { background: #4a90d9; }
+
+.sc-arcs {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #1c2530;
+}
+
+/* Сбитый сектор — самое важное, что должен заметить игрок */
+.sc-arc.down span,
+.sc-arc.down b { color: #d94a4a; }
+
+/* ---------- очки действий ---------- */
+
+#sc-ap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 10px;
+  padding-top: 10px;
+  border-top: 1px solid #1c2530;
+}
+
+#sc-ap-dots { display: flex; gap: 5px; }
+
+.sc-dot {
+  width: 11px;
+  height: 11px;
+  border: 1px solid #2a3644;
+  border-radius: 50%;
+  background: #10151e;
+}
+
+.sc-dot.on {
+  background: #d9a940;
+  border-color: #d9a940;
+}
+
+#sc-ap-text {
+  font-size: 10px;
+  color: #55606c;
+  letter-spacing: 1px;
+}
+
+/* ---------- кнопки ---------- */
+
+#sc-actions { display: flex; gap: 6px; }
+
+.sc-btn {
+  flex: 1;
+  padding: 10px 6px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 8px;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+
+.sc-btn.active {
+  background: #4a90d9;
+  border-color: #4a90d9;
+  color: #0a0d14;
+  font-weight: bold;
+}
+
+.sc-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.sc-btn-ghost {
+  color: #55606c;
+  border-style: dashed;
+}
+
+/* ---------- роза направлений ---------- */
+
+#sc-dial {
+  display: none;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.sc-dir {
+  padding: 10px 0;
+  background: #10151e;
+  border: 1px solid #2a3644;
+  border-radius: 8px;
+  color: #8fa8c4;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sc-dir:active {
+  background: #4a90d9;
+  color: #0a0d14;
+}
+
+/* Направление, в котором корабль стоит сейчас */
+.sc-dir.current {
+  border-color: #4a90d9;
+  color: #4a90d9;
+}
+
+#sc-hint {
+  min-height: 13px;
+  margin-top: 8px;
+  font-size: 10px;
+  color: #55606c;
+  letter-spacing: 1px;
+}
+
+#sc-hint.error { color: #d94a4a; }
+
+/* Зона досягаемости хода на карте */
+.sc-range {
+  position: absolute;
+  pointer-events: none;
+  border: 2px dashed rgba(95,217,104,0.5);
+  background: rgba(95,217,104,0.07);
+  border-radius: 4px;
+}

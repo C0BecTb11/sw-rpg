@@ -25,22 +25,32 @@ function loadCommanders(userId) {
   Promise.all([
     supabase.from('commanders').select('*').eq('user_id', userId).order('slot_index'),
     supabase.from('systems').select('id, name'),
-    supabase.from('commander_inventory').select('*, unit_types(name, image)')
+    supabase.from('ships').select('*, ship_types(name, image, capacity)').eq('owner_user_id', userId),
+    supabase.from('ship_cargo').select('*, unit_types(name, image)')
   ]).then(function(results) {
     var commandersRes = results[0];
     var systemsRes = results[1];
-    var invRes = results[2];
+    var shipsRes = results[2];
+    var cargoRes = results[3];
     if (commandersRes.error || !commandersRes.data) return;
+
+    var ships = shipsRes.error ? [] : (shipsRes.data || []);
+    var cargoByShip = {};
+    (cargoRes.data || []).forEach(function(c) {
+      if (c.quantity <= 0) return;
+      if (!cargoByShip[c.ship_id]) cargoByShip[c.ship_id] = [];
+      cargoByShip[c.ship_id].push(c);
+    });
+
+    var shipsByCommander = {};
+    ships.forEach(function(sh) {
+      var key = sh.commander_id || 'free';
+      if (!shipsByCommander[key]) shipsByCommander[key] = [];
+      shipsByCommander[key].push(sh);
+    });
 
     var systemNames = {};
     (systemsRes.data || []).forEach(function(s) { systemNames[s.id] = s.name; });
-
-    var invByCommander = {};
-    (invRes.data || []).forEach(function(row) {
-      if (row.quantity <= 0) return;
-      if (!invByCommander[row.commander_id]) invByCommander[row.commander_id] = [];
-      invByCommander[row.commander_id].push(row);
-    });
 
     listEl.innerHTML = '';
     commandersRes.data.forEach(function(c) {
@@ -79,34 +89,111 @@ function loadCommanders(userId) {
       row.appendChild(head);
 
       if (c.unlocked) {
-        var inv = document.createElement('div');
-        inv.className = 'commander-inventory';
+        // Флот командира: список кораблей, каждый раскрывается и показывает,
+        // кто внутри. Так вся цепочка «командир → корабль → войска» видна
+        // в одном месте, без отдельных разделов.
+        row.appendChild(makeFleetSection(shipsByCommander[c.id] || [], cargoByShip, systemNames));
 
-        var invTitle = document.createElement('div');
-        invTitle.className = 'inventory-title';
-        invTitle.textContent = 'Отряд';
-        inv.appendChild(invTitle);
-
-        var items = invByCommander[c.id] || [];
-        if (items.length === 0) {
-          var empty = document.createElement('div');
-          empty.className = 'inventory-empty';
-          empty.textContent = 'пусто';
-          inv.appendChild(empty);
-        } else {
-          var grid = document.createElement('div');
-          grid.className = 'inventory-grid';
-          items.forEach(function(it) {
-            grid.appendChild(makeUnitChip(it.unit_types, it.quantity));
-          });
-          inv.appendChild(grid);
-        }
-        row.appendChild(inv);
       }
 
       listEl.appendChild(row);
     });
+
+    // Корабли, ещё не переданные никакому командиру, показываем отдельно —
+    // иначе построенный Венатор просто пропал бы из виду.
+    var free = shipsByCommander['free'] || [];
+    if (free.length > 0) {
+      var freeBlock = document.createElement('div');
+      freeBlock.className = 'commander-row';
+
+      var freeHead = document.createElement('div');
+      freeHead.className = 'commander-head';
+      freeHead.innerHTML = '<div class="commander-icon" style="color:#4a90d9;border-color:#4a90d9">⬢</div>' +
+        '<div class="commander-info"><div class="commander-name">Корабли без командира</div>' +
+        '<div class="commander-status">Стоят в системах, ждут назначения</div></div>';
+      freeBlock.appendChild(freeHead);
+      freeBlock.appendChild(makeFleetSection(free, cargoByShip, systemNames));
+
+      listEl.appendChild(freeBlock);
+    }
   });
+}
+
+// Раскрывающийся список кораблей: внутри каждого — его трюм.
+function makeFleetSection(ships, cargoByShip, systemNames) {
+  var wrap = document.createElement('div');
+  wrap.className = 'fleet-section';
+
+  var title = document.createElement('div');
+  title.className = 'inventory-title';
+  title.textContent = 'Флот';
+  wrap.appendChild(title);
+
+  if (ships.length === 0) {
+    var empty = document.createElement('div');
+    empty.className = 'inventory-empty';
+    empty.textContent = 'кораблей нет';
+    wrap.appendChild(empty);
+    return wrap;
+  }
+
+  ships.forEach(function(ship) {
+    var type = ship.ship_types || {};
+    var cargo = cargoByShip[ship.id] || [];
+    var used = cargo.reduce(function(a, c) { return a + c.quantity; }, 0);
+
+    var block = document.createElement('div');
+    block.className = 'ship-block';
+
+    var header = document.createElement('button');
+    header.className = 'ship-header';
+    header.innerHTML =
+      '<span class="garrison-arrow">▸</span>' +
+      '<span class="ship-thumb"><img src="../' + (type.image || '') + '" alt=""></span>' +
+      '<span class="ship-title">' + (type.name || ship.ship_type) +
+        '<em>' + (systemNames[ship.system_id] || ship.system_id) + '</em></span>' +
+      '<span class="ship-capacity">' + used + '/' + (type.capacity || 0) + '</span>';
+    block.appendChild(header);
+
+    var body = document.createElement('div');
+    body.className = 'garrison-body';
+    body.style.display = 'none';
+
+    // Управление трюмом прямо из списка флота: видно, что внутри,
+    // и сразу можно догрузить или высадить.
+    var manage = document.createElement('button');
+    manage.className = 'ship-manage-btn';
+    manage.textContent = 'Заполнить трюм';
+    manage.addEventListener('click', function() {
+      if (typeof openShipCargo === 'function') openShipCargo(ship, type);
+    });
+    body.appendChild(manage);
+
+    if (cargo.length === 0) {
+      var e = document.createElement('div');
+      e.className = 'inventory-empty';
+      e.textContent = 'трюм пуст';
+      body.appendChild(e);
+    } else {
+      var grid = document.createElement('div');
+      grid.className = 'inventory-grid';
+      cargo.forEach(function(c) {
+        grid.appendChild(makeUnitChip(c.unit_types, c.quantity));
+      });
+      body.appendChild(grid);
+    }
+    block.appendChild(body);
+
+    header.addEventListener('click', function() {
+      var open = body.style.display !== 'none';
+      body.style.display = open ? 'none' : 'block';
+      header.querySelector('.garrison-arrow').textContent = open ? '▸' : '▾';
+    });
+
+    wrap.appendChild(block);
+  });
+
+  return wrap;
 }
 
 // Войска по планетам. Читаем реальные позиции юнитов на картах и группируем

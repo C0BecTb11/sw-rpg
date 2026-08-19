@@ -6,6 +6,7 @@
 <title>Галактика — Star Wars: Global Conflict</title>
 <link rel="stylesheet" href="../css/galaxy.css">
 <link rel="stylesheet" href="../css/shared-ui.css">
+<link rel="stylesheet" href="../css/faction.css">
 </head>
 <body>
 
@@ -71,16 +72,36 @@
 </div>
 
 <div id="planet-info-overlay" style="display:none;">
-  <div id="planet-info-box">
-    <button id="planet-info-close">✕</button>
-    <div id="planet-info-name">—</div>
-    <div id="planet-info-faction">—</div>
-    <div id="planet-info-controller">—</div>
-    <button id="planet-info-space-btn">Космическое пространство</button>
-    <button id="planet-info-ground-btn">Земное пространство</button>
-    <button id="planet-info-build-btn" style="display:none;">Строительство</button>
-    <button id="planet-info-move-btn" style="display:none;">Отправить командира</button>
+  <div id="pi-card">
+    <div id="pi-planet-strip"></div>
+    <button id="pi-close">✕</button>
+
+    <div id="pi-head">
+      <div id="pi-name">—</div>
+      <div id="pi-faction"></div>
+    </div>
+
+    <div id="pi-controller-row">
+      <span>Управляет</span>
+      <b id="pi-controller">—</b>
+    </div>
+
+    <div id="pi-stats"></div>
+
+    <div id="pi-actions">
+      <button id="pi-ground-btn" class="pi-action">
+        <span class="pi-action-icon">⛰</span>
+        <span class="pi-action-text">Земное<br>пространство</span>
+      </button>
+      <button id="pi-space-btn" class="pi-action">
+        <span class="pi-action-icon">✦</span>
+        <span class="pi-action-text">Космическое<br>пространство</span>
+      </button>
+    </div>
+
+    <button id="pi-move-btn" style="display:none;">Отправить командира</button>
   </div>
+</div>
 </div>
 
 <div id="faction-screen" style="display:none;">
@@ -110,6 +131,38 @@
   <div id="faction-control-list"></div>
 </div>
 
+<div id="cargo-panel" style="display:none;">
+  <div id="cargo-box">
+    <div id="cargo-header">
+      <div>
+        <div id="cargo-title">Погрузка</div>
+        <div id="cargo-subtitle"></div>
+      </div>
+      <button id="cargo-close">✕</button>
+    </div>
+    <div id="cargo-capacity" class="cargo-capacity"></div>
+    <div id="cargo-list"></div>
+  </div>
+</div>
+
+<div id="shipcargo-panel" style="display:none;">
+  <div id="shipcargo-box">
+    <div id="shipcargo-header">
+      <div>
+        <div id="shipcargo-title">Трюм</div>
+        <div id="shipcargo-name"></div>
+      </div>
+      <button id="shipcargo-close">✕</button>
+    </div>
+    <div id="shipcargo-tabs">
+      <button id="shipcargo-tab-load" class="shipcargo-tab active">Погрузка</button>
+      <button id="shipcargo-tab-unload" class="shipcargo-tab">Высадка</button>
+    </div>
+    <div id="shipcargo-capacity" class="cargo-capacity"></div>
+    <div id="shipcargo-list"></div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../js/supabase-client.js"></script>
 <script src="../js/credits-bar.js"></script>
@@ -117,6 +170,7 @@
 <script src="../js/profile.js"></script>
 <script src="../js/bottom-panel.js"></script>
 <script src="../js/army.js"></script>
+<script src="../js/ship-cargo.js"></script>
 <script src="../js/planet-info.js"></script>
 <script src="../js/faction-panel.js"></script>
 <script src="../js/faction-control.js"></script>

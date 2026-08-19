@@ -12,6 +12,34 @@ var FACTION_NAMES_PANEL = {
 var currentPlayerFaction = null;
 var currentPlayerIsLeader = false;
 
+// Планеты выводим чипами, а не строкой через запятую: на телефоне длинный
+// перечень через ", " сливается в нечитаемую полосу текста.
+function renderPlanetChips(container, names) {
+  container.innerHTML = '';
+
+  if (!names || names.length === 0) {
+    container.textContent = 'пока нет планет';
+    return;
+  }
+
+  var chips = document.createElement('div');
+  chips.className = 'faction-planet-chips';
+
+  names.forEach(function(name) {
+    var chip = document.createElement('span');
+    chip.className = 'faction-planet-chip';
+    chip.textContent = name;
+    chips.appendChild(chip);
+  });
+
+  container.appendChild(chips);
+
+  var count = document.createElement('div');
+  count.className = 'faction-planet-count';
+  count.textContent = 'всего: ' + names.length;
+  container.appendChild(count);
+}
+
 function openFactionScreen() {
   var screen = document.getElementById('faction-screen');
   var nameEl = document.getElementById('faction-screen-name');
@@ -49,7 +77,9 @@ function openFactionScreen() {
         var leadershipRes = results[1];
 
         if (!systemsRes.error && systemsRes.data) {
-          planetsEl.textContent = systemsRes.data.map(function(s) { return s.name; }).join(', ') || 'пока нет планет';
+          renderPlanetChips(planetsEl, systemsRes.data.map(function(s) { return s.name; }));
+        } else {
+          planetsEl.textContent = 'не удалось загрузить планеты';
         }
 
         var leaderId = (!leadershipRes.error && leadershipRes.data) ? leadershipRes.data.leader_user_id : null;
@@ -81,9 +111,18 @@ document.addEventListener('DOMContentLoaded', function() {
   var factionButton = document.getElementById('panel-item-faction');
   var closeBtn = document.getElementById('faction-screen-close');
   var controlBtn = document.getElementById('faction-control-open-btn');
+  var screen = document.getElementById('faction-screen');
 
   if (factionButton) factionButton.addEventListener('click', openFactionScreen);
   if (closeBtn) closeBtn.addEventListener('click', closeFactionScreen);
+
+  // Тап по затемнению закрывает окно — привычное поведение шторки на телефоне
+  if (screen) {
+    screen.addEventListener('click', function(e) {
+      if (e.target === screen) closeFactionScreen();
+    });
+  }
+
   if (controlBtn) {
     controlBtn.addEventListener('click', function() {
       if (typeof openFactionControlScreen === 'function') {

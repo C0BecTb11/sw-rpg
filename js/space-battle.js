@@ -14,7 +14,15 @@ var viewport, grid;
 
 var CELL_PX = 40;
 var GRID_CELLS = 130;      // размер космической карты в клетках (было 100)
-var STATION_SIZE = 8;      // слот станции 8x8 клеток
+var STATION_SIZE = 8;      // слот станции, размер приходит из БД
+
+// Арт станции по фракции. Своей таблицы типов у станций нет — вариант
+// ровно один на фракцию, поэтому держим соответствие здесь, как сделано
+// с цветами фракций в planets.js и bottom-panel.js.
+var STATION_IMAGES = {
+  republic: 'assets/stations/station-republic.png',
+  cis: 'assets/stations/station-cis.png'
+};
 var stationSlot = null;    // {x, y} — позиция слота в клетках
 var stationRecord = null;  // запись из space_stations, если станция построена
 var currentUserId = null;
@@ -40,18 +48,19 @@ function mulberry32(seed) {
   };
 }
 
-function generateStationSlot(seed) {
-  var rand = mulberry32(seed ^ 0x85EBCA6B);
-  var marginX = 14;
-
-  // Станция стоит в верхней части карты, но не вплотную к краю:
-  // полоса от 10 до 28 клеток сверху — есть место и над станцией, и под ней.
-  var bandTop = 10;
-  var bandBottom = 28;
-
-  var x = marginX + Math.floor(rand() * (GRID_CELLS - STATION_SIZE - marginX * 2));
-  var y = bandTop + Math.floor(rand() * (bandBottom - bandTop));
-  return { x: x, y: y };
+// Позиция слота станции приходит из БД: там же её проверяет сервер,
+// когда расставляет построенные корабли вокруг станции.
+function loadStationSlot() {
+  return supabase.from('station_slots').select('*').eq('system_id', systemId).maybeSingle()
+    .then(function(res) {
+      if (res.error) {
+        console.error('Не удалось загрузить слот станции:', res.error);
+      } else if (!res.data) {
+        console.error('Для этой системы нет записи в station_slots — выполни sql/ships.sql');
+      }
+      stationSlot = (res.error || !res.data) ? null : res.data;
+      if (stationSlot && stationSlot.size) STATION_SIZE = stationSlot.size;
+    });
 }
 
 // Слот станции рисуется отдельным элементом поверх сетки —
@@ -78,11 +87,34 @@ function renderStationSlot() {
   el.style.boxSizing = 'border-box';
 
   if (stationRecord) {
-    el.style.background = 'rgba(217,169,64,0.25)';
-    el.style.border = '2px solid #d9a940';
-    el.style.color = '#d9a940';
-    el.style.fontSize = (STATION_SIZE * CELL_PX * 0.35) + 'px';
-    el.textContent = '⬢';
+    var art = STATION_IMAGES[stationRecord.faction];
+    if (art) {
+      // Станция — постройка, а не корабль: разворачивать её не нужно,
+      // рендер уже сверху. Вписываем в квадрат слота по ширине.
+      var im = document.createElement('img');
+      im.src = '../' + art;
+      im.alt = '';
+      im.style.width = '100%';
+      im.style.height = '100%';
+      im.style.objectFit = 'contain';
+      im.style.pointerEvents = 'none';
+      im.style.filter = 'drop-shadow(0 0 ' + (CELL_PX * 0.4) + 'px rgba(0,0,0,0.8))';
+      // Если файл не подхватился, откатываемся на прежний значок
+      im.addEventListener('error', function() {
+        if (im.parentNode) im.parentNode.removeChild(im);
+        el.style.border = '2px solid #d9a940';
+        el.style.color = '#d9a940';
+        el.style.fontSize = (STATION_SIZE * CELL_PX * 0.35) + 'px';
+        el.textContent = '⬢';
+      });
+      el.appendChild(im);
+    } else {
+      el.style.background = 'rgba(217,169,64,0.25)';
+      el.style.border = '2px solid #d9a940';
+      el.style.color = '#d9a940';
+      el.style.fontSize = (STATION_SIZE * CELL_PX * 0.35) + 'px';
+      el.textContent = '⬢';
+    }
   } else {
     el.style.background = 'rgba(120,170,220,0.12)';
     el.style.border = '2px dashed rgba(120,170,220,0.6)';
@@ -106,16 +138,22 @@ function onStationSlotTapped() {
   var buildBtn = document.getElementById('station-build-btn');
   var demolishBtn = document.getElementById('station-demolish-btn');
 
+  var shipyardBtn = document.getElementById('station-shipyard-btn');
+
   if (stationRecord) {
     titleEl.textContent = stationRecord.name || 'Космическая станция';
-    textEl.textContent = 'При сносе вернётся: 150';
+    textEl.textContent = 'Верфь готова к постройке кораблей';
     buildBtn.style.display = 'none';
     demolishBtn.style.display = isController ? 'block' : 'none';
+    // Верфь доступна владельцу станции: заказы проверяет сервер
+    if (shipyardBtn) shipyardBtn.style.display =
+      (stationRecord.owner_user_id === currentUserId) ? 'block' : 'none';
   } else {
     titleEl.textContent = 'Слот космической станции';
-    textEl.textContent = isController ? 'Стоимость: 300' : 'У тебя нет прав на строительство здесь';
+    textEl.textContent = isController ? 'Здесь можно построить станцию' : 'У тебя нет прав на строительство здесь';
     buildBtn.style.display = isController ? 'block' : 'none';
     demolishBtn.style.display = 'none';
+    if (shipyardBtn) shipyardBtn.style.display = 'none';
   }
 
   panel.style.display = 'flex';
@@ -375,6 +413,9 @@ function subscribeToSpaceChanges() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'space_stations', filter: 'system_id=eq.' + systemId }, function() {
       loadStation();
     })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'ships', filter: 'system_id=eq.' + systemId }, function() {
+      loadShips();
+    })
     .subscribe();
 }
 
@@ -399,6 +440,20 @@ function initSpaceBattle() {
   var stationDemolishBtn = document.getElementById('station-demolish-btn');
   if (stationDemolishBtn) stationDemolishBtn.addEventListener('click', demolishStation);
 
+  var shipyardOpen = document.getElementById('station-shipyard-btn');
+  if (shipyardOpen) shipyardOpen.addEventListener('click', function() {
+    closeStationPanel();
+    openShipyard();
+  });
+
+  var shipyardClose = document.getElementById('shipyard-close');
+  if (shipyardClose) shipyardClose.addEventListener('click', closeShipyard);
+
+  var shipInfoClose = document.getElementById('ship-info-close');
+  if (shipInfoClose) shipInfoClose.addEventListener('click', closeShipInfo);
+
+  setInterval(loadShipOrders, 5000);
+
   supabase.auth.getSession().then(function(res) {
     if (!res.data.session) {
       window.location.href = '../auth.html';
@@ -406,16 +461,322 @@ function initSpaceBattle() {
     }
     if (!systemId) return;
 
-    stationSlot = generateStationSlot(hashStringToSeed(systemId));
-
-    checkStationRights().then(function() {
+    Promise.all([loadStationSlot(), checkStationRights()]).then(function() {
       loadStation();
+      loadShips();
       centerGridInitially();
       initPanAndZoom();
       initBuildSwitcher();
+      initBuildToggle(true);
       subscribeToSpaceChanges();
     });
   });
 }
 
 document.addEventListener('DOMContentLoaded', initSpaceBattle);
+
+// ===== Корабли =====
+
+var shipsInSystem = [];
+var shipTypeById = {};
+var shipImages = {};
+
+function getShipImage(path) {
+  if (!path) return null;
+  if (shipImages[path]) return shipImages[path];
+  var img = new Image();
+  img.src = '../' + path;
+  img.onload = function() { renderShips(); };
+  img.onerror = function() { img.failed = true; };
+  shipImages[path] = img;
+  return img;
+}
+
+function loadShips() {
+  Promise.all([
+    supabase.from('ships').select('*').eq('system_id', systemId),
+    supabase.from('ship_types').select('*')
+  ]).then(function(r) {
+    shipsInSystem = (r[0].error || !r[0].data) ? [] : r[0].data;
+    shipTypeById = {};
+    (r[1].data || []).forEach(function(t) { shipTypeById[t.id] = t; });
+    renderShips();
+    loadShipOrders();
+    if (typeof onShipsReloaded === 'function') onShipsReloaded();
+  });
+}
+
+// Габариты корабля в клетках с учётом разворота. Формула повторяет
+// ship_box_w / ship_box_h на сервере — расхождение здесь означало бы,
+// что игрок видит одно, а база считает другое.
+function shipBoxCells(type, facing) {
+  return (facing === 90 || facing === 270)
+    ? { w: type.height_cells, h: type.width_cells }
+    : { w: type.width_cells, h: type.height_cells };
+}
+
+// Корабли рисуем элементами поверх сетки: спрайт занимает ровно тот
+// прямоугольник клеток, который прописан у типа в БД.
+function renderShips() {
+  var old = grid.querySelectorAll('.ship-sprite');
+  for (var i = 0; i < old.length; i++) old[i].parentNode.removeChild(old[i]);
+
+  shipsInSystem.forEach(function(ship) {
+    var type = shipTypeById[ship.ship_type];
+    if (!type) return;
+
+    var facing = ship.facing || 0;
+    var box = shipBoxCells(type, facing);
+
+    // Внешний элемент — занятые клетки (габарит с учётом разворота),
+    // внутри него спрайт в исходных размерах, повёрнутый вокруг центра.
+    var el = document.createElement('div');
+    el.className = 'ship-sprite';
+    el.style.position = 'absolute';
+    el.style.left = (ship.x * CELL_PX) + 'px';
+    el.style.top = (ship.y * CELL_PX) + 'px';
+    el.style.width = (box.w * CELL_PX) + 'px';
+    el.style.height = (box.h * CELL_PX) + 'px';
+    el.style.cursor = 'pointer';
+
+    var mine = ship.owner_user_id === currentUserId;
+    el.style.outline = '2px solid ' + (mine ? 'rgba(95,217,104,0.8)' : 'rgba(217,74,74,0.8)');
+
+    var img = getShipImage(type.image);
+    if (img && img.complete && !img.failed) {
+      var inner = document.createElement('div');
+      inner.style.position = 'absolute';
+      inner.style.left = '50%';
+      inner.style.top = '50%';
+      inner.style.width = (type.width_cells * CELL_PX) + 'px';
+      inner.style.height = (type.height_cells * CELL_PX) + 'px';
+      // Спрайты нарисованы носом вверх, поэтому facing совпадает с углом
+      inner.style.transform = 'translate(-50%, -50%) rotate(' + facing + 'deg)';
+      inner.style.transformOrigin = '50% 50%';
+
+      var im = document.createElement('img');
+      im.src = img.src;
+      im.style.width = '100%';
+      im.style.height = '100%';
+      im.style.display = 'block';
+      inner.appendChild(im);
+      el.appendChild(inner);
+    }
+
+    el.addEventListener('click', function(e) {
+      e.stopPropagation();
+      // Своими кораблями управляем через HUD, чужие — только карточка
+      if (mine && typeof onOwnShipTapped === 'function') {
+        onOwnShipTapped(ship, type);
+      } else {
+        openShipInfo(ship, type);
+      }
+    });
+
+    grid.appendChild(el);
+  });
+}
+
+function openShipInfo(ship, type) {
+  var panel = document.getElementById('ship-info');
+  document.getElementById('ship-info-name').textContent = type.name;
+  fillShipCommanders(ship);
+  document.getElementById('ship-info-stats').innerHTML =
+    '<div><span>Прочность</span><b>' + ship.hp + ' / ' + type.max_hp + '</b></div>' +
+    '<div><span>Урон</span><b>' + type.damage + '</b></div>' +
+    '<div><span>Обзор</span><b>' + type.vision_range + ' кл.</b></div>' +
+    '<div><span>Ход</span><b>' + type.move_range + ' кл.</b></div>' +
+    '<div><span>Трюм</span><b>' + type.capacity + ' слотов</b></div>' +
+    '<div><span>Размер</span><b>' + type.width_cells + '×' + type.height_cells + '</b></div>';
+  panel.style.display = 'flex';
+}
+
+// Передача корабля командиру: в списке только свои командиры, которые
+// стоят в этой же системе и не в пути — остальных сервер всё равно отклонит.
+function fillShipCommanders(ship) {
+  var box = document.getElementById('ship-info-commander');
+  if (!box) return;
+
+  if (ship.owner_user_id !== currentUserId) {
+    box.innerHTML = '';
+    return;
+  }
+
+  box.innerHTML = '<div class="ship-assign-title">Командир флота</div>' +
+    '<div class="ship-assign-note">Корабль сам никуда не летит. Прикрепи его ' +
+    'к своему командиру в этой системе — тогда он пойдёт за ним на другую планету.</div>';
+
+  supabase.from('commanders').select('*')
+    .eq('user_id', currentUserId).eq('unlocked', true)
+    .then(function(res) {
+      var here = (res.data || []).filter(function(c) {
+        return !c.moving_to && c.current_system === ship.system_id;
+      });
+
+      var select = document.createElement('select');
+      select.className = 'ship-assign-select';
+
+      var none = document.createElement('option');
+      none.value = '';
+      none.textContent = '— без командира —';
+      select.appendChild(none);
+
+      here.forEach(function(c) {
+        var opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.name;
+        if (ship.commander_id === c.id) opt.selected = true;
+        select.appendChild(opt);
+      });
+
+      select.addEventListener('change', function() {
+        supabase.rpc('assign_ship', {
+          p_ship_id: ship.id,
+          p_commander_id: select.value || null
+        }).then(function(r) {
+          if (r.error) { alert(r.error.message); return; }
+          ship.commander_id = select.value || null;
+          loadShips();
+        });
+      });
+
+      box.appendChild(select);
+
+      if (here.length === 0) {
+        var hint = document.createElement('div');
+        hint.className = 'ship-assign-hint';
+        hint.textContent = 'В этой системе нет твоих свободных командиров';
+        box.appendChild(hint);
+      }
+    });
+}
+
+function closeShipInfo() {
+  document.getElementById('ship-info').style.display = 'none';
+}
+
+// ===== Верфь: заказ кораблей на станции =====
+
+function openShipyard() {
+  var panel = document.getElementById('shipyard-panel');
+  var list = document.getElementById('shipyard-list');
+  list.innerHTML = '<div class="shipyard-empty">Загрузка...</div>';
+  panel.style.display = 'flex';
+
+  supabase.rpc('get_my_profile').then(function(pr) {
+    var faction = (!pr.error && pr.data && pr.data.length) ? pr.data[0].faction : null;
+
+    supabase.from('ship_types').select('*').eq('faction', faction).then(function(res) {
+      if (res.error || !res.data || res.data.length === 0) {
+        list.innerHTML = '<div class="shipyard-empty">Нет доступных кораблей</div>';
+        return;
+      }
+      list.innerHTML = '';
+      res.data.forEach(function(type) {
+        list.appendChild(makeShipCard(type));
+      });
+    });
+  });
+}
+
+function closeShipyard() {
+  document.getElementById('shipyard-panel').style.display = 'none';
+}
+
+function makeShipCard(type) {
+  var card = document.createElement('div');
+  card.className = 'ship-card';
+
+  var media = document.createElement('div');
+  media.className = 'ship-card-media';
+  if (type.image) {
+    var im = document.createElement('img');
+    im.src = '../' + type.image;
+    media.appendChild(im);
+  }
+  card.appendChild(media);
+
+  var body = document.createElement('div');
+  body.className = 'ship-card-body';
+
+  var name = document.createElement('div');
+  name.className = 'ship-card-name';
+  name.textContent = type.name;
+  body.appendChild(name);
+
+  if (type.description) {
+    var d = document.createElement('div');
+    d.className = 'ship-card-desc';
+    d.textContent = type.description;
+    body.appendChild(d);
+  }
+
+  var stats = document.createElement('div');
+  stats.className = 'ship-card-stats';
+  stats.innerHTML =
+    '<div><span>Прочность</span><b>' + type.max_hp + '</b></div>' +
+    '<div><span>Урон</span><b>' + type.damage + '</b></div>' +
+    '<div><span>Обзор</span><b>' + type.vision_range + ' кл.</b></div>' +
+    '<div><span>Трюм</span><b>' + type.capacity + '</b></div>';
+  body.appendChild(stats);
+
+  var btn = document.createElement('button');
+  btn.className = 'ship-order-btn';
+  btn.textContent = 'Построить · ' + type.cost;
+  btn.addEventListener('click', function() {
+    btn.disabled = true;
+    supabase.rpc('order_ship', { p_system_id: systemId, p_ship_type: type.id })
+      .then(function(res) {
+        btn.disabled = false;
+        if (res.error) {
+          alert(res.error.message);
+          return;
+        }
+        closeShipyard();
+        loadShipOrders();
+      });
+  });
+  body.appendChild(btn);
+
+  card.appendChild(body);
+  return card;
+}
+
+function loadShipOrders() {
+  supabase.from('ship_orders').select('*, ship_types(name)')
+    .eq('system_id', systemId).eq('delivered', false)
+    .then(function(res) {
+      var bar = document.getElementById('ship-queue');
+      if (!bar) return;
+      if (res.error || !res.data || res.data.length === 0) {
+        bar.style.display = 'none';
+        return;
+      }
+      bar.innerHTML = '';
+      bar.style.display = 'flex';
+      res.data.forEach(function(o) {
+        var left = Math.max(0, Math.ceil((new Date(o.completes_at).getTime() - Date.now()) / 1000));
+        var chip = document.createElement('div');
+        chip.className = 'order-chip';
+        chip.textContent = (o.ship_types ? o.ship_types.name : o.ship_type) + ' · ' + left + 'с';
+        bar.appendChild(chip);
+      });
+    });
+}
+
+// Переключатель режима стройки прямо на карте: осмотр и наём войск —
+// в обычном режиме, а слоты и постройка зданий — по этой кнопке.
+function initBuildToggle(isSpace) {
+  if (!isController) return;
+
+  var btn = document.createElement('button');
+  btn.id = 'build-toggle';
+  btn.textContent = buildMode ? 'Выйти из стройки' : 'Строительство';
+  if (buildMode) btn.classList.add('active');
+  document.body.appendChild(btn);
+
+  btn.addEventListener('click', function() {
+    var page = isSpace ? 'space-battle.html' : 'ground-battle.html';
+    window.location.href = page + '?system=' + systemId + (buildMode ? '' : '&mode=build');
+  });
+}

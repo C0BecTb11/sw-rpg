@@ -13,6 +13,13 @@ var PANEL_FACTION_COLORS = {
   cis: '#d94a4a'
 };
 
+// Эмблемы уже перекрашены в цвет фракции, так что подставлять их
+// можно как есть — без CSS-фильтров и второго набора файлов.
+var PANEL_FACTION_EMBLEMS = {
+  republic: 'assets/ui/faction-republic.png',
+  cis: 'assets/ui/faction-cis.png'
+};
+
 function initBottomPanelToggle() {
   var panel = document.getElementById('bottom-panel');
   var toggle = document.getElementById('bottom-panel-toggle');
@@ -38,6 +45,20 @@ function initFactionBadge() {
       labelEl.textContent = FACTION_NAMES[faction] || 'Фракция';
       emblemEl.style.borderColor = PANEL_FACTION_COLORS[faction] || '#2a3644';
       emblemEl.style.color = PANEL_FACTION_COLORS[faction] || '#cfd8dc';
+
+      var art = PANEL_FACTION_EMBLEMS[faction];
+      if (!art) return;
+
+      var im = document.createElement('img');
+      im.src = '../' + art;
+      im.alt = '';
+      im.className = 'faction-emblem-img';
+      // Пока картинка не загрузилась, в кружке остаётся прежний символ;
+      // подменяем его только после успешной загрузки
+      im.addEventListener('load', function() {
+        emblemEl.textContent = '';
+        emblemEl.appendChild(im);
+      });
     });
   });
 }
