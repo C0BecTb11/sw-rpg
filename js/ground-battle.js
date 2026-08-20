@@ -834,11 +834,16 @@ function scheduleRedraw() {
 }
 
 function redrawScene() {
-  if (!ctx) return;
-  if (!terrainCache) {
-    terrainCache = generateTerrain(hashStringToSeed(systemId));
+  if (!ctx) { dbgLast = 'нет ctx'; return; }
+  try {
+    if (!terrainCache) {
+      terrainCache = generateTerrain(hashStringToSeed(systemId));
+    }
+    drawScene(terrainCache);
+    dbgDraws++;
+  } catch (err) {
+    dbgLast = 'СБОЙ отрисовки: ' + (err && err.message);
   }
-  drawScene(terrainCache);
 }
 
 // Пока на карте есть недостроенное здание, обновляем картинку раз в секунду,
@@ -926,6 +931,40 @@ window.addEventListener('unhandledrejection', function(e) {
   showFatal('Запрос не прошёл: ' + ((e.reason && e.reason.message) || e.reason));
 });
 
+// ===== Диагностика (временно) =====
+var dbgDraws = 0, dbgLast = '';
+
+function showDebug() {
+  var box = document.getElementById('dbg-box');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'dbg-box';
+    box.style.cssText = 'position:fixed;left:6px;top:52px;z-index:9998;padding:8px;' +
+      'background:rgba(0,0,0,0.88);border:1px solid #4a90d9;border-radius:6px;' +
+      'color:#8fd9ff;font-family:monospace;font-size:10px;line-height:1.45;' +
+      'white-space:pre;pointer-events:none;';
+    document.body.appendChild(box);
+  }
+
+  var v = document.getElementById('ground-viewport');
+  var c = document.getElementById('ground-canvas');
+  var r = c ? c.getBoundingClientRect() : null;
+
+  box.textContent =
+    'system: ' + systemId + '  mode: ' + (buildMode ? 'build' : '-') + '\n' +
+    'viewport: ' + (v ? v.clientWidth + 'x' + v.clientHeight : 'НЕТ') + '\n' +
+    'canvas buf: ' + (c ? c.width + 'x' + c.height : 'НЕТ') + '\n' +
+    'canvas на экране: ' + (r ? Math.round(r.left) + ',' + Math.round(r.top) +
+        ' ' + Math.round(r.width) + 'x' + Math.round(r.height) : '-') + '\n' +
+    'transform: ' + (c && c.style.transform ? c.style.transform : 'НЕТ') + '\n' +
+    'ctx: ' + (ctx ? 'есть' : 'НЕТ') + '  terrain: ' + (terrainCache ? 'есть' : 'нет') + '\n' +
+    'отрисовок: ' + dbgDraws + '  слоты: ' + buildSlots.length +
+      '  юниты: ' + unitsOnMap.length + '\n' +
+    'состояние: ' + document.visibilityState + '\n' + dbgLast;
+
+  setTimeout(showDebug, 1000);
+}
+
 function initGroundBattle() {
   systemId = getSystemIdFromUrl();
   buildMode = isBuildMode();
@@ -933,6 +972,7 @@ function initGroundBattle() {
   viewport = document.getElementById('ground-viewport');
   canvas = document.getElementById('ground-canvas');
   ctx = canvas ? canvas.getContext('2d') : null;
+  showDebug();
 
   if (!canvas) showFatal('В разметке нет <canvas id="ground-canvas">');
 
