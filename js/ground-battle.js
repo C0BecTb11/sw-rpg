@@ -467,6 +467,11 @@ function initPanAndZoom() {
 
   var pinchStartDist = 0;
   var pinchStartScale = 1;
+  var pinching = false;
+  // Меньше этого расстояния касание двумя точками щипком не считаем:
+  // телефон иногда ловит вторую точку от пальца на корпусе или от дребезга
+  // тачскрина при обычном тапе, и масштаб прыгал сам по себе.
+  var MIN_PINCH_DIST = 45;
   var anchorGridX = 0;
   var anchorGridY = 0;
 
@@ -494,6 +499,8 @@ function initPanAndZoom() {
     } else if (e.touches.length === 2) {
       isDragging = false;
       pinchStartDist = distance(e.touches[0], e.touches[1]);
+      pinching = pinchStartDist >= MIN_PINCH_DIST;
+      if (!pinching) return;
       pinchStartScale = scale;
 
       var mid = midpoint(e.touches[0], e.touches[1]);
@@ -515,8 +522,17 @@ function initPanAndZoom() {
       clampPan();
       applyTransform();
     } else if (e.touches.length === 2) {
+      if (!pinching) return;
+
       var newDist = distance(e.touches[0], e.touches[1]);
+      if (newDist < MIN_PINCH_DIST) return;
+
       var ratio = newDist / pinchStartDist;
+      // Отсекаем микродрожание: без этого палец, лежащий неподвижно,
+      // всё равно даёт колебания в пару процентов, а каждое из них —
+      // повторная растеризация огромного холста
+      if (Math.abs(ratio - 1) < 0.04) return;
+
       scale = Math.min(3, Math.max(0.1, pinchStartScale * ratio));
 
       var mid = midpoint(e.touches[0], e.touches[1]);
@@ -532,6 +548,8 @@ function initPanAndZoom() {
   }, { passive: true });
 
   viewport.addEventListener('touchend', function(e) {
+    if (e.touches.length < 2) pinching = false;
+
     if (e.touches.length === 0) {
       if (isDragging && !movedDuringDrag) {
         // Браузер после касания дублирует событие мышью. Оно попадает уже
