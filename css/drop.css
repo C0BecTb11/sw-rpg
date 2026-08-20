@@ -1,9 +1,11 @@
 /* Панель высадки десанта на наземной карте */
 
+/* Второй ряд снизу: первый занят кнопкой «Строительство»
+   и переключателем слоёв */
 #drop-btn {
   position: fixed;
-  right: 12px;
-  bottom: calc(16px + env(safe-area-inset-bottom));
+  left: 12px;
+  bottom: calc(64px + env(safe-area-inset-bottom));
   z-index: 1400;
   padding: 12px 18px;
   background: #d94a4a;
@@ -111,7 +113,7 @@
   position: fixed;
   left: 10px;
   right: 10px;
-  bottom: calc(76px + env(safe-area-inset-bottom));
+  bottom: calc(116px + env(safe-area-inset-bottom));
   z-index: 1400;
   padding: 11px 13px;
   background: rgba(13,17,25,0.96);

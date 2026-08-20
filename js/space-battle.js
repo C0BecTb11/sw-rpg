@@ -332,9 +332,32 @@ function applyTransform() {
 
 // Не даёт утащить поле за пределы экрана: если поле крупнее вьюпорта —
 // панорамирование ограничено его краями, если мельче — центрируется.
+// Сколько места внизу занимает HUD корабля. Без этого выбранный корабль
+// и клетки под панелью оказывались недосягаемы: ходить некуда, потому что
+// половина вариантов спрятана под самой панелью управления.
+var uiBottomInset = 0;
+
+function setBottomInset(px) {
+  var delta = px - uiBottomInset;
+  uiBottomInset = px;
+  panY -= delta;
+  clampPan();
+  applyTransform();
+}
+
+// Доводит карту до клетки, центрируя её над панелью управления
+function focusCell(cx, cy) {
+  var vw = viewport.clientWidth;
+  var vh = viewport.clientHeight - uiBottomInset;
+  panX = vw / 2 - (cx + 0.5) * CELL_PX * scale;
+  panY = vh / 2 - (cy + 0.5) * CELL_PX * scale;
+  clampPan();
+  applyTransform();
+}
+
 function clampPan() {
   var vw = viewport.clientWidth;
-  var vh = viewport.clientHeight;
+  var vh = viewport.clientHeight - uiBottomInset;
   var fieldPx = GRID_CELLS * CELL_PX;
   var scaledSize = fieldPx * scale;
 

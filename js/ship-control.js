@@ -131,6 +131,20 @@ function scRenderHud() {
   var hud = scEnsureHud();
   hud.style.display = 'block';
 
+  // Поднимаем карту над панелью, иначе половина клеток, куда можно пойти,
+  // прячется под самим HUD
+  if (typeof setBottomInset === 'function') {
+    setTimeout(function() {
+      setBottomInset(hud.offsetHeight + 12);
+      // Корабль должен остаться перед глазами вместе с зоной хода,
+      // а не уехать под панель
+      if (typeof focusCell === 'function' && scShip && scType) {
+        var box = scBox(scType, scShip.facing);
+        focusCell(scShip.x + box.w / 2, scShip.y + box.h / 2);
+      }
+    }, 0);
+  }
+
   document.getElementById('sc-name').textContent = scType.name;
   document.getElementById('sc-sub').textContent =
     'позиция ' + scShip.x + ':' + scShip.y + ' · ход до ' + scType.move_range + ' кл.';
@@ -393,6 +407,7 @@ function scDeselect() {
   scRenderGhost();
   var hud = document.getElementById('ship-hud');
   if (hud) hud.style.display = 'none';
+  if (typeof setBottomInset === 'function') setBottomInset(0);
   scRenderRange();
 }
 

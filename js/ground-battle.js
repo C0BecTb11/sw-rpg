@@ -7,7 +7,10 @@
 // Строить может только игрок, назначенный контролёром системы
 // (system_control) — проверка реально идёт на уровне RLS в БД при записи.
 
-var GRID_SIZE = 120;  // клеток по стороне
+// Карта 124 клетки: 120 игрового поля плюс приросшие снизу 4 ряда полосы
+// вторжения. Полоса добавлена к карте, а не вырезана из неё, поэтому все
+// прежние координаты построек и зон остались на местах.
+var GRID_SIZE = 124;
 var CELL_PX = 32;     // размер клетки в px на канвасе (уменьшен под возросший размер поля)
 var SLOT_COUNT = 7;
 var SLOT_SIZE = 6;    // 6x6 клеток на слот
@@ -23,6 +26,40 @@ var buildSlots = [];       // [{x,y}] верхний левый угол каж�
 var deployZones = [];      // две зоны высадки 6x6 у верхнего края карты
 var DEPLOY_SIZE = 6;
 var ATTACK_ZONE_H = 4;   // высота полосы вторжения, приходит из game_settings
+var iAmAttacker = null;  // null — ещё не выяснено
+
+// Сколько экрана занято панелями снизу. Карта должна уметь подняться над
+// ними: полоса вторжения лежит у нижнего края, и без этого её последние
+// ряды оказывались навсегда под панелью.
+var uiBottomInset = 0;
+
+function setBottomInset(px) {
+  var delta = px - uiBottomInset;
+  uiBottomInset = px;
+  panY -= delta;
+  clampPan();
+  applyTransform();
+}
+
+// Высоту панели меряем по факту: подсказка растёт от длины названия юнита,
+// а полоска погрузки — от числа кораблей в списке.
+function insetFor(el) {
+  if (!el) return 0;
+  var r = el.getBoundingClientRect();
+  if (!r.height) return 0;
+  return Math.max(0, window.innerHeight - r.top + 8);
+}
+
+// Центрирует клетку в свободной части экрана над панелью, чтобы выбранный
+// юнит не уезжал под неё и его не приходилось искать прокруткой.
+function focusCell(cx, cy) {
+  var vw = viewport.clientWidth;
+  var vh = viewport.clientHeight - uiBottomInset;
+  panX = vw / 2 - (cx + 0.5) * CELL_PX * scale;
+  panY = vh / 2 - (cy + 0.5) * CELL_PX * scale;
+  clampPan();
+  applyTransform();
+}
 var showDeployZones = false;  // зоны видны только своей фракции
 var systemFaction = null;
 var lastTouchEndMs = 0;
@@ -223,6 +260,25 @@ function loadDeployZones() {
 // Настройки тянем отдельным запросом и ничего им не блокируем: до ответа
 // работает значение по умолчанию, полоса просто перерисуется, если в базе
 // стоит другая высота.
+// Обороняющемуся полосу вторжения не показываем: по ней он бы понял, где
+// выстроен десант, и ждал бы на месте высадки. Ту же проверку делает
+// can_see_position в базе — юниты в полосе противнику не отдаются вовсе.
+function loadGroundSides() {
+  return supabase.auth.getSession().then(function(res) {
+    if (!res.data.session) return;
+    return Promise.all([
+      supabase.from('profiles').select('faction').eq('id', res.data.session.user.id).maybeSingle(),
+      supabase.from('systems').select('faction').eq('id', systemId).maybeSingle()
+    ]).then(function(r) {
+      var mine = r[0].data && r[0].data.faction;
+      var sys = r[1].data && r[1].data.faction;
+      if (!mine) return;
+      iAmAttacker = (sys !== mine);
+      redrawScene();
+    });
+  });
+}
+
 function loadGroundSettings() {
   return supabase.from('game_settings').select('key, value').then(function(res) {
     if (res.error || !res.data) return;
@@ -242,6 +298,8 @@ function loadGroundSettings() {
 // в космосе, она видна всем: обороняющийся должен понимать, где
 // встречать десант, иначе защищаться было бы невозможно.
 function drawAttackZone() {
+  if (!iAmAttacker) return;
+
   var py = (GRID_SIZE - ATTACK_ZONE_H) * CELL_PX;
   var w = GRID_SIZE * CELL_PX;
   var h = ATTACK_ZONE_H * CELL_PX;
@@ -427,7 +485,7 @@ function applyTransform() {
 
 function clampPan() {
   var vw = viewport.clientWidth;
-  var vh = viewport.clientHeight;
+  var vh = viewport.clientHeight - uiBottomInset;
   var fieldPx = GRID_SIZE * CELL_PX;
   var scaledSize = fieldPx * scale;
 
@@ -467,11 +525,6 @@ function initPanAndZoom() {
 
   var pinchStartDist = 0;
   var pinchStartScale = 1;
-  var pinching = false;
-  // Меньше этого расстояния касание двумя точками щипком не считаем:
-  // телефон иногда ловит вторую точку от пальца на корпусе или от дребезга
-  // тачскрина при обычном тапе, и масштаб прыгал сам по себе.
-  var MIN_PINCH_DIST = 45;
   var anchorGridX = 0;
   var anchorGridY = 0;
 
@@ -499,8 +552,6 @@ function initPanAndZoom() {
     } else if (e.touches.length === 2) {
       isDragging = false;
       pinchStartDist = distance(e.touches[0], e.touches[1]);
-      pinching = pinchStartDist >= MIN_PINCH_DIST;
-      if (!pinching) return;
       pinchStartScale = scale;
 
       var mid = midpoint(e.touches[0], e.touches[1]);
@@ -522,17 +573,8 @@ function initPanAndZoom() {
       clampPan();
       applyTransform();
     } else if (e.touches.length === 2) {
-      if (!pinching) return;
-
       var newDist = distance(e.touches[0], e.touches[1]);
-      if (newDist < MIN_PINCH_DIST) return;
-
       var ratio = newDist / pinchStartDist;
-      // Отсекаем микродрожание: без этого палец, лежащий неподвижно,
-      // всё равно даёт колебания в пару процентов, а каждое из них —
-      // повторная растеризация огромного холста
-      if (Math.abs(ratio - 1) < 0.04) return;
-
       scale = Math.min(3, Math.max(0.1, pinchStartScale * ratio));
 
       var mid = midpoint(e.touches[0], e.touches[1]);
@@ -548,8 +590,6 @@ function initPanAndZoom() {
   }, { passive: true });
 
   viewport.addEventListener('touchend', function(e) {
-    if (e.touches.length < 2) pinching = false;
-
     if (e.touches.length === 0) {
       if (isDragging && !movedDuringDrag) {
         // Браузер после касания дублирует событие мышью. Оно попадает уже
@@ -852,16 +892,11 @@ function scheduleRedraw() {
 }
 
 function redrawScene() {
-  if (!ctx) { dbgLast = 'нет ctx'; return; }
-  try {
-    if (!terrainCache) {
-      terrainCache = generateTerrain(hashStringToSeed(systemId));
-    }
-    drawScene(terrainCache);
-    dbgDraws++;
-  } catch (err) {
-    dbgLast = 'СБОЙ отрисовки: ' + (err && err.message);
+  if (!ctx) return;
+  if (!terrainCache) {
+    terrainCache = generateTerrain(hashStringToSeed(systemId));
   }
+  drawScene(terrainCache);
 }
 
 // Пока на карте есть недостроенное здание, обновляем картинку раз в секунду,
@@ -949,40 +984,6 @@ window.addEventListener('unhandledrejection', function(e) {
   showFatal('Запрос не прошёл: ' + ((e.reason && e.reason.message) || e.reason));
 });
 
-// ===== Диагностика (временно) =====
-var dbgDraws = 0, dbgLast = '';
-
-function showDebug() {
-  var box = document.getElementById('dbg-box');
-  if (!box) {
-    box = document.createElement('div');
-    box.id = 'dbg-box';
-    box.style.cssText = 'position:fixed;left:6px;top:52px;z-index:9998;padding:8px;' +
-      'background:rgba(0,0,0,0.88);border:1px solid #4a90d9;border-radius:6px;' +
-      'color:#8fd9ff;font-family:monospace;font-size:10px;line-height:1.45;' +
-      'white-space:pre;pointer-events:none;';
-    document.body.appendChild(box);
-  }
-
-  var v = document.getElementById('ground-viewport');
-  var c = document.getElementById('ground-canvas');
-  var r = c ? c.getBoundingClientRect() : null;
-
-  box.textContent =
-    'system: ' + systemId + '  mode: ' + (buildMode ? 'build' : '-') + '\n' +
-    'viewport: ' + (v ? v.clientWidth + 'x' + v.clientHeight : 'НЕТ') + '\n' +
-    'canvas buf: ' + (c ? c.width + 'x' + c.height : 'НЕТ') + '\n' +
-    'canvas на экране: ' + (r ? Math.round(r.left) + ',' + Math.round(r.top) +
-        ' ' + Math.round(r.width) + 'x' + Math.round(r.height) : '-') + '\n' +
-    'transform: ' + (c && c.style.transform ? c.style.transform : 'НЕТ') + '\n' +
-    'ctx: ' + (ctx ? 'есть' : 'НЕТ') + '  terrain: ' + (terrainCache ? 'есть' : 'нет') + '\n' +
-    'отрисовок: ' + dbgDraws + '  слоты: ' + buildSlots.length +
-      '  юниты: ' + unitsOnMap.length + '\n' +
-    'состояние: ' + document.visibilityState + '\n' + dbgLast;
-
-  setTimeout(showDebug, 1000);
-}
-
 function initGroundBattle() {
   systemId = getSystemIdFromUrl();
   buildMode = isBuildMode();
@@ -990,7 +991,6 @@ function initGroundBattle() {
   viewport = document.getElementById('ground-viewport');
   canvas = document.getElementById('ground-canvas');
   ctx = canvas ? canvas.getContext('2d') : null;
-  showDebug();
 
   if (!canvas) showFatal('В разметке нет <canvas id="ground-canvas">');
 
@@ -1049,6 +1049,7 @@ function initGroundBattle() {
         loadUnits();
       });
       loadGroundSettings();
+      loadGroundSides();
       loadDropCargo();
 
       var dropBtn = document.getElementById('drop-btn');
@@ -1414,11 +1415,15 @@ function showPickup(unit, ships) {
   });
 
   bar.style.visibility = 'visible';
+  setBottomInset(insetFor(bar));
+  focusCell(unit.x, unit.y);
 }
 
 function hidePickup() {
   var bar = document.getElementById('pickup-bar');
-  if (bar) bar.style.visibility = 'hidden';
+  if (!bar || bar.style.visibility === 'hidden') return;
+  bar.style.visibility = 'hidden';
+  setBottomInset(0);
 }
 
 function loadDropCargo() {
@@ -1483,12 +1488,24 @@ function startDrop(shipId, unitType, name) {
   hint.style.display = 'flex';
   document.getElementById('drop-cancel').addEventListener('click', cancelDrop);
 
+  // Кнопка «Высадка» в этом режиме лишняя и лезет на подсказку
+  var btn = document.getElementById('drop-btn');
+  if (btn) btn.style.visibility = 'hidden';
+
+  setBottomInset(insetFor(hint));
+  var midX = (viewport.clientWidth / 2 - panX) / scale / CELL_PX;
+  focusCell(midX, GRID_SIZE - ATTACK_ZONE_H + ATTACK_ZONE_H / 2);
   redrawScene();
 }
 
 function cancelDrop() {
   droppingUnit = null;
   document.getElementById('placement-hint').style.display = 'none';
+
+  var btn = document.getElementById('drop-btn');
+  if (btn && dropCargo.length) btn.style.visibility = 'visible';
+
+  setBottomInset(0);
   redrawScene();
 }
 

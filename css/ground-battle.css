@@ -455,11 +455,13 @@ html, body {
 }
 
 
+/* Подсказка режима постановки — над нижним рядом кнопок, иначе
+   наезжает на переключатель слоёв и «Строительство» */
 #placement-hint {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  bottom: 16px;
+  bottom: calc(116px + env(safe-area-inset-bottom));
   z-index: 1500;
   display: flex;
   align-items: center;
