@@ -277,3 +277,22 @@
   background: rgba(95,217,104,0.06);
   border-radius: 4px;
 }
+
+/* Площадки сброса десанта в центре карты */
+.orbital-drop-zone {
+  position: absolute;
+  pointer-events: none;
+  border: 2px solid rgba(217,169,64,0.75);
+  background: rgba(217,169,64,0.10);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.orbital-drop-zone span {
+  font-family: 'Courier New', monospace;
+  font-size: 15px;
+  letter-spacing: 3px;
+  color: rgba(217,169,64,0.85);
+}

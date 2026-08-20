@@ -22,6 +22,7 @@ var viewport, canvas, ctx;
 var buildSlots = [];       // [{x,y}] верхний левый угол каждого слота
 var deployZones = [];      // две зоны высадки 6x6 у верхнего края карты
 var DEPLOY_SIZE = 6;
+var ATTACK_ZONE_H = 4;   // высота полосы вторжения, приходит из game_settings
 var showDeployZones = false;  // зоны видны только своей фракции
 var systemFaction = null;
 var lastTouchEndMs = 0;
@@ -219,6 +220,51 @@ function loadDeployZones() {
   });
 }
 
+// Настройки тянем отдельным запросом и ничего им не блокируем: до ответа
+// работает значение по умолчанию, полоса просто перерисуется, если в базе
+// стоит другая высота.
+function loadGroundSettings() {
+  return supabase.from('game_settings').select('key, value').then(function(res) {
+    if (res.error || !res.data) return;
+    var was = ATTACK_ZONE_H;
+    res.data.forEach(function(row) {
+      if (row.key === 'ground_attack_zone_height') {
+        ATTACK_ZONE_H = parseInt(row.value, 10) || 4;
+      }
+    });
+    // Перерисовываем, только если значение реально отличается от того,
+    // с которым уже нарисовано. Полная отрисовка тут дорогая.
+    if (was !== ATTACK_ZONE_H) redrawScene();
+  });
+}
+
+// Полоса вторжения у нижнего края. В отличие от площадок сброса
+// в космосе, она видна всем: обороняющийся должен понимать, где
+// встречать десант, иначе защищаться было бы невозможно.
+function drawAttackZone() {
+  var py = (GRID_SIZE - ATTACK_ZONE_H) * CELL_PX;
+  var w = GRID_SIZE * CELL_PX;
+  var h = ATTACK_ZONE_H * CELL_PX;
+
+  ctx.fillStyle = 'rgba(217,74,74,0.10)';
+  ctx.fillRect(0, py, w, h);
+
+  ctx.strokeStyle = 'rgba(217,74,74,0.65)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 5]);
+  ctx.beginPath();
+  ctx.moveTo(0, py);
+  ctx.lineTo(w, py);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.fillStyle = 'rgba(217,74,74,0.85)';
+  ctx.font = Math.round(h * 0.32) + 'px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('ПОЛОСА ВТОРЖЕНИЯ', w / 2, py + h / 2);
+}
+
 var TERRAIN_COLORS = {
   grass_a: '#3a5a2e',
   grass_b: '#456834',
@@ -227,8 +273,14 @@ var TERRAIN_COLORS = {
 };
 
 function drawScene(grid) {
-  canvas.width = GRID_SIZE * CELL_PX;
-  canvas.height = GRID_SIZE * CELL_PX;
+  // Присвоение canvas.width заново выделяет буфер: при 3840x3840 это
+  // около 60 МБ на каждую отрисовку. Отсюда и было мигание с кусками —
+  // телефон не успевал. Размер ставим один раз.
+  var need = GRID_SIZE * CELL_PX;
+  if (canvas.width !== need || canvas.height !== need) {
+    canvas.width = need;
+    canvas.height = need;
+  }
 
   for (var y = 0; y < GRID_SIZE; y++) {
     for (var x = 0; x < GRID_SIZE; x++) {
@@ -253,6 +305,8 @@ function drawScene(grid) {
   drawBuildSlots();
   drawDeployZone();
   drawPlacementCells();
+  drawDropCells();
+  drawAttackZone();
   drawUnits();
 }
 
@@ -556,6 +610,11 @@ function handleTap(clientX, clientY) {
   var cellX = Math.floor(gridPxX / CELL_PX);
   var cellY = Math.floor(gridPxY / CELL_PX);
 
+  if (droppingUnit) {
+    handleDropTap(cellX, cellY);
+    return;
+  }
+
   if (placingOrder) {
     handlePlacementTap(cellX, cellY);
     return;
@@ -750,11 +809,20 @@ function loadBuildings() {
 
 // Рельеф генерируется один раз и кэшируется: пересчитывать его на каждую
 // перерисовку таймера — лишняя работа на 120x120 клеток.
+// Рисуем синхронно. Через requestAnimationFrame нельзя: в предпросмотре
+// SPCK панель создаётся скрытой, кадровые колбэки в ней не выполняются,
+// и отрисовка не наступает вовсе — страница остаётся чёрной.
 function redrawScene() {
-  if (!terrainCache) {
-    terrainCache = generateTerrain(hashStringToSeed(systemId));
+  if (!ctx) { dbgLast = 'нет ctx'; return; }
+  try {
+    if (!terrainCache) {
+      terrainCache = generateTerrain(hashStringToSeed(systemId));
+    }
+    drawScene(terrainCache);
+    dbgDraws++;
+  } catch (err) {
+    dbgLast = 'СБОЙ: ' + (err && err.message);
   }
-  drawScene(terrainCache);
 }
 
 // Пока на карте есть недостроенное здание, обновляем картинку раз в секунду,
@@ -817,13 +885,88 @@ function subscribeToGroundChanges() {
     .subscribe();
 }
 
+// На телефоне консоли нет, и любая ошибка выглядит одинаково — чёрный
+// экран. Показываем её прямо на странице, чтобы было с чем работать.
+function showFatal(text) {
+  var box = document.getElementById('fatal-box');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'fatal-box';
+    box.style.cssText = 'position:fixed;left:8px;right:8px;top:60px;z-index:9999;' +
+      'padding:12px;background:#2a1015;border:1px solid #d94a4a;border-radius:8px;' +
+      'color:#ffb3b3;font-family:monospace;font-size:11px;line-height:1.5;' +
+      'white-space:pre-wrap;word-break:break-word;max-height:50vh;overflow:auto;';
+    document.body.appendChild(box);
+  }
+  box.textContent = text;
+}
+
+window.addEventListener('error', function(e) {
+  showFatal('Ошибка: ' + e.message + '\n' +
+            (e.filename || '') + ':' + (e.lineno || '?'));
+});
+
+window.addEventListener('unhandledrejection', function(e) {
+  showFatal('Запрос не прошёл: ' + ((e.reason && e.reason.message) || e.reason));
+});
+
+// ===== Диагностика =====
+// Временная панель: показывает состояние холста прямо на экране.
+// Убрать, когда карта заработает.
+var dbgDraws = 0;
+var dbgLast = '';
+
+function showDebug() {
+  var box = document.getElementById('dbg-box');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'dbg-box';
+    box.style.cssText = 'position:fixed;left:6px;top:56px;z-index:9998;' +
+      'padding:8px;background:rgba(0,0,0,0.85);border:1px solid #4a90d9;' +
+      'border-radius:6px;color:#8fd9ff;font-family:monospace;font-size:10px;' +
+      'line-height:1.45;white-space:pre;pointer-events:none;';
+    document.body.appendChild(box);
+  }
+
+  var v = document.getElementById('ground-viewport');
+  var c = document.getElementById('ground-canvas');
+
+  box.textContent =
+    'system: ' + systemId + '\n' +
+    'viewport: ' + (v ? v.clientWidth + 'x' + v.clientHeight : 'НЕТ') + '\n' +
+    'canvas buf: ' + (c ? c.width + 'x' + c.height : 'НЕТ') + '\n' +
+    'canvas css: ' + (c ? Math.round(c.getBoundingClientRect().width) + 'x' +
+                          Math.round(c.getBoundingClientRect().height) : '-') + '\n' +
+    'ctx: ' + (ctx ? 'есть' : 'НЕТ') + '\n' +
+    'terrain: ' + (terrainCache ? 'есть' : 'нет') + '\n' +
+    'scale: ' + scale.toFixed(2) + '  pan: ' + Math.round(panX) + ',' + Math.round(panY) + '\n' +
+    'отрисовок: ' + dbgDraws + '\n' +
+    'слоты: ' + buildSlots.length + '  юниты: ' + unitsOnMap.length + '\n' +
+    dbgLast;
+
+  setTimeout(showDebug, 1000);
+}
+
 function initGroundBattle() {
   systemId = getSystemIdFromUrl();
   buildMode = isBuildMode();
 
   viewport = document.getElementById('ground-viewport');
   canvas = document.getElementById('ground-canvas');
-  ctx = canvas.getContext('2d');
+  ctx = canvas ? canvas.getContext('2d') : null;
+
+  showDebug();
+  if (!canvas) showFatal('В разметке нет <canvas id="ground-canvas">');
+
+  // Клиент Supabase создаётся в supabase-client.js поверх библиотеки с CDN.
+  // Если что-то из этого не загрузилось, в глобальной переменной остаётся
+  // библиотека без .auth — и падает всё, что ходит в базу.
+  if (typeof supabase === 'undefined' || !supabase.auth) {
+    showFatal('Клиент Supabase не создан.\n\n' +
+      'Не загрузилась библиотека с CDN или js/supabase-client.js. ' +
+      'Проверь интернет в предпросмотре и перезапусти его.');
+    return;
+  }
 
   var backBtn = document.getElementById('ground-back-btn');
   backBtn.addEventListener('click', function() {
@@ -845,7 +988,14 @@ function initGroundBattle() {
       return;
     }
 
-    if (!systemId) return;
+    if (!systemId) {
+      // Карта строится от сида системы: без ?system= в адресе строить
+      // нечего. Раньше код молча выходил и оставлял чёрный экран.
+      showFatal('В адресе нет ?system=\n\n' +
+        'Эту страницу открывают тапом по планете с карты галактики, ' +
+        'а не напрямую. Сейчас адрес: ' + window.location.search);
+      return;
+    }
 
     var slotSeed = hashStringToSeed(systemId);
     buildSlots = generateBuildSlots(slotSeed);
@@ -856,10 +1006,19 @@ function initGroundBattle() {
       }),
       checkBuildRights()
     ]).then(function() {
+      // Одна отрисовка на загрузку, как было изначально: на 120x120
+      // клетках каждая лишняя перерисовка ощутимо блокирует поток,
+      // и карта начинает дёргаться под пальцем.
       loadDeployZones().then(function() {
         loadUnits();
-        redrawScene();
       });
+      loadGroundSettings();
+      loadDropCargo();
+
+      var dropBtn = document.getElementById('drop-btn');
+      if (dropBtn) dropBtn.addEventListener('click', openDropPanel);
+      var dropClose = document.getElementById('drop-panel-close');
+      if (dropClose) dropClose.addEventListener('click', closeDropPanel);
       loadBuildings();
       loadUnitOrders();
       setInterval(loadUnitOrders, 5000);
@@ -1158,6 +1317,134 @@ function drawCellRange(unit, range, color) {
 }
 
 var selectedUnit = null;
+
+// ===== Высадка десанта =====
+// Отдельный режим от placingOrder: тот ставит только что нанятых юнитов
+// в свои зоны, а этот выгружает из трюма в полосу вторжения.
+var droppingUnit = null;   // {shipId, unitType, name}
+var dropCargo = [];        // ответ get_drop_ready_cargo
+
+function loadDropCargo() {
+  return supabase.rpc('get_drop_ready_cargo', { p_system_id: systemId })
+    .then(function(res) {
+      dropCargo = (res.error || !res.data) ? [] : res.data;
+
+      // Кнопка нужна, только если есть что и откуда высаживать
+      var btn = document.getElementById('drop-btn');
+      if (btn) btn.style.display = dropCargo.length ? 'block' : 'none';
+    });
+}
+
+function openDropPanel() {
+  var panel = document.getElementById('drop-panel');
+  var list = document.getElementById('drop-panel-list');
+  list.innerHTML = '';
+
+  if (!dropCargo.length) {
+    list.innerHTML = '<div class="drop-empty">В трюмах пусто</div>';
+  }
+
+  dropCargo.forEach(function(row) {
+    var ready = row.zone !== null && row.zone !== undefined;
+
+    var item = document.createElement('button');
+    item.className = 'drop-item' + (ready ? '' : ' not-ready');
+    item.innerHTML =
+      '<div class="drop-item-main">' +
+        '<div class="drop-item-name">' + row.unit_name + ' ×' + row.quantity + '</div>' +
+        '<div class="drop-item-sub">' + row.ship_name +
+          (ready ? ' · площадка ' + row.zone : ' · не в площадке сброса') + '</div>' +
+      '</div>';
+
+    if (ready) {
+      item.addEventListener('click', function() {
+        startDrop(row.ship_id, row.unit_type, row.unit_name);
+      });
+    } else {
+      item.disabled = true;
+    }
+
+    list.appendChild(item);
+  });
+
+  panel.style.display = 'flex';
+}
+
+function closeDropPanel() {
+  document.getElementById('drop-panel').style.display = 'none';
+}
+
+function startDrop(shipId, unitType, name) {
+  droppingUnit = { shipId: shipId, unitType: unitType, name: name };
+  closeDropPanel();
+
+  var hint = document.getElementById('placement-hint');
+  hint.innerHTML = '<span>Куда высадить: ' + name + '</span>' +
+                   '<button id="drop-cancel">Готово</button>';
+  hint.style.display = 'flex';
+  document.getElementById('drop-cancel').addEventListener('click', cancelDrop);
+
+  redrawScene();
+}
+
+function cancelDrop() {
+  droppingUnit = null;
+  document.getElementById('placement-hint').style.display = 'none';
+  redrawScene();
+}
+
+// Подсветка свободных клеток полосы вторжения
+function drawDropCells() {
+  if (!droppingUnit) return;
+
+  var occupied = {};
+  unitsOnMap.forEach(function(u) { occupied[u.x + ':' + u.y] = true; });
+
+  var y0 = GRID_SIZE - ATTACK_ZONE_H;
+  for (var cy = y0; cy < GRID_SIZE; cy++) {
+    for (var cx = 0; cx < GRID_SIZE; cx++) {
+      if (occupied[cx + ':' + cy]) continue;
+      ctx.fillStyle = 'rgba(217,74,74,0.22)';
+      ctx.fillRect(cx * CELL_PX + 3, cy * CELL_PX + 3, CELL_PX - 6, CELL_PX - 6);
+    }
+  }
+}
+
+// Тап в режиме высадки. Клетку проверяет и сервер, но локальная проверка
+// экономит запрос и даёт мгновенный отклик.
+function handleDropTap(cellX, cellY) {
+  if (cellY < GRID_SIZE - ATTACK_ZONE_H || cellY >= GRID_SIZE) return;
+  if (cellX < 0 || cellX >= GRID_SIZE) return;
+
+  if (unitsOnMap.some(function(u) { return u.x === cellX && u.y === cellY; })) {
+    alert('Клетка занята');
+    return;
+  }
+
+  var drop = droppingUnit;
+
+  supabase.rpc('unload_unit_at', {
+    p_ship_id: drop.shipId,
+    p_unit_type: drop.unitType,
+    p_x: cellX,
+    p_y: cellY
+  }).then(function(res) {
+    if (res.error) {
+      alert('Не удалось высадить: ' + res.error.message);
+      return;
+    }
+
+    // Высаживаем по одному, режим не сбрасываем: обычно ставят
+    // несколько бойцов подряд, и каждый раз лезть в панель неудобно
+    loadUnits();
+    loadDropCargo().then(function() {
+      var left = dropCargo.filter(function(r) {
+        return r.ship_id === drop.shipId && r.unit_type === drop.unitType;
+      })[0];
+      if (!left) cancelDrop();
+    });
+  });
+}
 
 // Режим выбора клетки: подсвечиваем свободные места в зонах.
 function startPlacement(unitTypeId, quantity) {

@@ -198,7 +198,9 @@ function makeFleetSection(ships, cargoByShip, systemNames) {
       '<span class="garrison-arrow">▸</span>' +
       '<span class="ship-thumb"><img src="../' + (type.image || '') + '" alt=""></span>' +
       '<span class="ship-title">' + (type.name || ship.ship_type) +
-        '<em>' + (systemNames[ship.system_id] || ship.system_id) + '</em></span>' +
+        '<em>' + (ship.in_transit
+            ? 'в гиперпространстве'
+            : (systemNames[ship.system_id] || ship.system_id)) + '</em></span>' +
       '<span class="ship-capacity">' + used + '/' + (type.capacity || 0) + '</span>';
     block.appendChild(header);
 

@@ -231,6 +231,32 @@ function loadHyperspaceZone() {
       }
 
       renderHyperspaceZone();
+      loadOrbitalDropZones();
+    });
+  });
+}
+
+// Площадки сброса десанта. Показываем только нападающему — обороняющийся
+// не должен видеть, что там стоит, иначе он просто караулил бы обе.
+function loadOrbitalDropZones() {
+  if (myZoneSide !== 'bottom') return;
+
+  supabase.rpc('orbital_drop_zones').then(function(res) {
+    if (res.error || !res.data) return;
+
+    res.data.forEach(function(z) {
+      var el = document.createElement('div');
+      el.className = 'orbital-drop-zone';
+      el.style.left = (z.x * CELL_PX) + 'px';
+      el.style.top = (z.y * CELL_PX) + 'px';
+      el.style.width = (z.size * CELL_PX) + 'px';
+      el.style.height = (z.size * CELL_PX) + 'px';
+
+      var label = document.createElement('span');
+      label.textContent = 'СБРОС ' + z.idx;
+      el.appendChild(label);
+
+      grid.insertBefore(el, grid.firstChild);
     });
   });
 }
@@ -554,7 +580,9 @@ function getShipImage(path) {
 
 function loadShips() {
   Promise.all([
-    supabase.from('ships').select('*').eq('system_id', systemId),
+    // Корабли в гиперпространстве на карте не показываем: они уже
+    // покинули систему и физически здесь их нет
+    supabase.from('ships').select('*').eq('system_id', systemId).eq('in_transit', false),
     supabase.from('ship_types').select('*')
   ]).then(function(r) {
     shipsInSystem = (r[0].error || !r[0].data) ? [] : r[0].data;
