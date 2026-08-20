@@ -104,3 +104,49 @@
   color: #55606c;
   text-align: center;
 }
+
+/* Полоска погрузки: появляется при выборе своего юнита, если рядом есть
+   корабль, готовый его принять */
+#pickup-bar {
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  bottom: calc(76px + env(safe-area-inset-bottom));
+  z-index: 1400;
+  padding: 11px 13px;
+  background: rgba(13,17,25,0.96);
+  border: 1px solid #1c2530;
+  border-left: 3px solid #5fd968;
+  border-radius: 10px;
+  font-family: 'Courier New', monospace;
+}
+
+.pickup-title {
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #55606c;
+  margin-bottom: 8px;
+}
+
+.pickup-ship {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px 12px;
+  background: #10151e;
+  border: 1px solid #2a3644;
+  border-radius: 8px;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+}
+
+.pickup-ship em {
+  font-style: normal;
+  font-size: 10px;
+  color: #5fd968;
+}
+
+.pickup-ship:disabled { opacity: 0.4; }

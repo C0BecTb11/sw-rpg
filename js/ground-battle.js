@@ -41,7 +41,7 @@ function getBuildingImage(path) {
 
   var img = new Image();
   img.src = '../' + path;
-  img.onload = function() { redrawScene(); };
+  img.onload = function() { scheduleRedraw(); };
   img.onerror = function() { img.failed = true; };
   buildingImages[path] = img;
   return img;
@@ -627,9 +627,14 @@ function handleTap(clientX, clientY) {
   if (tappedUnit) {
     selectedUnit = (selectedUnit && selectedUnit.id === tappedUnit.id) ? null : tappedUnit;
     redrawScene();
+    if (selectedUnit) {
+      offerPickup(selectedUnit);
+    } else {
+      hidePickup();
+    }
     return;
   }
-  if (selectedUnit) { selectedUnit = null; redrawScene(); }
+  if (selectedUnit) { selectedUnit = null; hidePickup(); redrawScene(); }
 
   for (var i = 0; i < buildSlots.length; i++) {
     var slot = buildSlots[i];
@@ -812,17 +817,28 @@ function loadBuildings() {
 // Рисуем синхронно. Через requestAnimationFrame нельзя: в предпросмотре
 // SPCK панель создаётся скрытой, кадровые колбэки в ней не выполняются,
 // и отрисовка не наступает вовсе — страница остаётся чёрной.
+// Отложенная перерисовка для картинок. Каждое здание и юнит просят
+// перерисовать карту, когда их файл догрузился: на чужой застроенной
+// планете это семь-восемь полных отрисовок подряд. Собираем их в одну.
+// Через setTimeout, а не requestAnimationFrame: кадровые колбэки не
+// работают в скрытых панелях предпросмотра.
+var redrawQueued = false;
+
+function scheduleRedraw() {
+  if (redrawQueued) return;
+  redrawQueued = true;
+  setTimeout(function() {
+    redrawQueued = false;
+    redrawScene();
+  }, 0);
+}
+
 function redrawScene() {
-  if (!ctx) { dbgLast = 'нет ctx'; return; }
-  try {
-    if (!terrainCache) {
-      terrainCache = generateTerrain(hashStringToSeed(systemId));
-    }
-    drawScene(terrainCache);
-    dbgDraws++;
-  } catch (err) {
-    dbgLast = 'СБОЙ: ' + (err && err.message);
+  if (!ctx) return;
+  if (!terrainCache) {
+    terrainCache = generateTerrain(hashStringToSeed(systemId));
   }
+  drawScene(terrainCache);
 }
 
 // Пока на карте есть недостроенное здание, обновляем картинку раз в секунду,
@@ -910,43 +926,6 @@ window.addEventListener('unhandledrejection', function(e) {
   showFatal('Запрос не прошёл: ' + ((e.reason && e.reason.message) || e.reason));
 });
 
-// ===== Диагностика =====
-// Временная панель: показывает состояние холста прямо на экране.
-// Убрать, когда карта заработает.
-var dbgDraws = 0;
-var dbgLast = '';
-
-function showDebug() {
-  var box = document.getElementById('dbg-box');
-  if (!box) {
-    box = document.createElement('div');
-    box.id = 'dbg-box';
-    box.style.cssText = 'position:fixed;left:6px;top:56px;z-index:9998;' +
-      'padding:8px;background:rgba(0,0,0,0.85);border:1px solid #4a90d9;' +
-      'border-radius:6px;color:#8fd9ff;font-family:monospace;font-size:10px;' +
-      'line-height:1.45;white-space:pre;pointer-events:none;';
-    document.body.appendChild(box);
-  }
-
-  var v = document.getElementById('ground-viewport');
-  var c = document.getElementById('ground-canvas');
-
-  box.textContent =
-    'system: ' + systemId + '\n' +
-    'viewport: ' + (v ? v.clientWidth + 'x' + v.clientHeight : 'НЕТ') + '\n' +
-    'canvas buf: ' + (c ? c.width + 'x' + c.height : 'НЕТ') + '\n' +
-    'canvas css: ' + (c ? Math.round(c.getBoundingClientRect().width) + 'x' +
-                          Math.round(c.getBoundingClientRect().height) : '-') + '\n' +
-    'ctx: ' + (ctx ? 'есть' : 'НЕТ') + '\n' +
-    'terrain: ' + (terrainCache ? 'есть' : 'нет') + '\n' +
-    'scale: ' + scale.toFixed(2) + '  pan: ' + Math.round(panX) + ',' + Math.round(panY) + '\n' +
-    'отрисовок: ' + dbgDraws + '\n' +
-    'слоты: ' + buildSlots.length + '  юниты: ' + unitsOnMap.length + '\n' +
-    dbgLast;
-
-  setTimeout(showDebug, 1000);
-}
-
 function initGroundBattle() {
   systemId = getSystemIdFromUrl();
   buildMode = isBuildMode();
@@ -955,7 +934,6 @@ function initGroundBattle() {
   canvas = document.getElementById('ground-canvas');
   ctx = canvas ? canvas.getContext('2d') : null;
 
-  showDebug();
   if (!canvas) showFatal('В разметке нет <canvas id="ground-canvas">');
 
   // Клиент Supabase создаётся в supabase-client.js поверх библиотеки с CDN.
@@ -1227,7 +1205,7 @@ function getUnitImage(path) {
   if (unitImages[path]) return unitImages[path];
   var img = new Image();
   img.src = '../' + path;
-  img.onload = function() { redrawScene(); };
+  img.onload = function() { scheduleRedraw(); };
   img.onerror = function() { img.failed = true; };
   unitImages[path] = img;
   return img;
@@ -1323,6 +1301,67 @@ var selectedUnit = null;
 // в свои зоны, а этот выгружает из трюма в полосу вторжения.
 var droppingUnit = null;   // {shipId, unitType, name}
 var dropCargo = [];        // ответ get_drop_ready_cargo
+
+// ===== Погрузка обратно на борт =====
+// Какие корабли могут принять этого юнита, решает сервер: он проверяет
+// и площадку сброса, и полосу вторжения, и свободное место в трюме.
+// Клиент только показывает результат.
+function offerPickup(unit) {
+  if (unit.owner_user_id !== currentUserId) { hidePickup(); return; }
+
+  supabase.rpc('get_pickup_ready_ships', { p_unit_id: unit.id }).then(function(res) {
+    if (res.error || !res.data || !res.data.length) { hidePickup(); return; }
+    // Юнит мог быть снят с выделения, пока шёл запрос
+    if (!selectedUnit || selectedUnit.id !== unit.id) return;
+    showPickup(unit, res.data);
+  });
+}
+
+function showPickup(unit, ships) {
+  var bar = document.getElementById('pickup-bar');
+  if (!bar) return;
+
+  var typeName = (unitTypeById[unit.unit_type] && unitTypeById[unit.unit_type].name)
+                 || unit.unit_type;
+
+  bar.innerHTML = '';
+
+  var title = document.createElement('div');
+  title.className = 'pickup-title';
+  title.textContent = 'Забрать на борт: ' + typeName;
+  bar.appendChild(title);
+
+  ships.forEach(function(sh) {
+    var b = document.createElement('button');
+    b.className = 'pickup-ship';
+    b.innerHTML = '<span>' + sh.ship_name + '</span>' +
+      '<em>свободно ' + sh.free_slots + '</em>';
+    b.addEventListener('click', function() {
+      b.disabled = true;
+      supabase.rpc('load_unit_from_ground', {
+        p_unit_id: unit.id, p_ship_id: sh.ship_id
+      }).then(function(r) {
+        if (r.error) {
+          alert('Не удалось забрать: ' + r.error.message);
+          b.disabled = false;
+          return;
+        }
+        selectedUnit = null;
+        hidePickup();
+        loadUnits();
+        loadDropCargo();
+      });
+    });
+    bar.appendChild(b);
+  });
+
+  bar.style.display = 'block';
+}
+
+function hidePickup() {
+  var bar = document.getElementById('pickup-bar');
+  if (bar) bar.style.display = 'none';
+}
 
 function loadDropCargo() {
   return supabase.rpc('get_drop_ready_cargo', { p_system_id: systemId })
