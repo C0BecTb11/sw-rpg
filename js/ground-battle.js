@@ -1355,12 +1355,12 @@ function showPickup(unit, ships) {
     bar.appendChild(b);
   });
 
-  bar.style.display = 'block';
+  bar.style.visibility = 'visible';
 }
 
 function hidePickup() {
   var bar = document.getElementById('pickup-bar');
-  if (bar) bar.style.display = 'none';
+  if (bar) bar.style.visibility = 'hidden';
 }
 
 function loadDropCargo() {
@@ -1368,9 +1368,11 @@ function loadDropCargo() {
     .then(function(res) {
       dropCargo = (res.error || !res.data) ? [] : res.data;
 
-      // Кнопка нужна, только если есть что и откуда высаживать
+      // Показываем через visibility, а не display: элемент остаётся
+      // в раскладке, и его появление не заставляет браузер заново
+      // растрировать лежащий под ним холст.
       var btn = document.getElementById('drop-btn');
-      if (btn) btn.style.display = dropCargo.length ? 'block' : 'none';
+      if (btn) btn.style.visibility = dropCargo.length ? 'visible' : 'hidden';
     });
 }
 
