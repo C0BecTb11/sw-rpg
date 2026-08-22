@@ -141,13 +141,31 @@ function onStationSlotTapped() {
   var shipyardBtn = document.getElementById('station-shipyard-btn');
 
   if (stationRecord) {
+    var building = stationRecord.completes_at
+      && new Date(stationRecord.completes_at).getTime() > Date.now();
+    var captured = sysFaction && stationRecord.faction
+      && stationRecord.faction !== sysFaction;
+
     titleEl.textContent = stationRecord.name || 'Космическая станция';
-    textEl.textContent = 'Верфь готова к постройке кораблей';
+
+    // Космос и земля — одна планета: право на верфь даёт контроль над
+    // системой, а не то, кто станцию построил. Иначе после передачи
+    // планеты верфь осталась бы у прежнего хозяина.
+    if (building) {
+      var left = Math.max(0, Math.ceil(
+        (new Date(stationRecord.completes_at).getTime() - Date.now()) / 1000));
+      textEl.textContent = 'Станция строится: осталось ' + left + ' с';
+    } else if (captured) {
+      textEl.textContent = 'Трофейная станция — работать не будет, только снос';
+    } else {
+      textEl.textContent = 'Верфь готова к постройке кораблей';
+    }
+
     buildBtn.style.display = 'none';
     demolishBtn.style.display = isController ? 'block' : 'none';
-    // Верфь доступна владельцу станции: заказы проверяет сервер
+
     if (shipyardBtn) shipyardBtn.style.display =
-      (stationRecord.owner_user_id === currentUserId) ? 'block' : 'none';
+      (isController && !building && !captured) ? 'block' : 'none';
   } else {
     titleEl.textContent = 'Слот космической станции';
     textEl.textContent = isController ? 'Здесь можно построить станцию' : 'У тебя нет прав на строительство здесь';
@@ -202,6 +220,7 @@ function loadStation() {
 // нет — её и не должно быть видно, за это же отвечает RLS в базе.
 var ZONE_HEIGHT = 14;
 var myZoneSide = null;
+var sysFaction = null;   // фракция планеты: по ней видно, трофейна ли станция
 
 function loadHyperspaceZone() {
   return supabase.auth.getSession().then(function(res) {
@@ -213,7 +232,7 @@ function loadHyperspaceZone() {
       supabase.from('game_settings').select('key, value')
     ]).then(function(r) {
       var myFaction = (r[0].data && r[0].data.faction) || null;
-      var sysFaction = (r[1].data && r[1].data.faction) || null;
+      sysFaction = (r[1].data && r[1].data.faction) || null;
 
       (r[2].data || []).forEach(function(row) {
         if (row.key === 'hyperspace_zone_height') ZONE_HEIGHT = parseInt(row.value, 10) || 14;

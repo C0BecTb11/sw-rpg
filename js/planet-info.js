@@ -95,11 +95,17 @@ function openPlanetInfo(systemId) {
         ctrlEl.textContent = 'не назначен';
       }
 
-      // Сводка. Постройки и станция публичны — они и так видны на картах.
+      // Сводка своей фракции. У чужой планеты эти строки не показываем:
+      // разведка должна быть действием, а не строчкой в карточке. Хочешь
+      // знать, что там понастроено, — зайди в земное пространство
+      // и посмотри сам.
+      var sameFaction = myFaction && sys.faction === myFaction;
       var stats = document.getElementById('pi-stats');
       stats.innerHTML = '';
-      stats.appendChild(makePiStat('Постройки', buildings.length + ' / 7'));
-      stats.appendChild(makePiStat('Орбитальная станция', station ? 'есть' : 'нет'));
+      if (sameFaction) {
+        stats.appendChild(makePiStat('Постройки', buildings.length + ' / 7'));
+        stats.appendChild(makePiStat('Орбитальная станция', station ? 'есть' : 'нет'));
+      }
 
       // Свои войска показываем только своей фракции. Считаем и тех, кто
       // стоит на земле, и тех, кто сидит в трюмах твоих кораблей в этой

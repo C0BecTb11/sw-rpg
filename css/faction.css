@@ -366,3 +366,203 @@
   font-size: 10px;
   color: #55606c;
 }
+
+/* ===== Панель лидера: группы и состав планеты ===== */
+
+.faction-control-group {
+  margin: 16px 0 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #55606c;
+}
+
+.faction-control-group:first-child { margin-top: 0; }
+
+/* Планета, только что взятая и ещё никому не отданная */
+.faction-control-row.pending {
+  border-color: #d9a940;
+  background: rgba(217,169,64,0.06);
+}
+
+.faction-control-row.pending .faction-control-status { color: #d9a940; }
+
+/* Состав планеты раскрывается по стрелке: назначение всегда на виду,
+   подробности — по желанию. Голая цифра построек лидеру ничего не давала. */
+.faction-control-toggle {
+  display: block;
+  margin-top: 6px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: #55606c;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-align: left;
+}
+
+.fc-arrow { color: #4a90d9; }
+
+.faction-control-details {
+  margin: 8px 0 4px;
+  padding: 8px 10px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 8px;
+}
+
+.fc-detail {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 3px 0;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: #cfd8dc;
+}
+
+.fc-detail em {
+  font-style: normal;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #55606c;
+}
+
+/* Трофейные постройки лидер должен отличать сразу: новому хозяину они
+   достанутся мёртвым грузом, который ещё и сносить за свои деньги */
+.fc-detail.captured,
+.fc-detail.captured em { color: #d94a4a; }
+
+.fc-detail-empty {
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  color: #55606c;
+}
+
+/* ===== Экран процессов ===== */
+
+#processes-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 2300;
+  background: #080b11;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+#processes-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  background: #0d1119;
+  border-bottom: 1px solid #1c2530;
+}
+
+.processes-title {
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #4a90d9;
+}
+
+#processes-close {
+  width: 26px;
+  height: 26px;
+  background: none;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  color: #8fa8c4;
+  font-size: 11px;
+  line-height: 1;
+}
+
+#processes-list {
+  padding: 14px 14px calc(24px + env(safe-area-inset-bottom));
+}
+
+.process-planet {
+  display: flex;
+  align-items: center;
+  margin: 18px 0 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #cfd8dc;
+}
+
+#processes-list .process-planet:first-child { margin-top: 0; }
+
+.process-count {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: #1c2530;
+  color: #8fa8c4;
+  font-size: 10px;
+}
+
+/* Цвет левой кромки — тип процесса. Простой намеренно приглушён:
+   он читается как отсутствие дела, а не как тревога. */
+.process-row {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-left: 3px solid #2a3644;
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+}
+
+.process-row.unit         { border-left-color: #5fd968; }
+.process-row.ship         { border-left-color: #4a90d9; }
+.process-row.construction { border-left-color: #d9a940; }
+.process-row.idle         { border-left-color: #2a3644; opacity: 0.75; }
+
+.process-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.process-place { font-size: 11px; color: #8fa8c4; }
+
+.process-kind {
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #55606c;
+}
+
+.process-main { margin-top: 4px; font-size: 12px; color: #cfd8dc; }
+.process-idle { color: #55606c; font-size: 11px; }
+
+.process-track {
+  height: 5px;
+  margin-top: 8px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.process-track i {
+  display: block;
+  height: 100%;
+  background: #5fd968;
+  transition: width 1s linear;
+}
+
+.process-row.ship .process-track i         { background: #4a90d9; }
+.process-row.construction .process-track i { background: #d9a940; }
+
+.process-left { margin-top: 5px; font-size: 10px; color: #55606c; }

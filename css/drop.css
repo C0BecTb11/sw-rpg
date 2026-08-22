@@ -167,3 +167,49 @@
   font-weight: normal;
   color: #55606c;
 }
+
+/* Производственная линия в окне найма */
+.prod-slot {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid #1c2530;
+  border-radius: 9px;
+  background: #10151e;
+  font-family: 'Courier New', monospace;
+}
+
+.prod-slot.free { border-left: 3px solid #5fd968; }
+.prod-slot.busy { border-left: 3px solid #d9a940; }
+
+.prod-slot-title {
+  font-size: 12px;
+  color: #cfd8dc;
+}
+
+.prod-slot-title em {
+  font-style: normal;
+  font-size: 10px;
+  color: #d94a4a;
+}
+
+.prod-slot-sub {
+  margin-top: 5px;
+  font-size: 10px;
+  color: #55606c;
+}
+
+.prod-slot-track {
+  height: 6px;
+  margin-top: 7px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.prod-slot-track i {
+  display: block;
+  height: 100%;
+  background: #d9a940;
+  transition: width 1s linear;
+}

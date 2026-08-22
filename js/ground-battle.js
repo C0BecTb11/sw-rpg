@@ -708,6 +708,10 @@ function handleTap(clientX, clientY) {
     var slot = buildSlots[i];
     if (cellX >= slot.x && cellX < slot.x + SLOT_SIZE &&
         cellY >= slot.y && cellY < slot.y + SLOT_SIZE) {
+      // Пустой слот вне режима стройки не должен реагировать: он и не
+      // нарисован, а тап по невидимому месту открывал панель выбора,
+      // в которой всё равно ничего нельзя построить
+      if (!buildingsBySlot[i + 1] && !buildMode) return;
       onSlotTapped(i + 1);
       return;
     }
@@ -1086,7 +1090,76 @@ document.addEventListener('DOMContentLoaded', initGroundBattle);
 // цену или урон через клиент невозможно.
 
 var unitPanelBuilding = null;
+var unitPanelMax = 5;
 var unitPanelTypes = [];
+
+// Состояние производственной линии в окне найма: что делается, сколько
+// осталось и можно ли ставить новый заказ. Раньше игрок узнавал о занятой
+// линии только из отказа после нажатия.
+var unitPanelTimer = null;
+
+function renderProductionSlot(building, maxPerOrder) {
+  var box = document.getElementById('unit-panel-slot');
+  if (!box) return;
+
+  supabase.rpc('get_building_queue', { p_building_id: building.id }).then(function(res) {
+    var q = (!res.error && res.data && res.data.length) ? res.data[0] : null;
+
+    if (!q) {
+      box.className = 'prod-slot free';
+      box.innerHTML = '<div class="prod-slot-title">Линия свободна</div>' +
+        '<div class="prod-slot-sub">За раз можно заказать до ' + maxPerOrder + '</div>';
+      setUnitButtonsEnabled(true);
+      if (unitPanelTimer) { clearInterval(unitPanelTimer); unitPanelTimer = null; }
+      return;
+    }
+
+    box.className = 'prod-slot busy';
+    setUnitButtonsEnabled(false);
+
+    var draw = function(left) {
+      var total = Math.max(1, q.seconds_left || 1);
+      if (!draw.total) draw.total = total;
+      var pct = Math.max(0, Math.min(100, (1 - left / draw.total) * 100));
+
+      box.innerHTML =
+        '<div class="prod-slot-title">' + (q.unit_name || 'Производство') +
+          ' ×' + q.quantity + (q.mine ? '' : ' <em>чужой заказ</em>') + '</div>' +
+        '<div class="prod-slot-track"><i style="width:' + pct + '%"></i></div>' +
+        '<div class="prod-slot-sub">Готово через ' + formatLeft(left) + '</div>';
+    };
+
+    var left = q.seconds_left;
+    draw(left);
+
+    if (unitPanelTimer) clearInterval(unitPanelTimer);
+    unitPanelTimer = setInterval(function() {
+      left -= 1;
+      if (left <= 0) {
+        clearInterval(unitPanelTimer);
+        unitPanelTimer = null;
+        renderProductionSlot(building, maxPerOrder);
+        return;
+      }
+      draw(left);
+    }, 1000);
+  });
+}
+
+function formatLeft(sec) {
+  if (sec >= 60) {
+    var m = Math.floor(sec / 60);
+    return m + ' мин ' + (sec % 60) + ' с';
+  }
+  return sec + ' с';
+}
+
+function setUnitButtonsEnabled(on) {
+  var panel = document.getElementById('unit-panel');
+  if (!panel) return;
+  var btns = panel.querySelectorAll('.unit-card-order, .unit-order-btn');
+  for (var i = 0; i < btns.length; i++) btns[i].disabled = !on;
+}
 
 function openUnitPanel(building) {
   unitPanelBuilding = building;
@@ -1104,7 +1177,18 @@ function openUnitPanel(building) {
   // но лучше предупредить заранее, чем ловить ошибку после нажатия.
   updateDeployCounter();
 
-  supabase.from('unit_types').select('*').eq('produced_by', code).then(function(res) {
+  // Предел партии задан типом постройки: казарма делает пятёрками,
+  // завод техники — по одной машине
+  Promise.all([
+    supabase.from('unit_types').select('*').eq('produced_by', code),
+    supabase.from('building_types').select('max_per_order').eq('code', code).maybeSingle()
+  ]).then(function(r) {
+    var res = r[0];
+    var maxPerOrder = (!r[1].error && r[1].data) ? (r[1].data.max_per_order || 5) : 5;
+    unitPanelMax = maxPerOrder;
+
+    renderProductionSlot(building, maxPerOrder);
+
     if (res.error || !res.data || res.data.length === 0) {
       list.innerHTML = '<div class="unit-panel-empty">Это здание пока ничего не производит</div>';
       return;
@@ -1181,7 +1265,8 @@ function buildUnitCard(unit) {
     updatePrice();
   });
   plus.addEventListener('click', function() {
-    var n = Math.min(99, parseInt(val.textContent, 10) + 1);
+    // Потолок задаёт постройка: 99 из воздуха сервер всё равно отвергнет
+    var n = Math.min(unitPanelMax, parseInt(val.textContent, 10) + 1);
     val.textContent = n;
     updatePrice();
   });
