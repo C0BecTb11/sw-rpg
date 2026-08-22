@@ -213,3 +213,18 @@
   background: #d9a940;
   transition: width 1s linear;
 }
+
+/* Очки действий и кнопка хода в панели юнита */
+.pickup-ap {
+  float: right;
+  color: #d9a940;
+  font-size: 10px;
+}
+
+.pickup-move {
+  border-left: 3px solid #5fd968;
+}
+
+.pickup-move:disabled {
+  opacity: 0.45;
+}

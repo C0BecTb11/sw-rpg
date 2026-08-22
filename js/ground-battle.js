@@ -25,6 +25,95 @@ var deployZones = [];      // две зоны высадки 6x6 у верхне
 var DEPLOY_SIZE = 6;
 var ATTACK_ZONE_H = 4;   // высота полосы вторжения, приходит из game_settings
 var iAmAttacker = null;  // null — ещё не выяснено
+var myFaction = null;
+var sysFaction = null;
+
+// Геометрию поселения берём из базы: расхождение значило бы, что игрок
+// видит одну зону, а захват считается по другой
+var settlement = null;
+var settlementZone = null;
+var captureState = null;
+var captureGoal = 60;
+
+function loadSettlement() {
+  return Promise.all([
+    supabase.rpc('settlement_box'),
+    supabase.rpc('settlement_zone_box'),
+    supabase.from('game_settings').select('value').eq('key', 'capture_seconds').maybeSingle()
+  ]).then(function(r) {
+    if (!r[0].error && r[0].data && r[0].data.length) settlement = r[0].data[0];
+    if (!r[1].error && r[1].data && r[1].data.length) settlementZone = r[1].data[0];
+    if (!r[2].error && r[2].data) captureGoal = parseInt(r[2].data.value, 10) || 60;
+    redrawScene();
+  });
+}
+
+function loadCaptureState() {
+  return supabase.from('system_capture').select('*').eq('system_id', systemId)
+    .maybeSingle().then(function(res) {
+      captureState = (res.error || !res.data) ? null : res.data;
+      renderCaptureBar();
+      redrawScene();
+    });
+}
+
+function renderCaptureBar() {
+  var bar = document.getElementById('capture-bar');
+  if (!bar) return;
+  if (!captureState) { bar.style.display = 'none'; return; }
+
+  var mine = captureState.faction === myFaction;
+  var pct = Math.max(0, Math.min(100, (captureState.progress / captureGoal) * 100));
+  var label;
+
+  if (captureState.status === 'distribution') {
+    label = mine ? 'Планета взята — ждёт распределения' : 'Планета потеряна';
+  } else if (captureState.status === 'capturing') {
+    label = mine ? 'Захват идёт' : 'Планету захватывают';
+  } else if (captureState.status === 'reverting') {
+    label = mine ? 'Нас выбивают, прогресс падает' : 'Отбиваем поселение';
+  } else if (captureState.status === 'contested') {
+    label = 'Схватка в поселении, силы равны';
+  } else {
+    label = 'Захват замер, в зоне никого';
+  }
+
+  bar.className = mine ? 'mine' : 'theirs';
+  bar.innerHTML = '<div class="capture-label">' + label + ' · ' + Math.round(pct) + '%</div>' +
+    '<div class="capture-track"><i style="width:' + pct + '%"></i></div>';
+  bar.style.display = 'block';
+}
+
+function drawSettlement() {
+  if (!settlement) return;
+
+  var px = settlement.x * CELL_PX;
+  var py = settlement.y * CELL_PX;
+  var sz = settlement.size * CELL_PX;
+
+  var img = getBuildingImage('assets/buildings/settlement.png');
+  if (img && img.complete && !img.failed && img.naturalWidth > 0) {
+    ctx.drawImage(img, px, py, sz, sz);
+  } else {
+    ctx.fillStyle = '#6b5a3e';
+    ctx.fillRect(px, py, sz, sz);
+  }
+
+  if (settlementZone) {
+    var zx = settlementZone.x * CELL_PX;
+    var zy = settlementZone.y * CELL_PX;
+    var zs = settlementZone.size * CELL_PX;
+    ctx.strokeStyle = captureState ? 'rgba(217,169,64,0.95)' : 'rgba(217,169,64,0.4)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 6]);
+    ctx.strokeRect(zx, zy, zs, zs);
+    ctx.setLineDash([]);
+  }
+
+  ctx.strokeStyle = 'rgba(217,169,64,0.8)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(px, py, sz, sz);
+}
 
 // Сколько экрана занято панелями снизу: карта должна уметь подняться
 // над ними, иначе нижние ряды остаются недосягаемыми
@@ -263,6 +352,9 @@ function loadGroundSides() {
       supabase.from('systems').select('faction').eq('id', systemId).maybeSingle()
     ]).then(function(r) {
       var mine = r[0].data && r[0].data.faction;
+      myFaction = mine || null;
+      sysFaction = sys || null;
+      renderCaptureBar();
       var sys = r[1].data && r[1].data.faction;
       if (!mine) return;
       iAmAttacker = (sys !== mine);
@@ -360,11 +452,13 @@ function drawScene(grid) {
     ctx.stroke();
   }
 
+  drawSettlement();
   drawBuildSlots();
   drawDeployZone();
   drawPlacementCells();
   drawDropCells();
   drawDisembarkCells();
+  drawMoveCells();
   drawAttackZone();
   drawUnits();
 }
@@ -669,6 +763,11 @@ function handleTap(clientX, clientY) {
   var cellX = Math.floor(gridPxX / CELL_PX);
   var cellY = Math.floor(gridPxY / CELL_PX);
 
+  if (movingUnit) {
+    handleGroundMoveTap(cellX, cellY);
+    return;
+  }
+
   if (disembarking) {
     handleDisembarkTap(cellX, cellY);
     return;
@@ -754,8 +853,20 @@ function openBuildingInfo(building) {
   var type = building.building_types || {};
   nameEl.textContent = type.name || 'Постройка';
 
-  var refund = Math.floor((type.cost || 0) / 2);
-  refundEl.textContent = 'При сносе вернётся: ' + refund;
+  // Трофейная постройка: её фракция разошлась с фракцией планеты
+  var captured = sysFaction && building.faction && building.faction !== sysFaction;
+  var half = Math.floor((type.cost || 0) / 2);
+
+  if (captured && isController) {
+    refundEl.textContent = 'Трофейная постройка. Снос обойдётся в ' + half;
+    refundEl.style.display = 'block';
+  } else if (isController) {
+    refundEl.textContent = 'При сносе вернётся: ' + half;
+    refundEl.style.display = 'block';
+  } else {
+    refundEl.textContent = '';
+    refundEl.style.display = 'none';
+  }
 
   demolishBtn.style.display = isController ? 'block' : 'none';
   demolishBtn.onclick = function() {
@@ -1064,6 +1175,9 @@ function initGroundBattle() {
       });
       loadGroundSettings();
       loadGroundSides();
+      loadSettlement();
+      loadCaptureState();
+      setInterval(loadCaptureState, 5000);
       loadDropCargo();
 
       var dropBtn = document.getElementById('drop-btn');
@@ -1504,25 +1618,33 @@ function offerPickup(unit) {
                     : supabase.rpc('get_carriers_nearby', { p_unit_id: unit.id }),
     type.carry_slots > 0
       ? supabase.rpc('get_carried_units', { p_carrier_unit_id: unit.id, p_ship_id: null })
-      : Promise.resolve({ data: [] })
+      : Promise.resolve({ data: [] }),
+    // Игрок обычно тапает транспорт, а не бойца. Показываем и обратный
+    // список: кого можно посадить в эту канонерку.
+    type.carry_slots > 0
+      ? supabase.rpc('get_boardable_units', { p_carrier_id: unit.id })
+      : Promise.resolve({ data: [] }),
+    supabase.rpc('unit_ap_state', { p_unit_id: unit.id })
   ]).then(function(r) {
     if (!selectedUnit || selectedUnit.id !== unit.id) return;
 
     var ships = (!r[0].error && r[0].data) ? r[0].data : [];
     var carriers = (!r[1].error && r[1].data) ? r[1].data : [];
     var inside = (!r[2].error && r[2].data) ? r[2].data : [];
+    var boardable = (!r[3].error && r[3].data) ? r[3].data : [];
+    var ap = (!r[4].error && r[4].data && r[4].data.length) ? r[4].data[0] : null;
 
-    if (!ships.length && !carriers.length && !inside.length) { hidePickup(); return; }
-    showPickup(unit, ships, carriers, inside);
+    showPickup(unit, ships, carriers, inside, boardable, ap);
   });
 }
 
-function showPickup(unit, ships, carriers, inside) {
+function showPickup(unit, ships, carriers, inside, boardable, ap) {
   var bar = document.getElementById('pickup-bar');
   if (!bar) return;
 
   carriers = carriers || [];
   inside = inside || [];
+  boardable = boardable || [];
 
   var type = unitTypeById[unit.unit_type] || {};
 
@@ -1530,8 +1652,36 @@ function showPickup(unit, ships, carriers, inside) {
 
   var title = document.createElement('div');
   title.className = 'pickup-title';
-  title.textContent = type.name || unit.unit_type;
+  title.innerHTML = (type.name || unit.unit_type) +
+    (ap ? '<span class="pickup-ap">' + ap.ap + '/' + ap.ap_max +
+          (ap.next_in ? ' · +1 через ' + ap.next_in + ' с' : '') + '</span>' : '');
   bar.appendChild(title);
+
+  // Ход — первым делом: это самое частое действие
+  var moveBtn = document.createElement('button');
+  moveBtn.className = 'pickup-ship pickup-move';
+  moveBtn.innerHTML = '<span>Идти</span><em>до ' + (type.move_range || 4) + ' кл.</em>';
+  moveBtn.disabled = !ap || ap.ap < 1;
+  moveBtn.addEventListener('click', function() { startGroundMove(unit); });
+  bar.appendChild(moveBtn);
+
+  // Кого можно посадить в этот транспорт
+  boardable.forEach(function(b) {
+    var btn = document.createElement('button');
+    btn.className = 'pickup-ship';
+    btn.innerHTML = '<span>Посадить ' + b.unit_name + ' <b>' + b.x + ':' + b.y + '</b></span>' +
+      '<em>мест ' + b.slots + '</em>';
+    btn.addEventListener('click', function() {
+      btn.disabled = true;
+      supabase.rpc('board_carrier', { p_unit_id: b.unit_id, p_carrier_id: unit.id })
+        .then(function(r) {
+          if (r.error) { alert('Не удалось посадить: ' + r.error.message); btn.disabled = false; return; }
+          loadUnits();
+          offerPickup(unit);
+        });
+    });
+    bar.appendChild(btn);
+  });
 
   inside.forEach(function(p) {
     var b = document.createElement('button');
@@ -1645,6 +1795,65 @@ function handleDisembarkTap(cellX, cellY) {
   }).then(function(r) {
     if (r.error) { alert('Не удалось высадить: ' + r.error.message); return; }
     cancelDisembark();
+    loadUnits();
+  });
+}
+
+// Передвижение наземного юнита. Разворота нет — только выбор клетки.
+var movingUnit = null;
+
+function startGroundMove(unit) {
+  movingUnit = unit;
+  hidePickup();
+
+  var type = unitTypeById[unit.unit_type] || {};
+  var hint = document.getElementById('placement-hint');
+  hint.innerHTML = '<span>Куда идёт ' + (type.name || 'юнит') + '</span>' +
+                   '<button id="move-cancel">Отмена</button>';
+  hint.style.display = 'flex';
+  document.getElementById('move-cancel').addEventListener('click', cancelGroundMove);
+
+  setBottomInset(insetFor(hint));
+  focusCell(unit.x, unit.y);
+  redrawScene();
+}
+
+function cancelGroundMove() {
+  movingUnit = null;
+  document.getElementById('placement-hint').style.display = 'none';
+  setBottomInset(0);
+  redrawScene();
+}
+
+// Зона хода: квадрат по дистанции Чебышёва, как у кораблей
+function drawMoveCells() {
+  if (!movingUnit) return;
+
+  var type = unitTypeById[movingUnit.unit_type] || {};
+  var r = type.move_range || 4;
+  var box = unitBox(movingUnit);
+
+  var x0 = (movingUnit.x - r) * CELL_PX;
+  var y0 = (movingUnit.y - r) * CELL_PX;
+  var w = (r * 2 + box.w) * CELL_PX;
+  var h = (r * 2 + box.h) * CELL_PX;
+
+  ctx.fillStyle = 'rgba(95,217,104,0.10)';
+  ctx.fillRect(x0, y0, w, h);
+  ctx.strokeStyle = 'rgba(95,217,104,0.55)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([7, 5]);
+  ctx.strokeRect(x0, y0, w, h);
+  ctx.setLineDash([]);
+}
+
+function handleGroundMoveTap(cellX, cellY) {
+  supabase.rpc('move_ground_unit', {
+    p_unit_id: movingUnit.id, p_x: cellX, p_y: cellY
+  }).then(function(r) {
+    if (r.error) { alert('Не получилось: ' + r.error.message); return; }
+    cancelGroundMove();
+    selectedUnit = null;
     loadUnits();
   });
 }
