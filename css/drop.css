@@ -161,3 +161,9 @@
   will-change: transform;
   transform: translateZ(0);
 }
+
+/* Координаты корабля в списке — тусклее названия, но различимы */
+.pickup-ship b {
+  font-weight: normal;
+  color: #55606c;
+}

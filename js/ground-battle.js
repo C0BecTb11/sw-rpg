@@ -7,9 +7,7 @@
 // Строить может только игрок, назначенный контролёром системы
 // (system_control) — проверка реально идёт на уровне RLS в БД при записи.
 
-// Карта 124 клетки: 120 игрового поля плюс приросшие снизу 4 ряда полосы
-// вторжения. Полоса добавлена к карте, а не вырезана из неё, поэтому все
-// прежние координаты построек и зон остались на местах.
+// 120 игрового поля плюс приросшие снизу 4 ряда полосы вторжения
 var GRID_SIZE = 124;
 var CELL_PX = 32;     // размер клетки в px на канвасе (уменьшен под возросший размер поля)
 var SLOT_COUNT = 7;
@@ -28,9 +26,8 @@ var DEPLOY_SIZE = 6;
 var ATTACK_ZONE_H = 4;   // высота полосы вторжения, приходит из game_settings
 var iAmAttacker = null;  // null — ещё не выяснено
 
-// Сколько экрана занято панелями снизу. Карта должна уметь подняться над
-// ними: полоса вторжения лежит у нижнего края, и без этого её последние
-// ряды оказывались навсегда под панелью.
+// Сколько экрана занято панелями снизу: карта должна уметь подняться
+// над ними, иначе нижние ряды остаются недосягаемыми
 var uiBottomInset = 0;
 
 function setBottomInset(px) {
@@ -41,8 +38,6 @@ function setBottomInset(px) {
   applyTransform();
 }
 
-// Высоту панели меряем по факту: подсказка растёт от длины названия юнита,
-// а полоска погрузки — от числа кораблей в списке.
 function insetFor(el) {
   if (!el) return 0;
   var r = el.getBoundingClientRect();
@@ -50,8 +45,6 @@ function insetFor(el) {
   return Math.max(0, window.innerHeight - r.top + 8);
 }
 
-// Центрирует клетку в свободной части экрана над панелью, чтобы выбранный
-// юнит не уезжал под неё и его не приходилось искать прокруткой.
 function focusCell(cx, cy) {
   var vw = viewport.clientWidth;
   var vh = viewport.clientHeight - uiBottomInset;
@@ -260,9 +253,8 @@ function loadDeployZones() {
 // Настройки тянем отдельным запросом и ничего им не блокируем: до ответа
 // работает значение по умолчанию, полоса просто перерисуется, если в базе
 // стоит другая высота.
-// Обороняющемуся полосу вторжения не показываем: по ней он бы понял, где
-// выстроен десант, и ждал бы на месте высадки. Ту же проверку делает
-// can_see_position в базе — юниты в полосе противнику не отдаются вовсе.
+// Обороняющемуся полосу вторжения не показываем: иначе он увидит,
+// где выстроен десант, и будет ждать на месте высадки
 function loadGroundSides() {
   return supabase.auth.getSession().then(function(res) {
     if (!res.data.session) return;
@@ -274,6 +266,14 @@ function loadGroundSides() {
       var sys = r[1].data && r[1].data.faction;
       if (!mine) return;
       iAmAttacker = (sys !== mine);
+
+      // Сторона приходит отдельным запросом и может опоздать за грузом,
+      // поэтому состояние кнопки пересчитываем и здесь
+      var btn = document.getElementById('drop-btn');
+      if (btn) {
+        btn.style.visibility =
+          (iAmAttacker && dropCargo.length > 0) ? 'visible' : 'hidden';
+      }
       redrawScene();
     });
   });
@@ -364,6 +364,7 @@ function drawScene(grid) {
   drawDeployZone();
   drawPlacementCells();
   drawDropCells();
+  drawDisembarkCells();
   drawAttackZone();
   drawUnits();
 }
@@ -668,6 +669,11 @@ function handleTap(clientX, clientY) {
   var cellX = Math.floor(gridPxX / CELL_PX);
   var cellY = Math.floor(gridPxY / CELL_PX);
 
+  if (disembarking) {
+    handleDisembarkTap(cellX, cellY);
+    return;
+  }
+
   if (droppingUnit) {
     handleDropTap(cellX, cellY);
     return;
@@ -679,8 +685,12 @@ function handleTap(clientX, clientY) {
   }
 
   // Тап по своему юниту показывает его радиус обзора
+  // По всему корпусу: тап по любой из четырёх клеток выбирает машину
   var tappedUnit = unitsOnMap.filter(function(u) {
-    return u.x === cellX && u.y === cellY;
+    if (u.x === null || u.x === undefined) return false;
+    var size = unitBox(u);
+    return cellX >= u.x && cellX < u.x + size.w
+        && cellY >= u.y && cellY < u.y + size.h;
   })[0];
   if (tappedUnit) {
     selectedUnit = (selectedUnit && selectedUnit.id === tappedUnit.id) ? null : tappedUnit;
@@ -1277,6 +1287,12 @@ function loadUnits() {
     supabase.from('unit_types').select('*')
   ]).then(function(r) {
     unitsOnMap = (r[0].error || !r[0].data) ? [] : r[0].data;
+
+    var inside = {};
+    unitsOnMap.forEach(function(u) {
+      if (u.carrier_unit_id) inside[u.carrier_unit_id] = (inside[u.carrier_unit_id] || 0) + 1;
+    });
+    unitsOnMap.forEach(function(u) { u.passengers = inside[u.id] || 0; });
     unitTypeById = {};
     (r[1].data || []).forEach(function(t) { unitTypeById[t.id] = t; });
     redrawScene();
@@ -1285,8 +1301,18 @@ function loadUnits() {
 
 // Юнит занимает одну клетку. Свои — зелёные, союзные — синие,
 // вражеские сюда просто не приходят: их отсекает туман войны в БД.
+// Габариты юнита в клетках: пехота 1x1, AT-TE и канонерка 2x2
+function unitBox(u) {
+  var t = unitTypeById[u.unit_type];
+  return { w: (t && t.width_cells) || 1, h: (t && t.height_cells) || 1 };
+}
+
 function drawUnits() {
   unitsOnMap.forEach(function(u) {
+    // Перевозимые на карте не стоят — они внутри транспорта или в трюме
+    if (u.x === null || u.x === undefined) return;
+
+    var size = unitBox(u);
     var px = u.x * CELL_PX;
     var py = u.y * CELL_PX;
     var mine = u.owner_user_id === currentUserId;
@@ -1295,36 +1321,53 @@ function drawUnits() {
     var img = type ? getUnitImage(type.image) : null;
 
     var inset = 2;
-    var box = CELL_PX - inset * 2;
+    var boxW = CELL_PX * size.w - inset * 2;
+    var boxH = CELL_PX * size.h - inset * 2;
 
     ctx.fillStyle = 'rgba(5,6,10,0.85)';
-    ctx.fillRect(px + inset, py + inset, box, box);
+    ctx.fillRect(px + inset, py + inset, boxW, boxH);
 
     if (img && img.complete && !img.failed && img.naturalWidth > 0) {
       // Исходник вытянутый 1:2, а клетка квадратная. Берём из кадра
       // квадратный кусок с головой и торсом — так юнит узнаётся даже
       // на иконке в 32 пикселя, и фигура не сплющивается.
-      var sw = img.naturalWidth * 0.70;
-      var sx = (img.naturalWidth - sw) / 2;
-      var sy = img.naturalHeight * 0.07;
-      var sh = sw;
+      // У техники кадр квадратный и весь по делу, у пехоты берём
+      // квадрат с головой и торсом
+      var sw, sx, sy, sh;
+      if (type && type.is_vehicle) {
+        sw = img.naturalWidth; sh = img.naturalHeight; sx = 0; sy = 0;
+      } else {
+        sw = img.naturalWidth * 0.70;
+        sx = (img.naturalWidth - sw) / 2;
+        sy = img.naturalHeight * 0.07;
+        sh = sw;
+      }
       ctx.save();
       ctx.beginPath();
-      ctx.rect(px + inset, py + inset, box, box);
+      ctx.rect(px + inset, py + inset, boxW, boxH);
       ctx.clip();
-      ctx.drawImage(img, sx, sy, sw, sh, px + inset, py + inset, box, box);
+      ctx.drawImage(img, sx, sy, sw, sh, px + inset, py + inset, boxW, boxH);
       ctx.restore();
     } else {
       ctx.fillStyle = color;
       ctx.font = Math.round(CELL_PX * 0.5) + 'px monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('⛊', px + CELL_PX / 2, py + CELL_PX / 2 + 1);
+      ctx.fillText('⛊', px + boxW / 2 + inset, py + boxH / 2 + inset);
     }
 
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
-    ctx.strokeRect(px + inset, py + inset, box, box);
+    ctx.strokeRect(px + inset, py + inset, boxW, boxH);
+
+    // Сколько десанта в транспорте — цифрой прямо на карте
+    if (mine && type && type.carry_slots > 0 && u.passengers) {
+      ctx.fillStyle = '#d9a940';
+      ctx.font = 'bold ' + Math.round(CELL_PX * 0.42) + 'px monospace';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(u.passengers, px + boxW, py + boxH + inset);
+    }
   });
 
   // Радиус обзора выбранного юнита показываем кругом — так видно,
@@ -1368,36 +1411,79 @@ var dropCargo = [];        // ответ get_drop_ready_cargo
 function offerPickup(unit) {
   if (unit.owner_user_id !== currentUserId) { hidePickup(); return; }
 
-  supabase.rpc('get_pickup_ready_ships', { p_unit_id: unit.id }).then(function(res) {
-    if (res.error || !res.data || !res.data.length) { hidePickup(); return; }
-    // Юнит мог быть снят с выделения, пока шёл запрос
+  var type = unitTypeById[unit.unit_type] || {};
+
+  Promise.all([
+    supabase.rpc('get_pickup_ready_ships', { p_unit_id: unit.id }),
+    type.is_vehicle ? Promise.resolve({ data: [] })
+                    : supabase.rpc('get_carriers_nearby', { p_unit_id: unit.id }),
+    type.carry_slots > 0
+      ? supabase.rpc('get_carried_units', { p_carrier_unit_id: unit.id, p_ship_id: null })
+      : Promise.resolve({ data: [] })
+  ]).then(function(r) {
     if (!selectedUnit || selectedUnit.id !== unit.id) return;
-    showPickup(unit, res.data);
+
+    var ships = (!r[0].error && r[0].data) ? r[0].data : [];
+    var carriers = (!r[1].error && r[1].data) ? r[1].data : [];
+    var inside = (!r[2].error && r[2].data) ? r[2].data : [];
+
+    if (!ships.length && !carriers.length && !inside.length) { hidePickup(); return; }
+    showPickup(unit, ships, carriers, inside);
   });
 }
 
-function showPickup(unit, ships) {
+function showPickup(unit, ships, carriers, inside) {
   var bar = document.getElementById('pickup-bar');
   if (!bar) return;
 
-  var typeName = (unitTypeById[unit.unit_type] && unitTypeById[unit.unit_type].name)
-                 || unit.unit_type;
+  carriers = carriers || [];
+  inside = inside || [];
+
+  var type = unitTypeById[unit.unit_type] || {};
 
   bar.innerHTML = '';
 
   var title = document.createElement('div');
   title.className = 'pickup-title';
-  title.textContent = 'Забрать на борт: ' + typeName;
+  title.textContent = type.name || unit.unit_type;
   bar.appendChild(title);
+
+  inside.forEach(function(p) {
+    var b = document.createElement('button');
+    b.className = 'pickup-ship';
+    b.innerHTML = '<span>' + p.unit_name + '</span><em>высадить</em>';
+    b.addEventListener('click', function() { startDisembark(unit, p); });
+    bar.appendChild(b);
+  });
+
+  carriers.forEach(function(c) {
+    var b = document.createElement('button');
+    b.className = 'pickup-ship';
+    b.innerHTML = '<span>В ' + c.carrier_name + ' <b>' + c.x + ':' + c.y + '</b></span>' +
+      '<em>мест ' + c.free_slots + '</em>';
+    b.addEventListener('click', function() {
+      b.disabled = true;
+      supabase.rpc('board_carrier', { p_unit_id: unit.id, p_carrier_id: c.carrier_id })
+        .then(function(r) {
+          if (r.error) { alert('Не удалось посадить: ' + r.error.message); b.disabled = false; return; }
+          selectedUnit = null; hidePickup(); loadUnits();
+        });
+    });
+    bar.appendChild(b);
+  });
 
   ships.forEach(function(sh) {
     var b = document.createElement('button');
     b.className = 'pickup-ship';
-    b.innerHTML = '<span>' + sh.ship_name + '</span>' +
+    // Координаты обязательны: одинаковых кораблей в системе может быть
+    // несколько, по одному названию не понять, в который грузишь
+    b.innerHTML = '<span>' + sh.ship_name + ' <b>' + sh.x + ':' + sh.y + '</b></span>' +
       '<em>свободно ' + sh.free_slots + '</em>';
     b.addEventListener('click', function() {
       b.disabled = true;
-      supabase.rpc('load_unit_from_ground', {
+      // Техника едет своей функцией: её вес считается вместе с десантом
+      var rpc = type.is_vehicle ? 'load_vehicle_to_ship' : 'load_unit_from_ground';
+      supabase.rpc(rpc, {
         p_unit_id: unit.id, p_ship_id: sh.ship_id
       }).then(function(r) {
         if (r.error) {
@@ -1419,6 +1505,65 @@ function showPickup(unit, ships) {
   focusCell(unit.x, unit.y);
 }
 
+// Высадка пассажира из канонерки: тап по клетке рядом с ней
+var disembarking = null;
+
+function startDisembark(carrier, passenger) {
+  disembarking = { carrier: carrier, passenger: passenger };
+  hidePickup();
+
+  var hint = document.getElementById('placement-hint');
+  hint.innerHTML = '<span>Куда высадить: ' + passenger.unit_name + '</span>' +
+                   '<button id="disembark-cancel">Отмена</button>';
+  hint.style.display = 'flex';
+  document.getElementById('disembark-cancel').addEventListener('click', cancelDisembark);
+
+  setBottomInset(insetFor(hint));
+  focusCell(carrier.x, carrier.y);
+  redrawScene();
+}
+
+function cancelDisembark() {
+  disembarking = null;
+  document.getElementById('placement-hint').style.display = 'none';
+  setBottomInset(0);
+  redrawScene();
+}
+
+function drawDisembarkCells() {
+  if (!disembarking) return;
+
+  var c = disembarking.carrier;
+  var size = unitBox(c);
+  var occupied = {};
+  unitsOnMap.forEach(function(u) {
+    if (u.x === null || u.x === undefined) return;
+    var b = unitBox(u);
+    for (var dx = 0; dx < b.w; dx++)
+      for (var dy = 0; dy < b.h; dy++)
+        occupied[(u.x + dx) + ':' + (u.y + dy)] = true;
+  });
+
+  for (var y = c.y - 1; y <= c.y + size.h; y++) {
+    for (var x = c.x - 1; x <= c.x + size.w; x++) {
+      if (x < 0 || y < 0 || x >= GRID_SIZE || y >= GRID_SIZE) continue;
+      if (occupied[x + ':' + y]) continue;
+      ctx.fillStyle = 'rgba(95,217,104,0.25)';
+      ctx.fillRect(x * CELL_PX + 3, y * CELL_PX + 3, CELL_PX - 6, CELL_PX - 6);
+    }
+  }
+}
+
+function handleDisembarkTap(cellX, cellY) {
+  supabase.rpc('disembark_carrier', {
+    p_unit_id: disembarking.passenger.unit_id, p_x: cellX, p_y: cellY
+  }).then(function(r) {
+    if (r.error) { alert('Не удалось высадить: ' + r.error.message); return; }
+    cancelDisembark();
+    loadUnits();
+  });
+}
+
 function hidePickup() {
   var bar = document.getElementById('pickup-bar');
   if (!bar || bar.style.visibility === 'hidden') return;
@@ -1434,8 +1579,11 @@ function loadDropCargo() {
       // Показываем через visibility, а не display: элемент остаётся
       // в раскладке, и его появление не заставляет браузер заново
       // растрировать лежащий под ним холст.
+      // Только на чужой планете: на своей высадка идёт пачкой через
+      // панель трюма, поштучная расстановка нужна при вторжении
       var btn = document.getElementById('drop-btn');
-      if (btn) btn.style.visibility = dropCargo.length ? 'visible' : 'hidden';
+      var show = iAmAttacker === true && dropCargo.length > 0;
+      if (btn) btn.style.visibility = show ? 'visible' : 'hidden';
     });
 }
 
@@ -1456,7 +1604,7 @@ function openDropPanel() {
     item.innerHTML =
       '<div class="drop-item-main">' +
         '<div class="drop-item-name">' + row.unit_name + ' ×' + row.quantity + '</div>' +
-        '<div class="drop-item-sub">' + row.ship_name +
+        '<div class="drop-item-sub">' + row.ship_name + ' ' + row.x + ':' + row.y +
           (ready ? ' · площадка ' + row.zone : ' · не в площадке сброса') + '</div>' +
       '</div>';
 
@@ -1488,7 +1636,6 @@ function startDrop(shipId, unitType, name) {
   hint.style.display = 'flex';
   document.getElementById('drop-cancel').addEventListener('click', cancelDrop);
 
-  // Кнопка «Высадка» в этом режиме лишняя и лезет на подсказку
   var btn = document.getElementById('drop-btn');
   if (btn) btn.style.visibility = 'hidden';
 
@@ -1503,7 +1650,7 @@ function cancelDrop() {
   document.getElementById('placement-hint').style.display = 'none';
 
   var btn = document.getElementById('drop-btn');
-  if (btn && dropCargo.length) btn.style.visibility = 'visible';
+  if (btn && iAmAttacker && dropCargo.length) btn.style.visibility = 'visible';
 
   setBottomInset(0);
   redrawScene();
