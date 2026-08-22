@@ -119,6 +119,40 @@ function drawSettlement() {
 // над ними, иначе нижние ряды остаются недосягаемыми
 var uiBottomInset = 0;
 
+// ===== Очки действий наземных юнитов =====
+// Считаем локально: ap и ap_updated_at приходят вместе с юнитом, а время
+// сверяем с сервером один раз при загрузке. Никаких запросов раз в секунду
+// — иначе на каждого игрока набегали бы тысячи обращений в час.
+var gbTimeOffset = 0;
+var gbApCd = 30;
+var gbApMax = 2;
+
+function gbServerNow() {
+  return Date.now() + gbTimeOffset;
+}
+
+function syncGroundTime() {
+  return supabase.rpc('get_server_time').then(function(res) {
+    if (!res.error && res.data) {
+      gbTimeOffset = new Date(res.data).getTime() - Date.now();
+    }
+  });
+}
+
+function unitApState(unit) {
+  if (!unit || unit.ap === undefined || unit.ap === null) return null;
+
+  var elapsed = Math.floor((gbServerNow() - new Date(unit.ap_updated_at).getTime()) / 1000);
+  if (elapsed < 0) elapsed = 0;
+
+  var ap = Math.min(gbApMax, unit.ap + Math.floor(elapsed / gbApCd));
+  return {
+    ap: ap,
+    ap_max: gbApMax,
+    next_in: ap >= gbApMax ? 0 : gbApCd - (elapsed % gbApCd)
+  };
+}
+
 function setBottomInset(px) {
   var delta = px - uiBottomInset;
   uiBottomInset = px;
@@ -379,6 +413,8 @@ function loadGroundSettings() {
       if (row.key === 'ground_attack_zone_height') {
         ATTACK_ZONE_H = parseInt(row.value, 10) || 4;
       }
+      if (row.key === 'ship_action_cooldown_seconds') gbApCd = parseInt(row.value, 10) || 30;
+      if (row.key === 'ship_action_max') gbApMax = parseInt(row.value, 10) || 2;
     });
     // Перерисовываем, только если значение реально отличается от того,
     // с которым уже нарисовано. Полная отрисовка тут дорогая.
@@ -1186,6 +1222,7 @@ function initGroundBattle() {
       });
       loadGroundSettings();
       loadGroundSides();
+      syncGroundTime();
       loadSettlement();
       loadCaptureState();
       setInterval(loadCaptureState, 5000);
@@ -1634,8 +1671,7 @@ function offerPickup(unit) {
     // список: кого можно посадить в эту канонерку.
     type.carry_slots > 0
       ? supabase.rpc('get_boardable_units', { p_carrier_id: unit.id })
-      : Promise.resolve({ data: [] }),
-    supabase.rpc('unit_ap_state', { p_unit_id: unit.id })
+      : Promise.resolve({ data: [] })
   ]).then(function(r) {
     if (!selectedUnit || selectedUnit.id !== unit.id) return;
 
@@ -1643,7 +1679,7 @@ function offerPickup(unit) {
     var carriers = (!r[1].error && r[1].data) ? r[1].data : [];
     var inside = (!r[2].error && r[2].data) ? r[2].data : [];
     var boardable = (!r[3].error && r[3].data) ? r[3].data : [];
-    var ap = (!r[4].error && r[4].data && r[4].data.length) ? r[4].data[0] : null;
+    var ap = unitApState(unit);
 
     showPickup(unit, ships, carriers, inside, boardable, ap);
   });
@@ -1700,13 +1736,13 @@ function showPickup(unit, ships, carriers, inside, boardable, ap) {
   }
 
   // Очки действий — точками, как у кораблей
-  html += '<div class="gu-ap"><div class="gu-dots">';
+  html += '<div class="gu-ap"><div class="gu-dots" id="gu-dots">';
   if (ap) {
     for (var i = 0; i < ap.ap_max; i++) {
       html += '<i class="gu-dot' + (i < ap.ap ? ' on' : '') + '"></i>';
     }
   }
-  html += '</div><div class="gu-ap-text">' +
+  html += '</div><div class="gu-ap-text" id="gu-ap-text">' +
     (ap ? (ap.ap >= ap.ap_max ? 'действия готовы' : '+1 через ' + ap.next_in + ' с') : '') +
     '</div></div>';
 
@@ -1784,6 +1820,43 @@ function showPickup(unit, ships, carriers, inside, boardable, ap) {
   bar.style.visibility = 'visible';
   setBottomInset(insetFor(bar));
   focusCell(unit.x, unit.y);
+
+  startApTicker(unit, moveBtn);
+}
+
+// Обновляем только точки, подпись и доступность кнопки. Панель целиком
+// не перерисовываем: иначе на каждой секунде сбрасывался бы нажатый
+// список и дёргалась вёрстка.
+var apTicker = null;
+
+function startApTicker(unit, moveBtn) {
+  if (apTicker) clearInterval(apTicker);
+
+  var paint = function() {
+    if (!selectedUnit || selectedUnit.id !== unit.id) {
+      clearInterval(apTicker);
+      apTicker = null;
+      return;
+    }
+
+    var st = unitApState(unit);
+    if (!st) return;
+
+    var dots = document.getElementById('gu-dots');
+    var text = document.getElementById('gu-ap-text');
+    if (!dots || !text) return;
+
+    var html = '';
+    for (var i = 0; i < st.ap_max; i++) {
+      html += '<i class="gu-dot' + (i < st.ap ? ' on' : '') + '"></i>';
+    }
+    dots.innerHTML = html;
+    text.textContent = st.ap >= st.ap_max ? 'действия готовы' : '+1 через ' + st.next_in + ' с';
+
+    if (moveBtn) moveBtn.disabled = st.ap < 1;
+  };
+
+  apTicker = setInterval(paint, 1000);
 }
 
 // Высадка пассажира из канонерки: тап по клетке рядом с ней.
@@ -1907,6 +1980,8 @@ function handleGroundMoveTap(cellX, cellY) {
 }
 
 function hidePickup() {
+  if (apTicker) { clearInterval(apTicker); apTicker = null; }
+
   var bar = document.getElementById('pickup-bar');
   if (!bar || bar.style.visibility === 'hidden') return;
   bar.style.visibility = 'hidden';
