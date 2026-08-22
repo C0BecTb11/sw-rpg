@@ -459,6 +459,7 @@ function drawScene(grid) {
   drawDropCells();
   drawDisembarkCells();
   drawMoveCells();
+  drawDisembarkCells();
   drawAttackZone();
   drawUnits();
 }
@@ -762,6 +763,16 @@ function handleTap(clientX, clientY) {
   var gridPxY = (vy - panY) / scale;
   var cellX = Math.floor(gridPxX / CELL_PX);
   var cellY = Math.floor(gridPxY / CELL_PX);
+
+  if (droppingVehicle) {
+    handleVehicleDropTap(cellX, cellY);
+    return;
+  }
+
+  if (disembarking) {
+    handleDisembarkTap(cellX, cellY);
+    return;
+  }
 
   if (movingUnit) {
     handleGroundMoveTap(cellX, cellY);
@@ -1775,6 +1786,67 @@ function showPickup(unit, ships, carriers, inside, boardable, ap) {
   focusCell(unit.x, unit.y);
 }
 
+// Высадка пассажира из канонерки: тап по клетке рядом с ней.
+// Отдельный режим от десанта с корабля — тот про полосу вторжения,
+// а этот про клетки вплотную к транспорту.
+var disembarking = null;
+
+function startDisembark(carrier, passenger) {
+  disembarking = { carrier: carrier, passenger: passenger };
+  hidePickup();
+
+  var hint = document.getElementById('placement-hint');
+  hint.innerHTML = '<span>Куда высадить: ' + passenger.unit_name + '</span>' +
+                   '<button id="disembark-cancel">Отмена</button>';
+  hint.style.display = 'flex';
+  document.getElementById('disembark-cancel').addEventListener('click', cancelDisembark);
+
+  setBottomInset(insetFor(hint));
+  focusCell(carrier.x, carrier.y);
+  redrawScene();
+}
+
+function cancelDisembark() {
+  disembarking = null;
+  document.getElementById('placement-hint').style.display = 'none';
+  setBottomInset(0);
+  redrawScene();
+}
+
+function drawDisembarkCells() {
+  if (!disembarking) return;
+
+  var c = disembarking.carrier;
+  var size = unitBox(c);
+  var occupied = {};
+  unitsOnMap.forEach(function(u) {
+    if (u.x === null || u.x === undefined) return;
+    var b = unitBox(u);
+    for (var dx = 0; dx < b.w; dx++)
+      for (var dy = 0; dy < b.h; dy++)
+        occupied[(u.x + dx) + ':' + (u.y + dy)] = true;
+  });
+
+  for (var y = c.y - 1; y <= c.y + size.h; y++) {
+    for (var x = c.x - 1; x <= c.x + size.w; x++) {
+      if (x < 0 || y < 0 || x >= GRID_SIZE || y >= GRID_SIZE) continue;
+      if (occupied[x + ':' + y]) continue;
+      ctx.fillStyle = 'rgba(95,217,104,0.25)';
+      ctx.fillRect(x * CELL_PX + 3, y * CELL_PX + 3, CELL_PX - 6, CELL_PX - 6);
+    }
+  }
+}
+
+function handleDisembarkTap(cellX, cellY) {
+  supabase.rpc('disembark_carrier', {
+    p_unit_id: disembarking.passenger.unit_id, p_x: cellX, p_y: cellY
+  }).then(function(r) {
+    if (r.error) { alert('Не удалось высадить: ' + r.error.message); return; }
+    cancelDisembark();
+    loadUnits();
+  });
+}
+
 // Передвижение наземного юнита. Разворота нет — только выбор клетки.
 var movingUnit = null;
 
@@ -1841,10 +1913,16 @@ function hidePickup() {
   setBottomInset(0);
 }
 
+var dropVehicles = [];
+
 function loadDropCargo() {
-  return supabase.rpc('get_drop_ready_cargo', { p_system_id: systemId })
-    .then(function(res) {
+  return Promise.all([
+    supabase.rpc('get_drop_ready_cargo', { p_system_id: systemId }),
+    supabase.rpc('get_drop_ready_vehicles', { p_system_id: systemId })
+  ]).then(function(r) {
+      var res = r[0];
       dropCargo = (res.error || !res.data) ? [] : res.data;
+      dropVehicles = (r[1].error || !r[1].data) ? [] : r[1].data;
 
       // Показываем через visibility, а не display: элемент остаётся
       // в раскладке, и его появление не заставляет браузер заново
@@ -1852,7 +1930,7 @@ function loadDropCargo() {
       // Только на чужой планете: на своей высадка идёт пачкой через
       // панель трюма, поштучная расстановка нужна при вторжении
       var btn = document.getElementById('drop-btn');
-      var show = iAmAttacker === true && dropCargo.length > 0;
+      var show = iAmAttacker === true && (dropCargo.length > 0 || dropVehicles.length > 0);
       if (btn) btn.style.visibility = show ? 'visible' : 'hidden';
     });
 }
@@ -1862,9 +1940,29 @@ function openDropPanel() {
   var list = document.getElementById('drop-panel-list');
   list.innerHTML = '';
 
-  if (!dropCargo.length) {
+  if (!dropCargo.length && !dropVehicles.length) {
     list.innerHTML = '<div class="drop-empty">В трюмах пусто</div>';
   }
+
+  // Техника идёт первой: она занимает несколько клеток, и её положение
+  // важнее, чем то, куда встанет отдельный пехотинец
+  dropVehicles.forEach(function(v) {
+    var ready = v.zone !== null && v.zone !== undefined;
+    var item = document.createElement('button');
+    item.className = 'drop-item' + (ready ? '' : ' not-ready');
+    item.innerHTML =
+      '<div class="drop-item-main">' +
+        '<div class="drop-item-name">' + v.unit_name +
+          ' <span class="drop-size">' + v.width_cells + '×' + v.height_cells + '</span>' +
+          (v.passengers ? ' <span class="drop-pax">+' + v.passengers + '</span>' : '') +
+        '</div>' +
+        '<div class="drop-item-sub">' + v.ship_name +
+          (ready ? ' · площадка ' + v.zone : ' · не в площадке сброса') + '</div>' +
+      '</div>';
+    if (ready) { item.addEventListener('click', function() { startVehicleDrop(v); }); }
+    else { item.disabled = true; }
+    list.appendChild(item);
+  });
 
   dropCargo.forEach(function(row) {
     var ready = row.zone !== null && row.zone !== undefined;
@@ -1896,6 +1994,40 @@ function closeDropPanel() {
   document.getElementById('drop-panel').style.display = 'none';
 }
 
+var droppingVehicle = null;
+
+function startVehicleDrop(v) {
+  droppingVehicle = v;
+  droppingUnit = null;
+  closeDropPanel();
+
+  var hint = document.getElementById('placement-hint');
+  hint.innerHTML = '<span>Куда высадить: ' + v.unit_name +
+                   ' (' + v.width_cells + '×' + v.height_cells + ')</span>' +
+                   '<button id="drop-cancel">Готово</button>';
+  hint.style.display = 'flex';
+  document.getElementById('drop-cancel').addEventListener('click', cancelDrop);
+
+  var btn = document.getElementById('drop-btn');
+  if (btn) btn.style.visibility = 'hidden';
+
+  setBottomInset(insetFor(hint));
+  var midX = (viewport.clientWidth / 2 - panX) / scale / CELL_PX;
+  focusCell(midX, GRID_SIZE - ATTACK_ZONE_H + ATTACK_ZONE_H / 2);
+  redrawScene();
+}
+
+function handleVehicleDropTap(cellX, cellY) {
+  supabase.rpc('unload_vehicle_at', {
+    p_unit_id: droppingVehicle.unit_id, p_x: cellX, p_y: cellY
+  }).then(function(r) {
+    if (r.error) { alert('Не удалось высадить: ' + r.error.message); return; }
+    cancelDrop();
+    loadUnits();
+    loadDropCargo();
+  });
+}
+
 function startDrop(shipId, unitType, name) {
   droppingUnit = { shipId: shipId, unitType: unitType, name: name };
   closeDropPanel();
@@ -1917,6 +2049,7 @@ function startDrop(shipId, unitType, name) {
 
 function cancelDrop() {
   droppingUnit = null;
+  droppingVehicle = null;
   document.getElementById('placement-hint').style.display = 'none';
 
   var btn = document.getElementById('drop-btn');
@@ -1928,17 +2061,35 @@ function cancelDrop() {
 
 // Подсветка свободных клеток полосы вторжения
 function drawDropCells() {
-  if (!droppingUnit) return;
+  if (!droppingUnit && !droppingVehicle) return;
+
+  var vw = droppingVehicle ? droppingVehicle.width_cells : 1;
+  var vh = droppingVehicle ? droppingVehicle.height_cells : 1;
 
   var occupied = {};
-  unitsOnMap.forEach(function(u) { occupied[u.x + ':' + u.y] = true; });
+  unitsOnMap.forEach(function(u) {
+    if (u.x === null || u.x === undefined) return;
+    var b = unitBox(u);
+    for (var dx = 0; dx < b.w; dx++)
+      for (var dy = 0; dy < b.h; dy++)
+        occupied[(u.x + dx) + ':' + (u.y + dy)] = true;
+  });
+
+  var boxFree = function(x, y) {
+    if (y + vh > GRID_SIZE || x + vw > GRID_SIZE) return false;
+    for (var dx = 0; dx < vw; dx++)
+      for (var dy = 0; dy < vh; dy++)
+        if (occupied[(x + dx) + ':' + (y + dy)]) return false;
+    return true;
+  };
 
   var y0 = GRID_SIZE - ATTACK_ZONE_H;
   for (var cy = y0; cy < GRID_SIZE; cy++) {
     for (var cx = 0; cx < GRID_SIZE; cx++) {
-      if (occupied[cx + ':' + cy]) continue;
+      if (!boxFree(cx, cy)) continue;
       ctx.fillStyle = 'rgba(217,74,74,0.22)';
-      ctx.fillRect(cx * CELL_PX + 3, cy * CELL_PX + 3, CELL_PX - 6, CELL_PX - 6);
+      ctx.fillRect(cx * CELL_PX + 3, cy * CELL_PX + 3,
+                   CELL_PX * vw - 6, CELL_PX * vh - 6);
     }
   }
 }
