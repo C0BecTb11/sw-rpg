@@ -228,3 +228,186 @@
 .pickup-move:disabled {
   opacity: 0.45;
 }
+
+/* Габарит и десант техники в списке высадки */
+.drop-size { color: #55606c; font-size: 10px; }
+.drop-pax  { color: #d9a940; font-size: 10px; }
+
+/* Полоса захвата поселения */
+#capture-bar {
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  top: 62px;
+  z-index: 1400;
+  padding: 9px 12px;
+  background: rgba(13,17,25,0.95);
+  border: 1px solid #1c2530;
+  border-radius: 10px;
+  font-family: 'Courier New', monospace;
+}
+
+#capture-bar.mine   { border-left: 3px solid #5fd968; }
+#capture-bar.theirs { border-left: 3px solid #d94a4a; }
+
+.capture-label {
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #cfd8dc;
+  margin-bottom: 6px;
+}
+
+.capture-track {
+  height: 6px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.capture-track i { display: block; height: 100%; transition: width 1s linear; }
+#capture-bar.mine   .capture-track i { background: #5fd968; }
+#capture-bar.theirs .capture-track i { background: #d94a4a; }
+
+/* ===== HUD наземного юнита ===== */
+
+#pickup-bar {
+  padding: 12px 14px calc(14px + env(safe-area-inset-bottom));
+}
+
+.gu-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.gu-media {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border: 1px solid #1c2530;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0a0d14;
+}
+
+.gu-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.gu-info { flex: 1; min-width: 0; }
+
+.gu-name {
+  font-size: 13px;
+  letter-spacing: 1px;
+  color: #cfd8dc;
+}
+
+.gu-sub {
+  margin-top: 3px;
+  font-size: 10px;
+  color: #55606c;
+}
+
+.gu-close {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  background: none;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  color: #8fa8c4;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.gu-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 10px;
+  color: #8fa8c4;
+}
+
+.gu-bar span { flex: none; width: 62px; letter-spacing: 1px; }
+.gu-bar b { flex: none; width: 46px; text-align: right; color: #cfd8dc; font-size: 10px; }
+
+.gu-track {
+  flex: 1;
+  height: 6px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.gu-track i { display: block; height: 100%; background: #5fd968; }
+.gu-track-cargo i { background: #d9a940; }
+
+.gu-ap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 11px 0 10px;
+  padding-top: 10px;
+  border-top: 1px solid #1c2530;
+}
+
+.gu-dots { display: flex; gap: 5px; }
+
+.gu-dot {
+  width: 11px;
+  height: 11px;
+  border: 1px solid #2a3644;
+  border-radius: 50%;
+  background: #10151e;
+}
+
+.gu-dot.on { background: #d9a940; border-color: #d9a940; }
+
+.gu-ap-text { font-size: 10px; color: #55606c; letter-spacing: 1px; }
+
+.gu-actions { display: flex; gap: 6px; }
+
+.gu-btn {
+  flex: 1;
+  padding: 11px 6px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 8px;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+.gu-btn-go { background: #5fd968; border-color: #5fd968; color: #0a0d14; font-weight: bold; }
+.gu-btn:disabled { opacity: 0.4; }
+
+/* Строки действий: посадка зелёная, содержимое жёлтое, корабль синий */
+.gu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px 12px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-left: 3px solid #2a3644;
+  border-radius: 8px;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  text-align: left;
+}
+
+.gu-row b { font-weight: normal; color: #55606c; }
+.gu-row em { font-style: normal; font-size: 10px; color: #8fa8c4; }
+.gu-row.board  { border-left-color: #5fd968; }
+.gu-row.inside { border-left-color: #d9a940; }
+.gu-row.ship   { border-left-color: #4a90d9; }
+.gu-row:disabled { opacity: 0.45; }
+
+/* Техника в трюме отличается от пехоты */
+.cargo-vehicle { border-color: #d9a940; }

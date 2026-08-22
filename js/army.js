@@ -26,7 +26,9 @@ function loadCommanders(userId) {
     supabase.from('commanders').select('*').eq('user_id', userId).order('slot_index'),
     supabase.from('systems').select('id, name'),
     supabase.from('ships').select('*, ship_types(name, image, capacity)').eq('owner_user_id', userId),
-    supabase.from('ship_cargo').select('*, unit_types(name, image)')
+    // Трюм — это не только пехота из ship_cargo: техника лежит строками
+    // в unit_positions, и без неё загруженная канонерка пропадала из виду
+    supabase.rpc('get_ship_holds')
   ]).then(function(results) {
     var commandersRes = results[0];
     var systemsRes = results[1];
@@ -187,7 +189,9 @@ function makeFleetSection(ships, cargoByShip, systemNames) {
   ships.forEach(function(ship) {
     var type = ship.ship_types || {};
     var cargo = cargoByShip[ship.id] || [];
-    var used = cargo.reduce(function(a, c) { return a + c.quantity; }, 0);
+    // Место считаем слотами, а не головами: техника занимает больше,
+    // а гружёная канонерка — ещё и за свой десант
+    var used = cargo.reduce(function(a, c) { return a + (c.slots || c.quantity); }, 0);
 
     var block = document.createElement('div');
     block.className = 'ship-block';
@@ -227,7 +231,14 @@ function makeFleetSection(ships, cargoByShip, systemNames) {
       var grid = document.createElement('div');
       grid.className = 'inventory-grid';
       cargo.forEach(function(c) {
-        grid.appendChild(makeUnitChip(c.unit_types, c.quantity));
+        // Поля приходят плоскими из get_ship_holds. У техники дописываем,
+        // сколько десанта сидит внутри — иначе непонятно, почему она
+        // занимает больше места, чем весит сама.
+        var chip = makeUnitChip(
+          { name: c.unit_name + (c.passengers ? ' +' + c.passengers : ''), image: c.unit_image },
+          c.quantity);
+        if (c.is_vehicle) chip.classList.add('cargo-vehicle');
+        grid.appendChild(chip);
       });
       body.appendChild(grid);
     }
@@ -252,7 +263,10 @@ function loadGarrisons(userId) {
   if (!listEl) return;
 
   Promise.all([
-    supabase.from('unit_positions').select('system_id, unit_type').eq('owner_user_id', userId),
+    // Только те, кто реально стоит на земле: у сидящих в транспорте
+    // и в трюме координат нет, иначе они считались бы дважды
+    supabase.from('unit_positions').select('system_id, unit_type')
+      .eq('owner_user_id', userId).not('x', 'is', null),
     supabase.from('systems').select('id, name'),
     supabase.from('unit_types').select('id, name, image')
   ]).then(function(results) {

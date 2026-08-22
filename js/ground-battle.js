@@ -1638,40 +1638,95 @@ function offerPickup(unit) {
   });
 }
 
+// HUD наземного юнита. Устроен как панель корабля: шапка с названием
+// и состоянием, полосы прочности, точки очков действий и кнопки внизу.
+// Разворота нет — у наземных нет носа и щитовых секторов.
 function showPickup(unit, ships, carriers, inside, boardable, ap) {
   var bar = document.getElementById('pickup-bar');
   if (!bar) return;
 
+  ships = ships || [];
   carriers = carriers || [];
   inside = inside || [];
   boardable = boardable || [];
 
   var type = unitTypeById[unit.unit_type] || {};
+  var hpPct = type.max_hp ? Math.max(0, Math.min(100, unit.hp / type.max_hp * 100)) : 100;
 
-  bar.innerHTML = '';
+  var html = '';
 
-  var title = document.createElement('div');
-  title.className = 'pickup-title';
-  title.innerHTML = (type.name || unit.unit_type) +
-    (ap ? '<span class="pickup-ap">' + ap.ap + '/' + ap.ap_max +
-          (ap.next_in ? ' · +1 через ' + ap.next_in + ' с' : '') + '</span>' : '');
-  bar.appendChild(title);
+  // Шапка
+  html += '<div class="gu-head">' +
+    '<div class="gu-media">' +
+      (type.image ? '<img src="../' + type.image + '" alt="">' : '') +
+    '</div>' +
+    '<div class="gu-info">' +
+      '<div class="gu-name">' + (type.name || unit.unit_type) + '</div>' +
+      '<div class="gu-sub">' + unit.x + ':' + unit.y +
+        ' · ход до ' + (type.move_range || 4) + ' кл.' +
+        (type.width_cells > 1 ? ' · ' + type.width_cells + '×' + type.height_cells : '') +
+      '</div>' +
+    '</div>' +
+    '<button class="gu-close" id="gu-close">✕</button>' +
+  '</div>';
 
-  // Ход — первым делом: это самое частое действие
+  // Прочность
+  html += '<div class="gu-bar">' +
+    '<span>Прочность</span>' +
+    '<div class="gu-track"><i style="width:' + hpPct + '%"></i></div>' +
+    '<b>' + unit.hp + '</b>' +
+  '</div>';
+
+  // Десант внутри транспорта — своей полосой, чтобы было видно загрузку
+  if (type.carry_slots > 0) {
+    var used = inside.reduce(function(a, p) { return a + (p.slots || 1); }, 0);
+    var pct = Math.min(100, used / type.carry_slots * 100);
+    html += '<div class="gu-bar">' +
+      '<span>Десант</span>' +
+      '<div class="gu-track gu-track-cargo"><i style="width:' + pct + '%"></i></div>' +
+      '<b>' + used + '/' + type.carry_slots + '</b>' +
+    '</div>';
+  }
+
+  // Очки действий — точками, как у кораблей
+  html += '<div class="gu-ap"><div class="gu-dots">';
+  if (ap) {
+    for (var i = 0; i < ap.ap_max; i++) {
+      html += '<i class="gu-dot' + (i < ap.ap ? ' on' : '') + '"></i>';
+    }
+  }
+  html += '</div><div class="gu-ap-text">' +
+    (ap ? (ap.ap >= ap.ap_max ? 'действия готовы' : '+1 через ' + ap.next_in + ' с') : '') +
+    '</div></div>';
+
+  bar.innerHTML = html;
+
+  // Кнопки
+  var actions = document.createElement('div');
+  actions.className = 'gu-actions';
+
   var moveBtn = document.createElement('button');
-  moveBtn.className = 'pickup-ship pickup-move';
-  moveBtn.innerHTML = '<span>Идти</span><em>до ' + (type.move_range || 4) + ' кл.</em>';
+  moveBtn.className = 'gu-btn gu-btn-go';
+  moveBtn.textContent = 'Идти';
   moveBtn.disabled = !ap || ap.ap < 1;
   moveBtn.addEventListener('click', function() { startGroundMove(unit); });
-  bar.appendChild(moveBtn);
+  actions.appendChild(moveBtn);
 
-  // Кого можно посадить в этот транспорт
+  bar.appendChild(actions);
+
+  // Списки: посадка, высадка, погрузка на корабль
+  var addRow = function(text, note, cls, onClick) {
+    var b = document.createElement('button');
+    b.className = 'gu-row' + (cls ? ' ' + cls : '');
+    b.innerHTML = '<span>' + text + '</span><em>' + note + '</em>';
+    if (onClick) b.addEventListener('click', function() { onClick(b); });
+    else b.disabled = true;
+    bar.appendChild(b);
+  };
+
   boardable.forEach(function(b) {
-    var btn = document.createElement('button');
-    btn.className = 'pickup-ship';
-    btn.innerHTML = '<span>Посадить ' + b.unit_name + ' <b>' + b.x + ':' + b.y + '</b></span>' +
-      '<em>мест ' + b.slots + '</em>';
-    btn.addEventListener('click', function() {
+    addRow('Посадить ' + b.unit_name + ' <b>' + b.x + ':' + b.y + '</b>',
+           'мест ' + b.slots, 'board', function(btn) {
       btn.disabled = true;
       supabase.rpc('board_carrier', { p_unit_id: b.unit_id, p_carrier_id: unit.id })
         .then(function(r) {
@@ -1680,123 +1735,44 @@ function showPickup(unit, ships, carriers, inside, boardable, ap) {
           offerPickup(unit);
         });
     });
-    bar.appendChild(btn);
   });
 
   inside.forEach(function(p) {
-    var b = document.createElement('button');
-    b.className = 'pickup-ship';
-    b.innerHTML = '<span>' + p.unit_name + '</span><em>высадить</em>';
-    b.addEventListener('click', function() { startDisembark(unit, p); });
-    bar.appendChild(b);
+    addRow(p.unit_name, 'высадить', 'inside', function() { startDisembark(unit, p); });
   });
 
   carriers.forEach(function(c) {
-    var b = document.createElement('button');
-    b.className = 'pickup-ship';
-    b.innerHTML = '<span>В ' + c.carrier_name + ' <b>' + c.x + ':' + c.y + '</b></span>' +
-      '<em>мест ' + c.free_slots + '</em>';
-    b.addEventListener('click', function() {
-      b.disabled = true;
+    addRow('В ' + c.carrier_name + ' <b>' + c.x + ':' + c.y + '</b>',
+           'мест ' + c.free_slots, 'board', function(btn) {
+      btn.disabled = true;
       supabase.rpc('board_carrier', { p_unit_id: unit.id, p_carrier_id: c.carrier_id })
         .then(function(r) {
-          if (r.error) { alert('Не удалось посадить: ' + r.error.message); b.disabled = false; return; }
+          if (r.error) { alert('Не удалось посадить: ' + r.error.message); btn.disabled = false; return; }
           selectedUnit = null; hidePickup(); loadUnits();
         });
     });
-    bar.appendChild(b);
   });
 
   ships.forEach(function(sh) {
-    var b = document.createElement('button');
-    b.className = 'pickup-ship';
-    // Координаты обязательны: одинаковых кораблей в системе может быть
-    // несколько, по одному названию не понять, в который грузишь
-    b.innerHTML = '<span>' + sh.ship_name + ' <b>' + sh.x + ':' + sh.y + '</b></span>' +
-      '<em>свободно ' + sh.free_slots + '</em>';
-    b.addEventListener('click', function() {
-      b.disabled = true;
-      // Техника едет своей функцией: её вес считается вместе с десантом
+    addRow('На ' + sh.ship_name + ' <b>' + sh.x + ':' + sh.y + '</b>',
+           'свободно ' + sh.free_slots, 'ship', function(btn) {
+      btn.disabled = true;
       var rpc = type.is_vehicle ? 'load_vehicle_to_ship' : 'load_unit_from_ground';
-      supabase.rpc(rpc, {
-        p_unit_id: unit.id, p_ship_id: sh.ship_id
-      }).then(function(r) {
-        if (r.error) {
-          alert('Не удалось забрать: ' + r.error.message);
-          b.disabled = false;
-          return;
-        }
-        selectedUnit = null;
-        hidePickup();
-        loadUnits();
-        loadDropCargo();
+      supabase.rpc(rpc, { p_unit_id: unit.id, p_ship_id: sh.ship_id }).then(function(r) {
+        if (r.error) { alert('Не удалось: ' + r.error.message); btn.disabled = false; return; }
+        selectedUnit = null; hidePickup(); loadUnits(); loadDropCargo();
       });
     });
-    bar.appendChild(b);
+  });
+
+  var closeBtn = document.getElementById('gu-close');
+  if (closeBtn) closeBtn.addEventListener('click', function() {
+    selectedUnit = null; hidePickup(); redrawScene();
   });
 
   bar.style.visibility = 'visible';
   setBottomInset(insetFor(bar));
   focusCell(unit.x, unit.y);
-}
-
-// Высадка пассажира из канонерки: тап по клетке рядом с ней
-var disembarking = null;
-
-function startDisembark(carrier, passenger) {
-  disembarking = { carrier: carrier, passenger: passenger };
-  hidePickup();
-
-  var hint = document.getElementById('placement-hint');
-  hint.innerHTML = '<span>Куда высадить: ' + passenger.unit_name + '</span>' +
-                   '<button id="disembark-cancel">Отмена</button>';
-  hint.style.display = 'flex';
-  document.getElementById('disembark-cancel').addEventListener('click', cancelDisembark);
-
-  setBottomInset(insetFor(hint));
-  focusCell(carrier.x, carrier.y);
-  redrawScene();
-}
-
-function cancelDisembark() {
-  disembarking = null;
-  document.getElementById('placement-hint').style.display = 'none';
-  setBottomInset(0);
-  redrawScene();
-}
-
-function drawDisembarkCells() {
-  if (!disembarking) return;
-
-  var c = disembarking.carrier;
-  var size = unitBox(c);
-  var occupied = {};
-  unitsOnMap.forEach(function(u) {
-    if (u.x === null || u.x === undefined) return;
-    var b = unitBox(u);
-    for (var dx = 0; dx < b.w; dx++)
-      for (var dy = 0; dy < b.h; dy++)
-        occupied[(u.x + dx) + ':' + (u.y + dy)] = true;
-  });
-
-  for (var y = c.y - 1; y <= c.y + size.h; y++) {
-    for (var x = c.x - 1; x <= c.x + size.w; x++) {
-      if (x < 0 || y < 0 || x >= GRID_SIZE || y >= GRID_SIZE) continue;
-      if (occupied[x + ':' + y]) continue;
-      ctx.fillStyle = 'rgba(95,217,104,0.25)';
-      ctx.fillRect(x * CELL_PX + 3, y * CELL_PX + 3, CELL_PX - 6, CELL_PX - 6);
-    }
-  }
-}
-
-function handleDisembarkTap(cellX, cellY) {
-  supabase.rpc('disembark_carrier', {
-    p_unit_id: disembarking.passenger.unit_id, p_x: cellX, p_y: cellY
-  }).then(function(r) {
-    if (r.error) { alert('Не удалось высадить: ' + r.error.message); return; }
-    cancelDisembark();
-    loadUnits();
-  });
 }
 
 // Передвижение наземного юнита. Разворота нет — только выбор клетки.
