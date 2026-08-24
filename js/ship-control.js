@@ -555,6 +555,29 @@ function scLoadTargets() {
 
 var SC_ARCS = { fore: 'в нос', aft: 'в корму', port: 'в левый борт', starboard: 'в правый борт' };
 
+// Сводка боя сверху экрана. Держим не больше трёх строк: это подсказка
+// «что сейчас произошло», а не журнал. Разбор полётов — в событиях.
+function scLog(kind, title, details) {
+  var box = document.getElementById('combat-log');
+  if (!box) return;
+
+  var line = document.createElement('div');
+  line.className = 'clog ' + kind;
+  line.innerHTML = '<span class="clog-title">' + title + '</span>' +
+    (details ? '<span class="clog-details">' + details + '</span>' : '');
+
+  box.insertBefore(line, box.firstChild);
+  while (box.children.length > 3) box.removeChild(box.lastChild);
+
+  // Убираем сами: висящие строки закрывают карту
+  setTimeout(function() {
+    line.classList.add('fading');
+    setTimeout(function() {
+      if (line.parentNode) line.parentNode.removeChild(line);
+    }, 600);
+  }, 8000);
+}
+
 function scDoAttack(target, btn) {
   btn.disabled = true;
 
@@ -568,13 +591,27 @@ function scDoAttack(target, btn) {
 
     if (!r) { loadShips(); return; }
 
+    var me = scType.name;
+    var arc = SC_ARCS[r.arc] || '';
+
     if (!r.hit) {
       hint.textContent = 'Промах по ' + target.ship_name;
+      scLog('miss', 'Промах по ' + target.ship_name, 'шанс был ' + target.chance + '%');
     } else if (r.destroyed) {
       hint.textContent = target.ship_name + ' уничтожен';
+      scLog('kill', target.ship_name + ' уничтожен', me + ' · ' + arc + ' · −' + r.damage);
     } else {
-      hint.textContent = 'Попадание ' + (SC_ARCS[r.arc] || '') +
+      // Сколько дошло до корпуса — разница прочности до и после.
+      // Без этого непонятно, пробил ты щит или он всё удержал.
+      var byHull = Math.max(0, target.hp - r.target_hp);
+
+      hint.textContent = 'Попадание ' + arc +
         ' · щит ' + r.shield_left + ' · корпус ' + r.target_hp;
+
+      scLog(byHull > 0 ? 'hull' : 'shield',
+            me + ' → ' + target.ship_name + ' · ' + arc,
+            '−' + r.damage + (byHull > 0 ? ' (по корпусу ' + byHull + ')' : ' весь в щит') +
+            ' · щит ' + r.shield_left + ' · корпус ' + r.target_hp);
     }
 
     loadShips();
