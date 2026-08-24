@@ -91,13 +91,14 @@ function scEnsureHud() {
     '<div id="sc-actions">' +
       '<button class="sc-btn" id="sc-move">Ход</button>' +
       '<button class="sc-btn" id="sc-rotate">Разворот</button>' +
-      '<button class="sc-btn sc-btn-ghost" id="sc-abilities" disabled>Способности</button>' +
+      '<button class="sc-btn" id="sc-attack">Атака</button>' +
     '</div>' +
     '<div id="sc-confirm">' +
       '<button class="sc-btn sc-btn-go" id="sc-go">Идти</button>' +
       '<button class="sc-btn" id="sc-cancel">Отмена</button>' +
     '</div>' +
     '<div id="sc-dial"></div>' +
+    '<div id="sc-targets" style="display:none;"></div>' +
     '<div id="sc-hint"></div>';
 
   document.body.appendChild(hud);
@@ -108,6 +109,9 @@ function scEnsureHud() {
   });
   document.getElementById('sc-rotate').addEventListener('click', function() {
     scSetMode(scMode === 'rotate' ? null : 'rotate');
+  });
+  document.getElementById('sc-attack').addEventListener('click', function() {
+    scSetMode(scMode === 'attack' ? null : 'attack');
   });
   document.getElementById('sc-go').addEventListener('click', scConfirmMove);
   document.getElementById('sc-cancel').addEventListener('click', scCancelAim);
@@ -286,6 +290,7 @@ function scRenderAp() {
 
   document.getElementById('sc-move').disabled = st.ap < 1;
   document.getElementById('sc-rotate').disabled = st.ap < 1;
+  document.getElementById('sc-attack').disabled = st.ap < 1;
 }
 
 function scRenderMode() {
@@ -294,6 +299,10 @@ function scRenderMode() {
   var moveBtn = document.getElementById('sc-move');
   var rotBtn = document.getElementById('sc-rotate');
   if (!dial) return;
+
+  var targets = document.getElementById('sc-targets');
+  if (targets) targets.style.display = scMode === 'attack' ? 'block' : 'none';
+  if (scMode === 'attack') scLoadTargets();
 
   dial.style.display = scMode === 'rotate' ? 'grid' : 'none';
 
@@ -311,7 +320,11 @@ function scRenderMode() {
   document.getElementById('sc-actions').style.display =
     (scMode === 'move' && scPreview) ? 'none' : 'flex';
 
-  if (scMode === 'move' && scPreview) {
+  document.getElementById('sc-attack').classList.toggle('active', scMode === 'attack');
+
+  if (scMode === 'attack') {
+    hint.textContent = 'Выбери цель — сектор попадания зависит от её разворота';
+  } else if (scMode === 'move' && scPreview) {
     hint.textContent = 'Пройдёт ' + scPreview.dist + ' из ' + scType.move_range +
       ' кл. · можно ткнуть в другую клетку';
   } else if (scMode === 'move') {
@@ -502,6 +515,70 @@ function scCancelAim() {
   scPreview = null;
   scRenderGhost();
   scRenderMode();
+}
+
+// Цели в радиусе. Список считает сервер: он же проверяет туман войны,
+// поэтому подсмотреть невидимого противника через этот список нельзя.
+function scLoadTargets() {
+  var box = document.getElementById('sc-targets');
+  if (!box || !scShip) return;
+
+  box.innerHTML = '<div class="sc-targets-empty">Ищем цели…</div>';
+
+  supabase.rpc('get_attack_targets', { p_ship_id: scShip.id }).then(function(res) {
+    if (scMode !== 'attack') return;
+
+    if (res.error || !res.data || !res.data.length) {
+      box.innerHTML = '<div class="sc-targets-empty">В радиусе никого</div>';
+      return;
+    }
+
+    box.innerHTML = '';
+    res.data.forEach(function(t) {
+      var hpPct = t.max_hp ? Math.max(0, t.hp / t.max_hp * 100) : 100;
+
+      var b = document.createElement('button');
+      b.className = 'sc-target';
+      b.innerHTML =
+        '<div class="sc-target-line">' +
+          '<span>' + t.ship_name + ' <b>' + t.x + ':' + t.y + '</b></span>' +
+          '<em>' + t.chance + '%</em>' +
+        '</div>' +
+        '<div class="sc-target-track"><i style="width:' + hpPct + '%"></i></div>' +
+        '<div class="sc-target-sub">дистанция ' + t.gap + ' · корпус ' + t.hp + '</div>';
+
+      b.addEventListener('click', function() { scDoAttack(t, b); });
+      box.appendChild(b);
+    });
+  });
+}
+
+var SC_ARCS = { fore: 'в нос', aft: 'в корму', port: 'в левый борт', starboard: 'в правый борт' };
+
+function scDoAttack(target, btn) {
+  btn.disabled = true;
+
+  supabase.rpc('attack_ship', {
+    p_attacker_id: scShip.id, p_target_id: target.target_id
+  }).then(function(res) {
+    if (res.error) { scFail(res.error.message); btn.disabled = false; return; }
+
+    var r = (res.data && res.data.length) ? res.data[0] : null;
+    var hint = document.getElementById('sc-hint');
+
+    if (!r) { loadShips(); return; }
+
+    if (!r.hit) {
+      hint.textContent = 'Промах по ' + target.ship_name;
+    } else if (r.destroyed) {
+      hint.textContent = target.ship_name + ' уничтожен';
+    } else {
+      hint.textContent = 'Попадание ' + (SC_ARCS[r.arc] || '') +
+        ' · щит ' + r.shield_left + ' · корпус ' + r.target_hp;
+    }
+
+    loadShips();
+  });
 }
 
 function scFail(msg) {
