@@ -322,8 +322,13 @@ function scRenderMode() {
 
   document.getElementById('sc-attack').classList.toggle('active', scMode === 'attack');
 
+  if (scMode !== 'attack' && scTargets.length) {
+    scTargets = [];
+    if (typeof renderShips === 'function') renderShips();
+  }
+
   if (scMode === 'attack') {
-    hint.textContent = 'Выбери цель — сектор попадания зависит от её разворота';
+    hint.textContent = 'Ткни в цель на карте или выбери из списка';
   } else if (scMode === 'move' && scPreview) {
     hint.textContent = 'Пройдёт ' + scPreview.dist + ' из ' + scType.move_range +
       ' кл. · можно ткнуть в другую клетку';
@@ -519,6 +524,38 @@ function scCancelAim() {
 
 // Цели в радиусе. Список считает сервер: он же проверяет туман войны,
 // поэтому подсмотреть невидимого противника через этот список нельзя.
+// Цели, до которых этот корабль дотягивается. Держим отдельно, чтобы
+// отрисовка карты могла подсветить их, а тап — сразу выстрелить.
+var scTargets = [];
+
+function scIsTargetable(shipId) {
+  if (scMode !== 'attack') return false;
+  for (var i = 0; i < scTargets.length; i++) {
+    if (scTargets[i].target_id === shipId) return true;
+  }
+  return false;
+}
+
+// Тап по чужому кораблю в режиме атаки. Возвращает true, если выстрел
+// начат — тогда карта не открывает карточку корабля.
+function scTryAttackByTap(ship) {
+  if (scMode !== 'attack' || !scShip) return false;
+
+  var target = null;
+  for (var i = 0; i < scTargets.length; i++) {
+    if (scTargets[i].target_id === ship.id) { target = scTargets[i]; break; }
+  }
+
+  if (!target) {
+    // Цель видно, но дотянуться нечем — объясняем, а не молчим
+    scFail('Цель вне досягаемости этого корабля');
+    return true;
+  }
+
+  scDoAttack(target, null);
+  return true;
+}
+
 function scLoadTargets() {
   var box = document.getElementById('sc-targets');
   if (!box || !scShip) return;
@@ -528,7 +565,10 @@ function scLoadTargets() {
   supabase.rpc('get_attack_targets', { p_ship_id: scShip.id }).then(function(res) {
     if (scMode !== 'attack') return;
 
-    if (res.error || !res.data || !res.data.length) {
+    scTargets = (res.error || !res.data) ? [] : res.data;
+    if (typeof renderShips === 'function') renderShips();
+
+    if (!scTargets.length) {
       box.innerHTML = '<div class="sc-targets-empty">В радиусе никого</div>';
       return;
     }
@@ -555,66 +595,31 @@ function scLoadTargets() {
 
 var SC_ARCS = { fore: 'в нос', aft: 'в корму', port: 'в левый борт', starboard: 'в правый борт' };
 
-// Сводка боя сверху экрана. Держим не больше трёх строк: это подсказка
-// «что сейчас произошло», а не журнал. Разбор полётов — в событиях.
-function scLog(kind, title, details) {
-  var box = document.getElementById('combat-log');
-  if (!box) return;
-
-  var line = document.createElement('div');
-  line.className = 'clog ' + kind;
-  line.innerHTML = '<span class="clog-title">' + title + '</span>' +
-    (details ? '<span class="clog-details">' + details + '</span>' : '');
-
-  box.insertBefore(line, box.firstChild);
-  while (box.children.length > 3) box.removeChild(box.lastChild);
-
-  // Убираем сами: висящие строки закрывают карту
-  setTimeout(function() {
-    line.classList.add('fading');
-    setTimeout(function() {
-      if (line.parentNode) line.parentNode.removeChild(line);
-    }, 600);
-  }, 8000);
-}
-
 function scDoAttack(target, btn) {
-  btn.disabled = true;
+  if (btn) btn.disabled = true;
 
   supabase.rpc('attack_ship', {
     p_attacker_id: scShip.id, p_target_id: target.target_id
   }).then(function(res) {
-    if (res.error) { scFail(res.error.message); btn.disabled = false; return; }
+    if (res.error) { scFail(res.error.message); if (btn) btn.disabled = false; return; }
 
     var r = (res.data && res.data.length) ? res.data[0] : null;
     var hint = document.getElementById('sc-hint');
 
     if (!r) { loadShips(); return; }
 
-    var me = scType.name;
-    var arc = SC_ARCS[r.arc] || '';
-
     if (!r.hit) {
       hint.textContent = 'Промах по ' + target.ship_name;
-      scLog('miss', 'Промах по ' + target.ship_name, 'шанс был ' + target.chance + '%');
     } else if (r.destroyed) {
       hint.textContent = target.ship_name + ' уничтожен';
-      scLog('kill', target.ship_name + ' уничтожен', me + ' · ' + arc + ' · −' + r.damage);
     } else {
-      // Сколько дошло до корпуса — разница прочности до и после.
-      // Без этого непонятно, пробил ты щит или он всё удержал.
-      var byHull = Math.max(0, target.hp - r.target_hp);
-
-      hint.textContent = 'Попадание ' + arc +
+      hint.textContent = 'Попадание ' + (SC_ARCS[r.arc] || '') +
         ' · щит ' + r.shield_left + ' · корпус ' + r.target_hp;
-
-      scLog(byHull > 0 ? 'hull' : 'shield',
-            me + ' → ' + target.ship_name + ' · ' + arc,
-            '−' + r.damage + (byHull > 0 ? ' (по корпусу ' + byHull + ')' : ' весь в щит') +
-            ' · щит ' + r.shield_left + ' · корпус ' + r.target_hp);
     }
 
     loadShips();
+    // Список целей мог измениться: кто-то погиб, кто-то вышел из радиуса
+    if (scMode === 'attack') scLoadTargets();
   });
 }
 

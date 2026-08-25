@@ -13,7 +13,7 @@ var panY = 0;
 var viewport, grid;
 
 var CELL_PX = 40;
-var GRID_CELLS = 130;      // размер космической карты в клетках (было 100)
+var GRID_CELLS = 150;   // карта выросла: станции стояли впритык к полосам прыжка      // размер космической карты в клетках (было 100)
 var STATION_SIZE = 8;      // слот станции, размер приходит из БД
 
 // Арт станции по фракции. Своей таблицы типов у станций нет — вариант
@@ -678,6 +678,11 @@ function renderShips() {
     var mine = ship.owner_user_id === currentUserId;
     el.style.outline = '2px solid ' + (mine ? 'rgba(95,217,104,0.8)' : 'rgba(217,74,74,0.8)');
 
+    // В режиме атаки достижимые цели обводим ярче остальных
+    if (!mine && typeof scIsTargetable === 'function' && scIsTargetable(ship.id)) {
+      el.classList.add('ship-targetable');
+    }
+
     var img = getShipImage(type.image);
     if (img && img.complete && !img.failed) {
       var inner = document.createElement('div');
@@ -701,7 +706,14 @@ function renderShips() {
 
     el.addEventListener('click', function(e) {
       e.stopPropagation();
-      // Своими кораблями управляем через HUD, чужие — только карточка
+
+      // В режиме атаки тап по чужому кораблю — это выстрел. В месиве
+      // одинаковых кораблей выбирать из списка невозможно, а палец
+      // показывает цель однозначно.
+      if (!mine && typeof scTryAttackByTap === 'function' && scTryAttackByTap(ship, type)) {
+        return;
+      }
+
       if (mine && typeof onOwnShipTapped === 'function') {
         onOwnShipTapped(ship, type);
       } else {
