@@ -114,6 +114,140 @@ function renderCaptureBar() {
   bar.style.display = 'block';
 }
 
+// ===== Панель поселения =====
+// Довольство, доход и суточные задачи. Данные отдаёт сервер только своей
+// фракции: по задачам видно, где слабая охрана и где нет флота, — это
+// разведданные, а не украшение.
+
+var SETTLEMENT_TASKS = {
+  guard:     { title: 'Охрана поселения', hint: 'пехоты в зоне' },
+  patrol:    { title: 'Патруль', hint: 'техники в зоне' },
+  orbit:     { title: 'Прикрытие с орбиты', hint: 'корабль в площадке сброса' },
+  marauder:  { title: 'Мародёр', hint: 'уничтожить налётчика' },
+  donation:  { title: 'Пожертвование', hint: 'кредитов' },
+  festival:  { title: 'Праздник', hint: 'кредитов' },
+  factories: { title: 'Слишком много заводов', hint: 'оставить не больше' },
+  medical:   { title: 'Нужна лечебница', hint: 'построить' }
+};
+
+var settlementTimer = null;
+
+function openSettlementPanel() {
+  var panel = document.getElementById('settlement-panel');
+  if (!panel) return;
+
+  panel.style.display = 'flex';
+  document.getElementById('settlement-body').innerHTML =
+    '<div class="stl-empty">Загрузка…</div>';
+
+  loadSettlementPanel();
+
+  if (settlementTimer) clearInterval(settlementTimer);
+  settlementTimer = setInterval(loadSettlementPanel, 15000);
+}
+
+function closeSettlementPanel() {
+  var panel = document.getElementById('settlement-panel');
+  if (panel) panel.style.display = 'none';
+  if (settlementTimer) { clearInterval(settlementTimer); settlementTimer = null; }
+}
+
+function formatSettlementLeft(sec) {
+  var h = Math.floor(sec / 3600);
+  var m = Math.floor((sec % 3600) / 60);
+  if (h > 0) return h + ' ч ' + m + ' мин';
+  if (m > 0) return m + ' мин';
+  return sec + ' с';
+}
+
+function loadSettlementPanel() {
+  Promise.all([
+    supabase.rpc('get_settlement_state', { p_system_id: systemId }),
+    supabase.rpc('get_settlement_tasks', { p_system_id: systemId })
+  ]).then(function(r) {
+    var body = document.getElementById('settlement-body');
+    if (!body) return;
+
+    var st = (!r[0].error && r[0].data && r[0].data.length) ? r[0].data[0] : null;
+
+    // Чужая планета — сервер ничего не отдаёт, и это правильно
+    if (!st) {
+      body.innerHTML = '<div class="stl-empty">Поселение не делится сведениями ' +
+        'с чужой фракцией</div>';
+      return;
+    }
+
+    var tasks = (!r[1].error && r[1].data) ? r[1].data : [];
+    var doneCount = tasks.filter(function(t) { return t.done_now; }).length;
+    var allDone = tasks.length > 0 && doneCount === tasks.length;
+
+    var html = '';
+
+    // Довольство и что оно даёт
+    html += '<div class="stl-top">' +
+      '<div class="stl-mood">' +
+        '<div class="stl-mood-value">' + st.satisfaction + '</div>' +
+        '<div class="stl-mood-label">довольство</div>' +
+      '</div>' +
+      '<div class="stl-money">' +
+        '<div class="stl-money-row"><span>Доход за сутки</span><b>' + st.income + '</b></div>' +
+        '<div class="stl-money-row"><span>Станет при росте</span><em>' + st.next_income + '</em></div>' +
+        '<div class="stl-money-row"><span>Всего выплачено</span><em>' + st.total_paid + '</em></div>' +
+      '</div>' +
+    '</div>';
+
+    html += '<div class="stl-track"><i style="width:' + st.satisfaction + '%"></i></div>';
+
+    html += '<div class="stl-meta">' +
+      'Управляет: ' + (st.controller || 'не назначен') +
+      ' · до итогов ' + formatSettlementLeft(st.seconds_left) +
+      '</div>';
+
+    // Итог дня заранее: понятно, растёт довольство или упадёт
+    html += '<div class="stl-verdict ' + (allDone ? 'good' : 'bad') + '">' +
+      (tasks.length === 0 ? 'Задач на эти сутки нет'
+        : allDone ? 'Все требования выполнены — довольство вырастет'
+                  : 'Выполнено ' + doneCount + ' из ' + tasks.length +
+                    ' — при таком раскладе довольство упадёт') +
+      '</div>';
+
+    body.innerHTML = html;
+
+    tasks.forEach(function(t) {
+      var meta = SETTLEMENT_TASKS[t.kind] || { title: t.kind, hint: '' };
+
+      var row = document.createElement('div');
+      row.className = 'stl-task' + (t.done_now ? ' done' : '');
+
+      var payable = (t.kind === 'donation' || t.kind === 'festival');
+
+      row.innerHTML =
+        '<div class="stl-task-head">' +
+          '<span class="stl-task-title">' + meta.title + '</span>' +
+          '<span class="stl-task-mark">' + (t.done_now ? '✓' : '·') + '</span>' +
+        '</div>' +
+        '<div class="stl-task-sub">' + t.target + ' ' + meta.hint + '</div>';
+
+      // Платные задачи закрываются кнопкой, остальные — делом
+      if (payable && !t.done_now && st.is_controller) {
+        var btn = document.createElement('button');
+        btn.className = 'stl-pay';
+        btn.textContent = 'Заплатить ' + t.target;
+        btn.addEventListener('click', function() {
+          btn.disabled = true;
+          supabase.rpc('settlement_pay_task', { p_task_id: t.id }).then(function(res) {
+            if (res.error) { alert(res.error.message); btn.disabled = false; return; }
+            loadSettlementPanel();
+          });
+        });
+        row.appendChild(btn);
+      }
+
+      body.appendChild(row);
+    });
+  });
+}
+
 function drawSettlement() {
   if (!settlement) return;
 
@@ -826,6 +960,15 @@ function handleTap(clientX, clientY) {
 
   // Тап по своему юниту показывает его радиус обзора
   // По всему корпусу: тап по любой из четырёх клеток выбирает машину
+  // Поселение проверяем раньше юнитов: оно занимает 6x6 и на нём никто
+  // не стоит, а вот охрана вокруг него — вполне
+  if (settlement
+      && cellX >= settlement.x && cellX < settlement.x + settlement.size
+      && cellY >= settlement.y && cellY < settlement.y + settlement.size) {
+    openSettlementPanel();
+    return;
+  }
+
   var tappedUnit = unitsOnMap.filter(function(u) {
     if (u.x === null || u.x === undefined) return false;
     var size = unitBox(u);
@@ -1226,6 +1369,9 @@ function initGroundBattle() {
 
       var dropBtn = document.getElementById('drop-btn');
       if (dropBtn) dropBtn.addEventListener('click', openDropPanel);
+      var stlClose = document.getElementById('settlement-close');
+      if (stlClose) stlClose.addEventListener('click', closeSettlementPanel);
+
       var dropClose = document.getElementById('drop-panel-close');
       if (dropClose) dropClose.addEventListener('click', closeDropPanel);
       loadBuildings();

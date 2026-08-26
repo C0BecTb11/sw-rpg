@@ -414,3 +414,179 @@
 
 /* Техника в трюме отличается от пехоты */
 .cargo-vehicle { border-color: #d9a940; }
+
+/* ===== Панель поселения ===== */
+
+#settlement-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 1600;
+  display: none;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(3,5,9,0.78);
+}
+
+#settlement-box {
+  width: 100%;
+  max-width: 460px;
+  max-height: 82vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 16px 16px calc(18px + env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, #0d1119 0%, #080b11 100%);
+  border: 1px solid #1c2530;
+  border-bottom: none;
+  border-radius: 14px 14px 0 0;
+}
+
+#settlement-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+#settlement-title {
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #d9a940;
+}
+
+#settlement-close {
+  width: 26px;
+  height: 26px;
+  background: none;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  color: #8fa8c4;
+  font-size: 11px;
+  line-height: 1;
+}
+
+/* Довольство слева крупно, деньги справа: сначала «сколько», потом
+   «за что» */
+.stl-top { display: flex; gap: 14px; align-items: center; }
+
+.stl-mood {
+  flex: none;
+  width: 76px;
+  text-align: center;
+  padding: 10px 0;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 10px;
+}
+
+.stl-mood-value {
+  font-family: 'Courier New', monospace;
+  font-size: 26px;
+  color: #d9a940;
+  line-height: 1;
+}
+
+.stl-mood-label {
+  margin-top: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: #55606c;
+}
+
+.stl-money { flex: 1; min-width: 0; }
+
+.stl-money-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  color: #8fa8c4;
+}
+
+.stl-money-row b { color: #5fd968; font-size: 12px; }
+.stl-money-row em { font-style: normal; color: #55606c; }
+
+.stl-track {
+  height: 6px;
+  margin: 12px 0 8px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.stl-track i { display: block; height: 100%; background: #d9a940; }
+
+.stl-meta {
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  color: #55606c;
+}
+
+/* Итог дня заранее: игрок должен понимать, куда всё катится */
+.stl-verdict {
+  margin: 12px 0 10px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+}
+
+.stl-verdict.good { background: rgba(95,217,104,0.10); color: #5fd968; }
+.stl-verdict.bad  { background: rgba(217,74,74,0.10); color: #d94a4a; }
+
+.stl-task {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-left: 3px solid #2a3644;
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+}
+
+.stl-task.done { border-left-color: #5fd968; }
+
+.stl-task-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.stl-task-title { font-size: 12px; color: #cfd8dc; }
+.stl-task-mark { font-size: 13px; color: #55606c; }
+.stl-task.done .stl-task-mark { color: #5fd968; }
+
+.stl-task-sub {
+  margin-top: 3px;
+  font-size: 10px;
+  color: #55606c;
+}
+
+.stl-pay {
+  width: 100%;
+  margin-top: 9px;
+  padding: 9px;
+  background: #d9a940;
+  border: none;
+  border-radius: 7px;
+  color: #0a0d14;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.stl-pay:disabled { opacity: 0.5; }
+
+.stl-empty {
+  padding: 18px 0;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: #55606c;
+  text-align: center;
+}
