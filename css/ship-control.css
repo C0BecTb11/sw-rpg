@@ -373,3 +373,58 @@
 @media (prefers-reduced-motion: reduce) {
   .ship-targetable { animation: none; }
 }
+
+/* ===== Сводка боя =====
+   Появляется только на карте боя: подписки отфильтрованы по системе,
+   так что чужие сражения сюда не долетают. */
+
+#combat-log {
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  top: 58px;
+  z-index: 2400;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  pointer-events: none;
+}
+
+.clog {
+  padding: 7px 11px;
+  background: rgba(13,17,25,0.95);
+  border: 1px solid #1c2530;
+  border-left: 3px solid #2a3644;
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+  animation: clog-in 0.18s ease-out;
+  transition: opacity 0.6s;
+}
+
+.clog.fading { opacity: 0; }
+
+@keyframes clog-in {
+  from { transform: translateY(-6px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+
+/* Цвет кромки сообщает исход быстрее, чем успеешь прочитать строку */
+.clog.shield { border-left-color: #4a90d9; }
+.clog.hull   { border-left-color: #d9a940; }
+.clog.kill   { border-left-color: #d94a4a; }
+.clog.miss   { border-left-color: #55606c; }
+
+.clog-title { display: block; font-size: 11px; color: #cfd8dc; }
+.clog.kill .clog-title { color: #d94a4a; }
+.clog.miss .clog-title { color: #8fa8c4; }
+
+.clog-details {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  color: #55606c;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .clog { animation: none; }
+}
