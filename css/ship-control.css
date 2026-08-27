@@ -494,3 +494,125 @@
 
 .sc-hangar-btn.wide { width: 100%; }
 .sc-hangar-btn:active { background: #4a90d9; color: #0a0d14; }
+
+/* ===== Компактная панель =====
+   По умолчанию видно состояние корабля. Выбран режим — всё лишнее
+   скрывается: во время прицеливания нужна карта, а не полосы щитов. */
+
+#ship-hud {
+  max-height: 62vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+#ship-hud.mode-move,
+#ship-hud.mode-attack { max-height: 42vh; }
+
+#ship-hud.mode-move #sc-bars,
+#ship-hud.mode-move #sc-cmd,
+#ship-hud.mode-move #sc-hangar,
+#ship-hud.mode-rotate #sc-bars,
+#ship-hud.mode-rotate #sc-cmd,
+#ship-hud.mode-rotate #sc-hangar,
+#ship-hud.mode-attack #sc-bars,
+#ship-hud.mode-attack #sc-cmd,
+#ship-hud.mode-attack #sc-hangar,
+#ship-hud.mode-hangar #sc-bars,
+#ship-hud.mode-hangar #sc-cmd { display: none; }
+
+/* Списки показываются только в своём режиме */
+#sc-targets, #sc-hangar { display: none; }
+#ship-hud.mode-attack #sc-targets { display: block; }
+#ship-hud.mode-hangar #sc-hangar  { display: block; }
+
+#sc-targets, #sc-hangar {
+  max-height: 34vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Четыре кнопки в ряд: подписи короче, чтобы влезли */
+#sc-actions .sc-btn {
+  padding: 11px 2px;
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+/* Командир свёрнут в строку: нужен редко, а места занимал много */
+.sc-cmd-head {
+  display: block;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  color: #8fa8c4;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  text-align: left;
+}
+
+.sc-cmd-head.assigned { color: #5fd968; }
+.sc-cmd-arrow { color: #4a90d9; }
+
+.sc-cmd-details { display: none; margin-top: 8px; }
+#sc-cmd.open .sc-cmd-details { display: block; }
+
+/* Ангар в панели корабля */
+#sc-hangar { margin-top: 10px; }
+
+.sc-hangar-head {
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #55606c;
+  margin-bottom: 6px;
+}
+
+.sc-hangar-empty { padding: 8px 0; font-size: 10px; color: #55606c; }
+
+.sc-hangar-row {
+  margin-bottom: 7px;
+  padding: 9px 11px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-left: 3px solid #4a90d9;
+  border-radius: 8px;
+}
+
+.sc-hangar-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+  color: #cfd8dc;
+}
+
+.sc-hangar-line em { font-style: normal; font-size: 10px; color: #55606c; }
+
+.sc-hangar-track {
+  height: 4px;
+  margin-top: 6px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.sc-hangar-track i { display: block; height: 100%; background: #5fd968; }
+.sc-hangar-acts { display: flex; gap: 6px; margin-top: 8px; }
+
+.sc-hangar-btn {
+  flex: 1;
+  padding: 8px 6px;
+  background: #0a0d14;
+  border: 1px solid #2a3644;
+  border-radius: 7px;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.sc-hangar-btn.wide { width: 100%; }
+.sc-hangar-btn:active { background: #4a90d9; color: #0a0d14; }

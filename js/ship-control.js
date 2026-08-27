@@ -93,6 +93,7 @@ function scEnsureHud() {
       '<button class="sc-btn" id="sc-move">Ход</button>' +
       '<button class="sc-btn" id="sc-rotate">Разворот</button>' +
       '<button class="sc-btn" id="sc-attack">Атака</button>' +
+      '<button class="sc-btn" id="sc-hangar-btn">Ангар</button>' +
     '</div>' +
     '<div id="sc-confirm">' +
       '<button class="sc-btn sc-btn-go" id="sc-go">Идти</button>' +
@@ -114,6 +115,9 @@ function scEnsureHud() {
   });
   document.getElementById('sc-attack').addEventListener('click', function() {
     scSetMode(scMode === 'attack' ? null : 'attack');
+  });
+  document.getElementById('sc-hangar-btn').addEventListener('click', function() {
+    scSetMode(scMode === 'hangar' ? null : 'hangar');
   });
   document.getElementById('sc-go').addEventListener('click', scConfirmMove);
   document.getElementById('sc-cancel').addEventListener('click', scCancelAim);
@@ -190,7 +194,6 @@ function scRenderHud() {
   }
 
   document.getElementById('sc-bars').innerHTML = html;
-  scRenderHangar();
   scRenderCommander();
   scRenderAp();
   scRenderMode();
@@ -218,14 +221,31 @@ function scRenderCommander() {
       if (list[i].id === scShip.commander_id) { current = list[i]; break; }
     }
 
-    box.innerHTML = '<div class="sc-cmd-title">Командир</div>';
+    // Командир нужен редко, а места занимал много. Сворачиваем в строку,
+    // которая раскрывается по тапу.
+    box.innerHTML = '';
+
+    var head = document.createElement('button');
+    head.className = 'sc-cmd-head' + (current ? ' assigned' : '');
+    head.innerHTML = '<span class="sc-cmd-arrow">▸</span> Командир: ' +
+      (current ? current.name : 'в обороне');
+    box.appendChild(head);
+
+    var details = document.createElement('div');
+    details.className = 'sc-cmd-details';
+    box.appendChild(details);
+
+    head.addEventListener('click', function() {
+      var open = box.classList.toggle('open');
+      head.querySelector('.sc-cmd-arrow').textContent = open ? '▾' : '▸';
+    });
 
     var state = document.createElement('div');
     state.className = 'sc-cmd-state' + (current ? ' assigned' : '');
     state.textContent = current
       ? 'ведёт ' + current.name + ' — уйдёт вместе с ним'
       : 'в обороне системы — остаётся на месте';
-    box.appendChild(state);
+    details.appendChild(state);
 
     var sel = document.createElement('select');
     sel.className = 'sc-cmd-select';
@@ -260,13 +280,13 @@ function scRenderCommander() {
       });
     });
 
-    box.appendChild(sel);
+    details.appendChild(sel);
 
     if (here.length === 0) {
       var hint = document.createElement('div');
       hint.className = 'sc-cmd-hint';
       hint.textContent = 'Свободных командиров в этой системе нет';
-      box.appendChild(hint);
+      details.appendChild(hint);
     }
   };
 
@@ -292,14 +312,14 @@ function scRenderHangar() {
   if (!box || !scShip || !scType) return;
 
   // Ангар есть не у всех, и это нормально
+  // Видимость решают классы режима на самой панели. Инлайновый стиль
+  // здесь перебивал бы их: он сильнее правил из таблицы стилей, и раздел
+  // оставался на экране даже в режиме хода.
   if (!scType.hangar_slots) {
     box.innerHTML = '';
-    box.style.display = 'none';
     if (scType.is_fighter) scRenderFighterActions(box);
     return;
   }
-
-  box.style.display = 'block';
 
   supabase.rpc('get_hangar', { p_ship_id: scShip.id }).then(function(res) {
     if (!scShip) return;
@@ -350,7 +370,6 @@ function scRenderHangar() {
 
 // Истребитель, уже вылетевший: ему нужна кнопка возврата
 function scRenderFighterActions(box) {
-  box.style.display = 'block';
   box.innerHTML = '<div class="sc-hangar-head">Носитель</div>';
 
   var b = document.createElement('button');
@@ -433,8 +452,9 @@ function scRenderMode() {
   if (!dial) return;
 
   var targets = document.getElementById('sc-targets');
-  if (targets) targets.style.display = scMode === 'attack' ? 'block' : 'none';
   if (scMode === 'attack') scLoadTargets();
+
+  if (scMode === 'hangar') scRenderHangar();
 
   dial.style.display = scMode === 'rotate' ? 'grid' : 'none';
 
@@ -564,6 +584,14 @@ function scDeselect() {
 
 function scSetMode(mode) {
   scMode = mode;
+
+  // Видимость разделов решают классы: во время хода и атаки нужна карта,
+  // а не полосы щитов
+  var hud = document.getElementById('ship-hud');
+  if (hud) {
+    hud.classList.remove('mode-move', 'mode-rotate', 'mode-attack', 'mode-hangar');
+    if (mode) hud.classList.add('mode-' + mode);
+  }
   if (mode !== 'move') scPreview = null;
   scRenderGhost();
   scRenderMode();
@@ -702,7 +730,9 @@ function scLoadTargets() {
     if (typeof renderShips === 'function') renderShips();
 
     if (!scTargets.length) {
-      box.innerHTML = '<div class="sc-targets-empty">В радиусе никого</div>';
+      box.innerHTML = '<div class="sc-targets-empty">Целей в радиусе нет</div>';
+      var h = document.getElementById('sc-hint');
+      if (h) h.textContent = 'Подойди ближе или найди цель обзором';
       return;
     }
 
