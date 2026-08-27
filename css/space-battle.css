@@ -381,3 +381,49 @@ html, body {
   line-height: 1.45;
   margin-bottom: 8px;
 }
+
+/* Выбор истребителей при заказе носителя */
+.ship-addon {
+  margin: 10px 0;
+  padding: 9px 11px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 8px;
+}
+
+.ship-addon-head {
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #8fa8c4;
+  margin-bottom: 7px;
+}
+
+.ship-addon-row { display: flex; gap: 5px; }
+
+.ship-addon-btn {
+  flex: 1;
+  padding: 8px 0;
+  background: #10151e;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+}
+
+.ship-addon-btn.active {
+  background: #4a90d9;
+  border-color: #4a90d9;
+  color: #0a0d14;
+  font-weight: bold;
+}
+
+/* Цена и срок пересчитываются сразу: игрок должен видеть, во что
+   обходится каждый истребитель, до нажатия «Построить» */
+.ship-addon-sub {
+  margin-top: 7px;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  color: #55606c;
+}

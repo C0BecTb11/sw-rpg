@@ -100,6 +100,7 @@ function scEnsureHud() {
     '</div>' +
     '<div id="sc-dial"></div>' +
     '<div id="sc-targets" style="display:none;"></div>' +
+    '<div id="sc-hangar"></div>' +
     '<div id="sc-hint"></div>';
 
   document.body.appendChild(hud);
@@ -189,6 +190,7 @@ function scRenderHud() {
   }
 
   document.getElementById('sc-bars').innerHTML = html;
+  scRenderHangar();
   scRenderCommander();
   scRenderAp();
   scRenderMode();
@@ -275,6 +277,130 @@ function scRenderCommander() {
       scCommandersCache = res.error ? [] : (res.data || []);
       fill(scCommandersCache);
     });
+}
+
+// ===== Ангар =====
+// Истребители в ангаре и на карте — это один и тот же корабль, просто
+// в разных состояниях. Выпуск и посадка меняют состояние, а не создают
+// новую сущность, поэтому прочность и повреждения сохраняются.
+
+var scHangarMode = null;   // null | 'launch' | 'land'
+var scHangarPick = null;   // выбранный истребитель
+
+function scRenderHangar() {
+  var box = document.getElementById('sc-hangar');
+  if (!box || !scShip || !scType) return;
+
+  // Ангар есть не у всех, и это нормально
+  if (!scType.hangar_slots) {
+    box.innerHTML = '';
+    box.style.display = 'none';
+    if (scType.is_fighter) scRenderFighterActions(box);
+    return;
+  }
+
+  box.style.display = 'block';
+
+  supabase.rpc('get_hangar', { p_ship_id: scShip.id }).then(function(res) {
+    if (!scShip) return;
+    var list = (!res.error && res.data) ? res.data : [];
+
+    var html = '<div class="sc-hangar-head">Ангар · ' +
+      list.length + ' из ' + scType.hangar_slots + '</div>';
+    box.innerHTML = html;
+
+    if (!list.length) {
+      var empty = document.createElement('div');
+      empty.className = 'sc-hangar-empty';
+      empty.textContent = 'Пусто';
+      box.appendChild(empty);
+      return;
+    }
+
+    list.forEach(function(f) {
+      var hpPct = f.max_hp ? Math.max(0, f.hp / f.max_hp * 100) : 100;
+
+      var row = document.createElement('div');
+      row.className = 'sc-hangar-row';
+      row.innerHTML =
+        '<div class="sc-hangar-line"><span>' + f.name + '</span>' +
+        '<em>' + f.hp + '/' + f.max_hp + '</em></div>' +
+        '<div class="sc-hangar-track"><i style="width:' + hpPct + '%"></i></div>';
+
+      var acts = document.createElement('div');
+      acts.className = 'sc-hangar-acts';
+
+      var launch = document.createElement('button');
+      launch.className = 'sc-hangar-btn';
+      launch.textContent = 'Выпустить';
+      launch.addEventListener('click', function() { scStartLaunch(f); });
+      acts.appendChild(launch);
+
+      var land = document.createElement('button');
+      land.className = 'sc-hangar-btn';
+      land.textContent = 'На грунт';
+      land.addEventListener('click', function() { scStartLand(f); });
+      acts.appendChild(land);
+
+      row.appendChild(acts);
+      box.appendChild(row);
+    });
+  });
+}
+
+// Истребитель, уже вылетевший: ему нужна кнопка возврата
+function scRenderFighterActions(box) {
+  box.style.display = 'block';
+  box.innerHTML = '<div class="sc-hangar-head">Носитель</div>';
+
+  var b = document.createElement('button');
+  b.className = 'sc-hangar-btn wide';
+  b.textContent = 'Вернуться в ангар';
+  b.addEventListener('click', scRecallToCarrier);
+  box.appendChild(b);
+}
+
+function scStartLaunch(f) {
+  scHangarPick = f;
+  scHangarMode = 'launch';
+  scSetMode(null);
+
+  var hint = document.getElementById('sc-hint');
+  hint.textContent = 'Коснись клетки рядом с носителем';
+}
+
+function scStartLand(f) {
+  scHangarPick = f;
+  scHangarMode = 'land';
+  scSetMode(null);
+
+  var hint = document.getElementById('sc-hint');
+  hint.textContent = 'Посадка идёт на наземной карте — открой её и выбери клетку';
+}
+
+// Возврат в ангар ближайшего своего носителя со свободным местом
+function scRecallToCarrier() {
+  if (!scShip) return;
+
+  var carrier = null;
+  for (var i = 0; i < shipsInSystem.length; i++) {
+    var c = shipsInSystem[i];
+    if (c.owner_user_id !== currentUserId) continue;
+    var ct = shipTypeById[c.ship_type];
+    if (!ct || !ct.hangar_slots) continue;
+    carrier = c;
+    break;
+  }
+
+  if (!carrier) { scFail('Рядом нет носителя с ангаром'); return; }
+
+  supabase.rpc('recall_fighter', {
+    p_fighter_id: scShip.id, p_carrier_id: carrier.id
+  }).then(function(r) {
+    if (r.error) { scFail(r.error.message); return; }
+    scDeselect();
+    loadShips();
+  });
 }
 
 function scRenderAp() {
@@ -691,7 +817,25 @@ function scInitFieldTap() {
   });
 
   viewport.addEventListener('click', function(e) {
-    if (moved || scMode !== 'move') return;
+    if (moved) return;
+
+    if (scHangarMode === 'launch' && scHangarPick) {
+      var rect0 = viewport.getBoundingClientRect();
+      var lx = Math.floor(((e.clientX - rect0.left - panX) / scale) / CELL_PX);
+      var ly = Math.floor(((e.clientY - rect0.top - panY) / scale) / CELL_PX);
+
+      supabase.rpc('launch_fighter', {
+        p_fighter_id: scHangarPick.fighter_id, p_x: lx, p_y: ly
+      }).then(function(r) {
+        if (r.error) { scFail(r.error.message); return; }
+        scHangarMode = null; scHangarPick = null;
+        loadShips();
+        if (scShip) scRenderHangar();
+      });
+      return;
+    }
+
+    if (scMode !== 'move') return;
     var rect = viewport.getBoundingClientRect();
     var gx = (e.clientX - rect.left - panX) / scale;
     var gy = (e.clientY - rect.top - panY) / scale;

@@ -928,6 +928,11 @@ function handleTap(clientX, clientY) {
   var cellX = Math.floor(gridPxX / CELL_PX);
   var cellY = Math.floor(gridPxY / CELL_PX);
 
+  if (landingFighter) {
+    handleFighterLandingTap(cellX, cellY);
+    return;
+  }
+
   if (droppingVehicle) {
     handleVehicleDropTap(cellX, cellY);
     return;
@@ -1814,7 +1819,7 @@ function offerPickup(unit) {
     type.carry_slots > 0
       ? supabase.rpc('get_boardable_units', { p_carrier_id: unit.id })
       : Promise.resolve({ data: [] }),
-    supabase.rpc('unit_ap_state', { p_unit_id: unit.id })
+    supabase.rpc('get_lift_carriers', { p_unit_id: unit.id })
   ]).then(function(r) {
     if (!selectedUnit || selectedUnit.id !== unit.id) return;
 
@@ -1831,7 +1836,8 @@ function offerPickup(unit) {
 // HUD наземного юнита. Устроен как панель корабля: шапка с названием
 // и состоянием, полосы прочности, точки очков действий и кнопки внизу.
 // Разворота нет — у наземных нет носа и щитовых секторов.
-function showPickup(unit, ships, carriers, inside, boardable, ap) {
+function showPickup(unit, ships, carriers, inside, boardable, ap, liftCarriers) {
+  liftCarriers = liftCarriers || [];
   var bar = document.getElementById('pickup-bar');
   if (!bar) return;
 
@@ -1913,6 +1919,21 @@ function showPickup(unit, ships, carriers, inside, boardable, ap) {
     else b.disabled = true;
     bar.appendChild(b);
   };
+
+  // Истребитель на грунте умеет вернуться в ангар носителя
+  if (type.is_vehicle && liftCarriers.length) {
+    liftCarriers.forEach(function(c) {
+      addRow('В ангар ' + c.carrier_name, 'мест ' + c.free_slots, 'ship', function(btn) {
+        btn.disabled = true;
+        supabase.rpc('lift_fighter', {
+          p_unit_id: unit.id, p_carrier_id: c.carrier_id
+        }).then(function(r) {
+          if (r.error) { alert('Не удалось поднять: ' + r.error.message); btn.disabled = false; return; }
+          selectedUnit = null; hidePickup(); loadUnits(); loadDropCargo();
+        });
+      });
+    });
+  }
 
   boardable.forEach(function(b) {
     addRow('Посадить ' + b.unit_name + ' <b>' + b.x + ':' + b.y + '</b>',
@@ -2093,15 +2114,18 @@ function hidePickup() {
 }
 
 var dropVehicles = [];
+var dropFighters = [];
 
 function loadDropCargo() {
   return Promise.all([
     supabase.rpc('get_drop_ready_cargo', { p_system_id: systemId }),
-    supabase.rpc('get_drop_ready_vehicles', { p_system_id: systemId })
+    supabase.rpc('get_drop_ready_vehicles', { p_system_id: systemId }),
+    supabase.rpc('get_landable_fighters', { p_system_id: systemId })
   ]).then(function(r) {
       var res = r[0];
       dropCargo = (res.error || !res.data) ? [] : res.data;
       dropVehicles = (r[1].error || !r[1].data) ? [] : r[1].data;
+      dropFighters = (r[2].error || !r[2].data) ? [] : r[2].data;
 
       // Показываем через visibility, а не display: элемент остаётся
       // в раскладке, и его появление не заставляет браузер заново
@@ -2109,7 +2133,10 @@ function loadDropCargo() {
       // Только на чужой планете: на своей высадка идёт пачкой через
       // панель трюма, поштучная расстановка нужна при вторжении
       var btn = document.getElementById('drop-btn');
-      var show = iAmAttacker === true && (dropCargo.length > 0 || dropVehicles.length > 0);
+      // Истребители садятся и на своей планете тоже: ангар это не десант,
+      // а способ вернуть машину на грунт
+      var hasCargo = dropCargo.length > 0 || dropVehicles.length > 0;
+      var show = (iAmAttacker === true && hasCargo) || dropFighters.length > 0;
       if (btn) btn.style.visibility = show ? 'visible' : 'hidden';
     });
 }
@@ -2119,7 +2146,24 @@ function openDropPanel() {
   var list = document.getElementById('drop-panel-list');
   list.innerHTML = '';
 
-  if (!dropCargo.length && !dropVehicles.length) {
+  // Истребители первыми: их положение важнее всего, они самые манёвренные
+  dropFighters.forEach(function(f) {
+    var ready = f.zone !== null && f.zone !== undefined;
+    var item = document.createElement('button');
+    item.className = 'drop-item' + (ready ? '' : ' not-ready');
+    item.innerHTML =
+      '<div class="drop-item-main">' +
+        '<div class="drop-item-name">' + f.name +
+          ' <span class="drop-size">' + f.hp + '/' + f.max_hp + '</span></div>' +
+        '<div class="drop-item-sub">' + f.carrier_name +
+          (ready ? ' · площадка ' + f.zone : ' · носитель не в площадке сброса') + '</div>' +
+      '</div>';
+    if (ready) { item.addEventListener('click', function() { startFighterLanding(f); }); }
+    else { item.disabled = true; }
+    list.appendChild(item);
+  });
+
+  if (!dropCargo.length && !dropVehicles.length && !dropFighters.length) {
     list.innerHTML = '<div class="drop-empty">В трюмах пусто</div>';
   }
 
@@ -2174,6 +2218,41 @@ function closeDropPanel() {
 }
 
 var droppingVehicle = null;
+var landingFighter = null;
+
+function startFighterLanding(f) {
+  landingFighter = f;
+  droppingUnit = null;
+  droppingVehicle = null;
+  closeDropPanel();
+
+  var hint = document.getElementById('placement-hint');
+  hint.innerHTML = '<span>Куда сажать: ' + f.name + '</span>' +
+                   '<button id="drop-cancel">Готово</button>';
+  hint.style.display = 'flex';
+  document.getElementById('drop-cancel').addEventListener('click', cancelDrop);
+
+  var btn = document.getElementById('drop-btn');
+  if (btn) btn.style.visibility = 'hidden';
+
+  setBottomInset(insetFor(hint));
+  var midX = (viewport.clientWidth / 2 - panX) / scale / CELL_PX;
+  focusCell(midX, iAmAttacker
+    ? GRID_SIZE - ATTACK_ZONE_H + ATTACK_ZONE_H / 2
+    : (deployZones.length ? deployZones[0].y : 10));
+  redrawScene();
+}
+
+function handleFighterLandingTap(cellX, cellY) {
+  supabase.rpc('land_fighter', {
+    p_fighter_id: landingFighter.fighter_id, p_x: cellX, p_y: cellY
+  }).then(function(r) {
+    if (r.error) { alert('Не удалось посадить: ' + r.error.message); return; }
+    cancelDrop();
+    loadUnits();
+    loadDropCargo();
+  });
+}
 
 function startVehicleDrop(v) {
   droppingVehicle = v;
@@ -2229,6 +2308,7 @@ function startDrop(shipId, unitType, name) {
 function cancelDrop() {
   droppingUnit = null;
   droppingVehicle = null;
+  landingFighter = null;
   document.getElementById('placement-hint').style.display = 'none';
 
   var btn = document.getElementById('drop-btn');
@@ -2240,7 +2320,7 @@ function cancelDrop() {
 
 // Подсветка свободных клеток полосы вторжения
 function drawDropCells() {
-  if (!droppingUnit && !droppingVehicle) return;
+  if (!droppingUnit && !droppingVehicle && !landingFighter) return;
 
   var vw = droppingVehicle ? droppingVehicle.width_cells : 1;
   var vh = droppingVehicle ? droppingVehicle.height_cells : 1;

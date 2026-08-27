@@ -572,6 +572,8 @@ function initSpaceBattle() {
   var stationDemolishBtn = document.getElementById('station-demolish-btn');
   if (stationDemolishBtn) stationDemolishBtn.addEventListener('click', demolishStation);
 
+  loadFighterInfo();
+
   var shipyardOpen = document.getElementById('station-shipyard-btn');
   if (shipyardOpen) shipyardOpen.addEventListener('click', function() {
     closeStationPanel();
@@ -814,7 +816,7 @@ function openShipyard() {
   supabase.rpc('get_my_profile').then(function(pr) {
     var faction = (!pr.error && pr.data && pr.data.length) ? pr.data[0].faction : null;
 
-    supabase.from('ship_types').select('*').eq('faction', faction).then(function(res) {
+    supabase.from('ship_types').select('*').eq('is_fighter', false).eq('faction', faction).then(function(res) {
       if (res.error || !res.data || res.data.length === 0) {
         list.innerHTML = '<div class="shipyard-empty">Нет доступных кораблей</div>';
         return;
@@ -829,6 +831,21 @@ function openShipyard() {
 
 function closeShipyard() {
   document.getElementById('shipyard-panel').style.display = 'none';
+}
+
+// Цену и срок истребителя берём из базы, чтобы карточка не врала,
+// если поменяешь настройки
+var shipyardFighterCost = 250;
+var shipyardFighterSeconds = 20;
+
+function loadFighterInfo() {
+  Promise.all([
+    supabase.from('ship_types').select('cost').eq('is_fighter', true).limit(1).maybeSingle(),
+    supabase.from('game_settings').select('value').eq('key', 'fighter_build_seconds').maybeSingle()
+  ]).then(function(r) {
+    if (!r[0].error && r[0].data) shipyardFighterCost = r[0].data.cost || 250;
+    if (!r[1].error && r[1].data) shipyardFighterSeconds = parseInt(r[1].data.value, 10) || 20;
+  });
 }
 
 function makeShipCard(type) {
@@ -868,22 +885,75 @@ function makeShipCard(type) {
     '<div><span>Трюм</span><b>' + type.capacity + '</b></div>';
   body.appendChild(stats);
 
+  // Истребители заказываются вместе с носителем: ангар собирают
+  // на стапеле, пристегнуть его потом нельзя
+  var fighters = 0;
+  var slots = type.hangar_slots || 0;
+  var priceEl;
+
   var btn = document.createElement('button');
   btn.className = 'ship-order-btn';
-  btn.textContent = 'Построить · ' + type.cost;
+
+  var updatePrice = function() {
+    btn.textContent = 'Построить · ' + (type.cost + fighters * shipyardFighterCost);
+    if (priceEl) {
+      priceEl.textContent = fighters === 0
+        ? 'Ангар пуст'
+        : 'Истребителей: ' + fighters + ' · +' + (fighters * shipyardFighterCost) +
+          ' кредитов и +' + (fighters * shipyardFighterSeconds) + ' с к сроку';
+    }
+  };
+
+  if (slots > 0) {
+    var addon = document.createElement('div');
+    addon.className = 'ship-addon';
+
+    var head = document.createElement('div');
+    head.className = 'ship-addon-head';
+    head.textContent = 'Ангар · мест ' + slots;
+    addon.appendChild(head);
+
+    var row = document.createElement('div');
+    row.className = 'ship-addon-row';
+
+    for (var i = 0; i <= slots; i++) {
+      (function(n) {
+        var b = document.createElement('button');
+        b.className = 'ship-addon-btn' + (n === 0 ? ' active' : '');
+        b.textContent = n;
+        b.addEventListener('click', function() {
+          fighters = n;
+          var all = row.querySelectorAll('.ship-addon-btn');
+          for (var k = 0; k < all.length; k++) all[k].classList.remove('active');
+          b.classList.add('active');
+          updatePrice();
+        });
+        row.appendChild(b);
+      })(i);
+    }
+
+    addon.appendChild(row);
+
+    priceEl = document.createElement('div');
+    priceEl.className = 'ship-addon-sub';
+    addon.appendChild(priceEl);
+
+    body.appendChild(addon);
+  }
+
   btn.addEventListener('click', function() {
     btn.disabled = true;
-    supabase.rpc('order_ship', { p_system_id: systemId, p_ship_type: type.id })
-      .then(function(res) {
+    supabase.rpc('order_ship', {
+      p_system_id: systemId, p_ship_type: type.id, p_fighters: fighters
+    }).then(function(res) {
         btn.disabled = false;
-        if (res.error) {
-          alert(res.error.message);
-          return;
-        }
+        if (res.error) { alert(res.error.message); return; }
         closeShipyard();
         loadShipOrders();
       });
   });
+
+  updatePrice();
   body.appendChild(btn);
 
   card.appendChild(body);

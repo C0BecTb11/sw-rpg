@@ -428,3 +428,69 @@
 @media (prefers-reduced-motion: reduce) {
   .clog { animation: none; }
 }
+
+/* ===== Ангар в панели корабля ===== */
+
+#sc-hangar { margin-top: 10px; }
+
+.sc-hangar-head {
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #55606c;
+  margin-bottom: 6px;
+}
+
+.sc-hangar-empty {
+  padding: 8px 0;
+  font-size: 10px;
+  color: #55606c;
+}
+
+.sc-hangar-row {
+  margin-bottom: 7px;
+  padding: 9px 11px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-left: 3px solid #4a90d9;
+  border-radius: 8px;
+}
+
+.sc-hangar-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+  color: #cfd8dc;
+}
+
+.sc-hangar-line em { font-style: normal; font-size: 10px; color: #55606c; }
+
+.sc-hangar-track {
+  height: 4px;
+  margin-top: 6px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.sc-hangar-track i { display: block; height: 100%; background: #5fd968; }
+
+.sc-hangar-acts { display: flex; gap: 6px; margin-top: 8px; }
+
+.sc-hangar-btn {
+  flex: 1;
+  padding: 8px 6px;
+  background: #0a0d14;
+  border: 1px solid #2a3644;
+  border-radius: 7px;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.sc-hangar-btn.wide { width: 100%; }
+.sc-hangar-btn:active { background: #4a90d9; color: #0a0d14; }
