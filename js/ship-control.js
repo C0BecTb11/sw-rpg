@@ -373,14 +373,52 @@ function scRenderHangar() {
 }
 
 // Истребитель, уже вылетевший: ему нужна кнопка возврата
+// Носители, готовые принять: считает сервер, потому что дотянуться
+// можно не до любого корабля с ангаром, а только до ближайшего
+// со свободным местом
 function scRenderFighterActions(box) {
   box.innerHTML = '<div class="sc-hangar-head">Носитель</div>';
 
-  var b = document.createElement('button');
-  b.className = 'sc-hangar-btn wide';
-  b.textContent = 'Вернуться в ангар';
-  b.addEventListener('click', scRecallToCarrier);
-  box.appendChild(b);
+  if (!scShip) return;
+  var forShip = scShip.id;
+
+  var loading = document.createElement('div');
+  loading.className = 'sc-hangar-empty';
+  loading.textContent = 'Ищем носитель…';
+  box.appendChild(loading);
+
+  supabase.rpc('get_recall_carriers', { p_fighter_id: forShip }).then(function(res) {
+    if (!scShip || scShip.id !== forShip || scMode !== 'hangar') return;
+
+    var list = (!res.error && res.data) ? res.data : [];
+    box.innerHTML = '<div class="sc-hangar-head">Носитель</div>';
+
+    if (!list.length) {
+      var empty = document.createElement('div');
+      empty.className = 'sc-hangar-empty';
+      empty.textContent = 'Рядом нет носителя со свободным местом';
+      box.appendChild(empty);
+      return;
+    }
+
+    list.forEach(function(c) {
+      var b = document.createElement('button');
+      b.className = 'sc-hangar-btn wide';
+      b.innerHTML = 'В ангар · ' + c.carrier_name +
+        ' <b>' + c.x + ':' + c.y + '</b> · мест ' + c.free_slots;
+      b.addEventListener('click', function() {
+        b.disabled = true;
+        supabase.rpc('recall_fighter', {
+          p_fighter_id: forShip, p_carrier_id: c.carrier_id
+        }).then(function(r) {
+          if (r.error) { scFail(r.error.message); b.disabled = false; return; }
+          scDeselect();
+          loadShips();
+        });
+      });
+      box.appendChild(b);
+    });
+  });
 }
 
 function scStartLaunch(f) {
@@ -399,31 +437,6 @@ function scStartLand(f) {
 
   var hint = document.getElementById('sc-hint');
   hint.textContent = 'Посадка идёт на наземной карте — открой её и выбери клетку';
-}
-
-// Возврат в ангар ближайшего своего носителя со свободным местом
-function scRecallToCarrier() {
-  if (!scShip) return;
-
-  var carrier = null;
-  for (var i = 0; i < shipsInSystem.length; i++) {
-    var c = shipsInSystem[i];
-    if (c.owner_user_id !== currentUserId) continue;
-    var ct = shipTypeById[c.ship_type];
-    if (!ct || !ct.hangar_slots) continue;
-    carrier = c;
-    break;
-  }
-
-  if (!carrier) { scFail('Рядом нет носителя с ангаром'); return; }
-
-  supabase.rpc('recall_fighter', {
-    p_fighter_id: scShip.id, p_carrier_id: carrier.id
-  }).then(function(r) {
-    if (r.error) { scFail(r.error.message); return; }
-    scDeselect();
-    loadShips();
-  });
 }
 
 function scRenderAp() {
