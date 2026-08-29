@@ -1819,6 +1819,9 @@ function offerPickup(unit) {
     type.carry_slots > 0
       ? supabase.rpc('get_boardable_units', { p_carrier_id: unit.id })
       : Promise.resolve({ data: [] }),
+    supabase.rpc('unit_ap_state', { p_unit_id: unit.id }),
+    // Носители со свободным ангаром — только для истребителей,
+    // остальным вернётся пустой список
     supabase.rpc('get_lift_carriers', { p_unit_id: unit.id })
   ]).then(function(r) {
     if (!selectedUnit || selectedUnit.id !== unit.id) return;
@@ -1828,8 +1831,9 @@ function offerPickup(unit) {
     var inside = (!r[2].error && r[2].data) ? r[2].data : [];
     var boardable = (!r[3].error && r[3].data) ? r[3].data : [];
     var ap = (!r[4].error && r[4].data && r[4].data.length) ? r[4].data[0] : null;
+    var lifts = (!r[5].error && r[5].data) ? r[5].data : [];
 
-    showPickup(unit, ships, carriers, inside, boardable, ap);
+    showPickup(unit, ships, carriers, inside, boardable, ap, lifts);
   });
 }
 
@@ -2136,7 +2140,9 @@ function loadDropCargo() {
       // Истребители садятся и на своей планете тоже: ангар это не десант,
       // а способ вернуть машину на грунт
       var hasCargo = dropCargo.length > 0 || dropVehicles.length > 0;
-      var show = (iAmAttacker === true && hasCargo) || dropFighters.length > 0;
+      // Только на чужой планете. Своя высадка идёт пачкой через панель
+      // трюма в космосе, поштучная расстановка нужна при вторжении.
+      var show = iAmAttacker === true && (hasCargo || dropFighters.length > 0);
       if (btn) btn.style.visibility = show ? 'visible' : 'hidden';
     });
 }

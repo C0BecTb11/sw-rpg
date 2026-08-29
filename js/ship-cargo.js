@@ -65,22 +65,84 @@ function renderLoadable() {
 }
 
 function renderCargo() {
-  supabase.from('ship_cargo').select('*, unit_types(name, image, slot_size)')
-    .eq('ship_id', cargoShip.id).gt('quantity', 0)
-    .then(function(res) {
-      var list = document.getElementById('shipcargo-list');
-      if (res.error || !res.data || res.data.length === 0) {
-        list.innerHTML = '<div class="cargo-empty">Трюм пуст</div>';
-        return;
-      }
-      list.innerHTML = '';
-      res.data.forEach(function(row) {
-        var t = row.unit_types || {};
-        list.appendChild(makeShipCargoRow({
-          unit_type: row.unit_type, name: t.name, image: t.image
-        }, row.quantity, 'Высадить', t.slot_size || 1));
-      });
+  // Трюм это не только ship_cargo: пехота лежит там счётчиком, а техника
+  // отдельными строками — иначе гружёная канонерка не помнила бы своих
+  // пассажиров. Собираем обе части одной функцией.
+  Promise.all([
+    supabase.rpc('get_ship_holds'),
+    supabase.rpc('get_carried_units', { p_carrier_unit_id: null, p_ship_id: cargoShip.id })
+  ]).then(function(r) {
+    var list = document.getElementById('shipcargo-list');
+
+    var holds = (!r[0].error && r[0].data) ? r[0].data : [];
+    var mine = holds.filter(function(h) { return h.ship_id === cargoShip.id; });
+    var vehicles = (!r[1].error && r[1].data) ? r[1].data : [];
+
+    if (!mine.length && !vehicles.length) {
+      list.innerHTML = '<div class="cargo-empty">Трюм пуст</div>';
+      return;
+    }
+
+    list.innerHTML = '';
+
+    // Техника идёт первой: она занимает больше места и её положение важнее
+    vehicles.forEach(function(v) {
+      list.appendChild(makeVehicleCargoRow(v));
     });
+
+    mine.filter(function(h) { return !h.is_vehicle; }).forEach(function(h) {
+      list.appendChild(makeShipCargoRow({
+        unit_type: h.unit_type, name: h.unit_name, image: h.unit_image
+      }, h.quantity, 'Высадить', h.slots / Math.max(1, h.quantity)));
+    });
+  });
+}
+
+// У техники нет счётчика: каждая машина отдельная, со своей прочностью
+// и своим десантом внутри
+function makeVehicleCargoRow(v) {
+  var row = document.createElement('div');
+  row.className = 'cargo-row cargo-vehicle';
+
+  var thumb = document.createElement('div');
+  thumb.className = 'cargo-thumb';
+  if (v.unit_image) {
+    var img = document.createElement('img');
+    img.src = '../' + v.unit_image;
+    img.alt = '';
+    thumb.appendChild(img);
+  }
+  row.appendChild(thumb);
+
+  var info = document.createElement('div');
+  info.className = 'cargo-info';
+
+  var name = document.createElement('div');
+  name.className = 'cargo-name';
+  name.textContent = v.unit_name + (v.passengers ? ' · десант ' + v.passengers : '');
+  info.appendChild(name);
+
+  var avail = document.createElement('div');
+  avail.className = 'cargo-available';
+  avail.textContent = 'Прочность ' + v.hp + ' · занимает ' + v.slots + ' слотов';
+  info.appendChild(avail);
+
+  var btn = document.createElement('button');
+  btn.className = 'cargo-action';
+  btn.textContent = 'Высадить';
+  btn.addEventListener('click', function() {
+    btn.disabled = true;
+    supabase.rpc('unload_vehicle_auto', { p_unit_id: v.unit_id }).then(function(res) {
+      btn.disabled = false;
+      if (res.error) { alert(res.error.message); return; }
+      renderCargo();
+      if (typeof loadShips === 'function') loadShips();
+    });
+  });
+
+  info.appendChild(btn);
+  row.appendChild(info);
+  return row;
 }
 
 function makeShipCargoRow(unit, available, actionLabel, slotSize) {

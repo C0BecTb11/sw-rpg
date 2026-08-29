@@ -25,7 +25,11 @@ function loadCommanders(userId) {
   Promise.all([
     supabase.from('commanders').select('*').eq('user_id', userId).order('slot_index'),
     supabase.from('systems').select('id, name'),
-    supabase.from('ships').select('*, ship_types(name, image, capacity)').eq('owner_user_id', userId),
+    // Истребители в ангаре не показываем отдельными кораблями: они
+    // внутри носителя, а не стоят в системе сами по себе
+    supabase.from('ships')
+      .select('*, ship_types(name, image, capacity, is_fighter, hangar_slots)')
+      .eq('owner_user_id', userId).is('carrier_ship_id', null),
     // Трюм — это не только пехота из ship_cargo: техника лежит строками
     // в unit_positions, и без неё загруженная канонерка пропадала из виду
     supabase.rpc('get_ship_holds')
@@ -205,7 +209,10 @@ function makeFleetSection(ships, cargoByShip, systemNames) {
         '<em>' + (ship.in_transit
             ? 'в гиперпространстве'
             : (systemNames[ship.system_id] || ship.system_id)) + '</em></span>' +
-      '<span class="ship-capacity">' + used + '/' + (type.capacity || 0) + '</span>';
+      // У истребителя трюма нет, и «0/0» рядом с ним только сбивает
+      '<span class="ship-capacity">' +
+        (type.is_fighter ? 'истребитель' : used + '/' + (type.capacity || 0)) +
+      '</span>';
     block.appendChild(header);
 
     var body = document.createElement('div');
@@ -214,15 +221,33 @@ function makeFleetSection(ships, cargoByShip, systemNames) {
 
     // Управление трюмом прямо из списка флота: видно, что внутри,
     // и сразу можно догрузить или высадить.
-    var manage = document.createElement('button');
-    manage.className = 'ship-manage-btn';
-    manage.textContent = 'Заполнить трюм';
-    manage.addEventListener('click', function() {
-      if (typeof openShipCargo === 'function') openShipCargo(ship, type);
-    });
-    body.appendChild(manage);
+    // Кнопка трюма только там, где трюм есть
+    if (!type.is_fighter && (type.capacity || 0) > 0) {
+      var manage = document.createElement('button');
+      manage.className = 'ship-manage-btn';
+      manage.textContent = 'Заполнить трюм';
+      manage.addEventListener('click', function() {
+        if (typeof openShipCargo === 'function') openShipCargo(ship, type);
+      });
+      body.appendChild(manage);
+    }
 
-    if (cargo.length === 0) {
+    // Зато у носителя показываем ангар: сколько истребителей внутри
+    if (type.hangar_slots > 0) {
+      var hangar = document.createElement('div');
+      hangar.className = 'ship-hangar-line';
+      hangar.textContent = 'Ангар: загрузка…';
+      body.appendChild(hangar);
+
+      supabase.rpc('get_hangar', { p_ship_id: ship.id }).then(function(res) {
+        var n = (!res.error && res.data) ? res.data.length : 0;
+        hangar.textContent = 'Ангар: ' + n + ' из ' + type.hangar_slots;
+      });
+    }
+
+    if (type.is_fighter) {
+      // Истребителю нечего показывать: ни трюма, ни ангара
+    } else if (cargo.length === 0) {
       var e = document.createElement('div');
       e.className = 'inventory-empty';
       e.textContent = 'трюм пуст';

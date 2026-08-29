@@ -590,3 +590,29 @@
   color: #55606c;
   text-align: center;
 }
+
+/* Ангар носителя в списке флота */
+.ship-hangar-line {
+  margin: 8px 0 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #8fa8c4;
+}
+
+/* Техника в панели трюма: своя строка с кнопкой, без счётчика */
+.cargo-row.cargo-vehicle { border-left: 3px solid #d9a940; }
+
+.cargo-action {
+  margin-top: 8px;
+  padding: 9px 14px;
+  background: #d9a940;
+  border: none;
+  border-radius: 7px;
+  color: #0a0d14;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.cargo-action:disabled { opacity: 0.5; }
