@@ -321,8 +321,12 @@ function scRenderHangar() {
     return;
   }
 
-  supabase.rpc('get_hangar', { p_ship_id: scShip.id }).then(function(res) {
-    if (!scShip) return;
+  var forShip = scShip.id;
+
+  supabase.rpc('get_hangar', { p_ship_id: forShip }).then(function(res) {
+    // Пока шёл запрос, игрок мог выбрать другой корабль — тогда ответ
+    // уже не про него
+    if (!scShip || scShip.id !== forShip || scMode !== 'hangar') return;
     var list = (!res.error && res.data) ? res.data : [];
 
     var html = '<div class="sc-hangar-head">Ангар · ' +
@@ -564,6 +568,12 @@ function scRenderGhost() {
 
 function onOwnShipTapped(ship, type) {
   scJustSelected = (!scShip || scShip.id !== ship.id);
+
+  // Каждый корабль открывается заново, без режима и без чужих списков.
+  // Иначе панель показывала ангар «Венатора» при выборе истребителя:
+  // раздел оставался нарисованным с прошлого раза.
+  if (scJustSelected) scResetSections();
+
   scShip = ship;
   scType = type;
   scMode = null;
@@ -576,10 +586,32 @@ function scDeselect() {
   scMode = null;
   scPreview = null;
   scRenderGhost();
+  scResetSections();
+
   var hud = document.getElementById('ship-hud');
   if (hud) hud.style.display = 'none';
   if (typeof setBottomInset === 'function') setBottomInset(0);
   scRenderRange();
+}
+
+// Полная очистка разделов: содержимое, состояние режимов и списки
+function scResetSections() {
+  scMode = null;
+  scHangarMode = null;
+  scHangarPick = null;
+  scTargets = [];
+  scPreview = null;
+
+  var hud = document.getElementById('ship-hud');
+  if (hud) hud.classList.remove('mode-move', 'mode-rotate', 'mode-attack', 'mode-hangar');
+
+  ['sc-targets', 'sc-hangar'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.innerHTML = '';
+  });
+
+  var cmd = document.getElementById('sc-cmd');
+  if (cmd) cmd.classList.remove('open');
 }
 
 function scSetMode(mode) {
@@ -723,8 +755,10 @@ function scLoadTargets() {
 
   box.innerHTML = '<div class="sc-targets-empty">Ищем цели…</div>';
 
-  supabase.rpc('get_attack_targets', { p_ship_id: scShip.id }).then(function(res) {
-    if (scMode !== 'attack') return;
+  var forShip = scShip.id;
+
+  supabase.rpc('get_attack_targets', { p_ship_id: forShip }).then(function(res) {
+    if (scMode !== 'attack' || !scShip || scShip.id !== forShip) return;
 
     scTargets = (res.error || !res.data) ? [] : res.data;
     if (typeof renderShips === 'function') renderShips();
