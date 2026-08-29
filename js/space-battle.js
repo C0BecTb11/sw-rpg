@@ -833,18 +833,25 @@ function closeShipyard() {
   document.getElementById('shipyard-panel').style.display = 'none';
 }
 
-// Цену и срок истребителя берём из базы, чтобы карточка не врала,
-// если поменяешь настройки
-var shipyardFighterCost = 250;
-var shipyardFighterSeconds = 20;
+// Цены машин ангара берём из базы, чтобы карточка не врала после
+// правок баланса
+var hangarTypes = { fighter: null, bomber: null };
+var shipyardHangarSeconds = 20;
 
 function loadFighterInfo() {
   Promise.all([
-    supabase.from('ship_types').select('cost').eq('is_fighter', true).limit(1).maybeSingle(),
-    supabase.from('game_settings').select('value').eq('key', 'fighter_build_seconds').maybeSingle()
+    supabase.from('ship_types').select('id, name, cost, hull_class, damage, max_hp')
+      .eq('is_fighter', true),
+    supabase.from('game_settings').select('value')
+      .eq('key', 'fighter_build_seconds').maybeSingle()
   ]).then(function(r) {
-    if (!r[0].error && r[0].data) shipyardFighterCost = r[0].data.cost || 250;
-    if (!r[1].error && r[1].data) shipyardFighterSeconds = parseInt(r[1].data.value, 10) || 20;
+    if (!r[0].error && r[0].data) {
+      r[0].data.forEach(function(t) {
+        if (t.hull_class === 'bomber') hangarTypes.bomber = t;
+        else hangarTypes.fighter = t;
+      });
+    }
+    if (!r[1].error && r[1].data) shipyardHangarSeconds = parseInt(r[1].data.value, 10) || 20;
   });
 }
 
@@ -885,36 +892,59 @@ function makeShipCard(type) {
     '<div><span>Трюм</span><b>' + type.capacity + '</b></div>';
   body.appendChild(stats);
 
-  // Истребители заказываются вместе с носителем: ангар собирают
-  // на стапеле, пристегнуть его потом нельзя
-  var fighters = 0;
+  // Ангар собирают на стапеле, пристегнуть его потом нельзя. Истребители
+  // и бомбардировщики делят одни и те же места, поэтому выбор состава —
+  // это выбор между прикрытием и ударной силой.
+  var pick = { fighter: 0, bomber: 0 };
   var slots = type.hangar_slots || 0;
   var priceEl;
+  var rows = {};
 
   var btn = document.createElement('button');
   btn.className = 'ship-order-btn';
 
-  var updatePrice = function() {
-    btn.textContent = 'Построить · ' + (type.cost + fighters * shipyardFighterCost);
-    if (priceEl) {
-      priceEl.textContent = fighters === 0
-        ? 'Ангар пуст'
-        : 'Истребителей: ' + fighters + ' · +' + (fighters * shipyardFighterCost) +
-          ' кредитов и +' + (fighters * shipyardFighterSeconds) + ' с к сроку';
-    }
+  var extraCost = function() {
+    return pick.fighter * ((hangarTypes.fighter && hangarTypes.fighter.cost) || 0)
+         + pick.bomber  * ((hangarTypes.bomber  && hangarTypes.bomber.cost)  || 0);
   };
 
-  if (slots > 0) {
-    var addon = document.createElement('div');
-    addon.className = 'ship-addon';
+  var updatePrice = function() {
+    btn.textContent = 'Построить · ' + (type.cost + extraCost());
+
+    if (!priceEl) return;
+
+    var total = pick.fighter + pick.bomber;
+    priceEl.textContent = total === 0
+      ? 'Ангар пуст · свободно ' + slots
+      : 'Занято ' + total + ' из ' + slots + ' · +' + extraCost() +
+        ' кредитов и +' + (total * shipyardHangarSeconds) + ' с к сроку';
+
+    // Кнопки, которые не влезут в оставшиеся места, гасим — так правило
+    // видно до нажатия, а не в отказе сервера
+    ['fighter','bomber'].forEach(function(kind) {
+      if (!rows[kind]) return;
+      var other = kind === 'fighter' ? pick.bomber : pick.fighter;
+      var all = rows[kind].querySelectorAll('.ship-addon-btn');
+      for (var i = 0; i < all.length; i++) {
+        var n = parseInt(all[i].textContent, 10);
+        all[i].disabled = (n + other) > slots;
+        all[i].classList.toggle('active', n === pick[kind]);
+      }
+    });
+  };
+
+  var makeRow = function(kind, label, t) {
+    if (!t) return;
 
     var head = document.createElement('div');
-    head.className = 'ship-addon-head';
-    head.textContent = 'Ангар · мест ' + slots;
+    head.className = 'ship-addon-line';
+    head.innerHTML = '<span>' + label + '</span>' +
+      '<em>' + t.cost + ' кр · урон ' + t.damage + ' · прочность ' + t.max_hp + '</em>';
     addon.appendChild(head);
 
     var row = document.createElement('div');
     row.className = 'ship-addon-row';
+    rows[kind] = row;
 
     for (var i = 0; i <= slots; i++) {
       (function(n) {
@@ -922,10 +952,8 @@ function makeShipCard(type) {
         b.className = 'ship-addon-btn' + (n === 0 ? ' active' : '');
         b.textContent = n;
         b.addEventListener('click', function() {
-          fighters = n;
-          var all = row.querySelectorAll('.ship-addon-btn');
-          for (var k = 0; k < all.length; k++) all[k].classList.remove('active');
-          b.classList.add('active');
+          if (b.disabled) return;
+          pick[kind] = n;
           updatePrice();
         });
         row.appendChild(b);
@@ -933,6 +961,21 @@ function makeShipCard(type) {
     }
 
     addon.appendChild(row);
+  };
+
+  var addon;
+
+  if (slots > 0) {
+    addon = document.createElement('div');
+    addon.className = 'ship-addon';
+
+    var head = document.createElement('div');
+    head.className = 'ship-addon-head';
+    head.textContent = 'Ангар · мест ' + slots;
+    addon.appendChild(head);
+
+    makeRow('fighter', 'Истребители', hangarTypes.fighter);
+    makeRow('bomber', 'Бомбардировщики', hangarTypes.bomber);
 
     priceEl = document.createElement('div');
     priceEl.className = 'ship-addon-sub';
@@ -944,7 +987,8 @@ function makeShipCard(type) {
   btn.addEventListener('click', function() {
     btn.disabled = true;
     supabase.rpc('order_ship', {
-      p_system_id: systemId, p_ship_type: type.id, p_fighters: fighters
+      p_system_id: systemId, p_ship_type: type.id,
+      p_fighters: pick.fighter, p_bombers: pick.bomber
     }).then(function(res) {
         btn.disabled = false;
         if (res.error) { alert(res.error.message); return; }

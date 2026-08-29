@@ -742,13 +742,17 @@ function scLoadTargets() {
 
       var b = document.createElement('button');
       b.className = 'sc-target';
+      // Урон считает сервер по классу цели: бомбардировщик по крейсеру
+      // бьёт втрое сильнее, чем по истребителю, и это должно быть видно
+      // до выстрела, а не после
       b.innerHTML =
         '<div class="sc-target-line">' +
           '<span>' + t.ship_name + ' <b>' + t.x + ':' + t.y + '</b></span>' +
           '<em>' + t.chance + '%</em>' +
         '</div>' +
         '<div class="sc-target-track"><i style="width:' + hpPct + '%"></i></div>' +
-        '<div class="sc-target-sub">дистанция ' + t.gap + ' · корпус ' + t.hp + '</div>';
+        '<div class="sc-target-sub">урон <b class="sc-dmg">' + t.damage + '</b>' +
+          ' · дистанция ' + t.gap + ' · корпус ' + t.hp + '</div>';
 
       b.addEventListener('click', function() { scDoAttack(t, b); });
       box.appendChild(b);

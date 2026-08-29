@@ -616,3 +616,6 @@
 
 .sc-hangar-btn.wide { width: 100%; }
 .sc-hangar-btn:active { background: #4a90d9; color: #0a0d14; }
+
+/* Урон по конкретной цели — главное число после шанса попадания */
+.sc-dmg { color: #d9a940; font-weight: normal; }
