@@ -616,3 +616,185 @@
 }
 
 .cargo-action:disabled { opacity: 0.5; }
+
+/* ===== HUD наземного юнита: портрет и вкладки ===== */
+
+#pickup-bar { padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); }
+
+.gu-top { display: flex; gap: 11px; align-items: flex-start; }
+
+/* Портрет крупный: по нему юнит узнаётся быстрее, чем по названию */
+.gu-portrait {
+  flex: none;
+  width: 62px;
+  height: 78px;
+  border: 1px solid #2a3644;
+  border-radius: 9px;
+  overflow: hidden;
+  background: #0a0d14;
+}
+
+.gu-portrait img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  display: block;
+}
+
+.gu-stats { flex: 1; min-width: 0; }
+
+.gu-name {
+  font-size: 14px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #cfd8dc;
+}
+
+.gu-role { margin-top: 2px; font-size: 10px; color: #55606c; }
+
+.gu-hp { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+.gu-hp-num { flex: none; font-size: 11px; color: #d94a4a; }
+
+.gu-hp-track {
+  flex: 1;
+  height: 6px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.gu-hp-track i { display: block; height: 100%; background: #d94a4a; }
+
+.gu-props {
+  display: flex;
+  gap: 12px;
+  margin-top: 7px;
+  font-size: 11px;
+  color: #8fa8c4;
+}
+
+.gu-close {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  background: none;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  color: #8fa8c4;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.gu-ap-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 11px 0 9px;
+  padding-top: 10px;
+  border-top: 1px solid #1c2530;
+}
+
+.gu-dots { display: flex; gap: 5px; }
+
+.gu-dot {
+  width: 11px;
+  height: 11px;
+  border: 1px solid #2a3644;
+  border-radius: 50%;
+  background: #10151e;
+}
+
+.gu-dot.on { background: #d9a940; border-color: #d9a940; }
+.gu-ap-text { font-size: 10px; color: #55606c; letter-spacing: 1px; }
+
+/* Вкладки */
+.gu-tabs { display: flex; gap: 5px; }
+
+.gu-tab {
+  flex: 1;
+  padding: 9px 4px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  color: #55606c;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.gu-tab.active { background: #16202e; color: #4a90d9; border-color: #2a3644; }
+
+.gu-panel {
+  padding: 11px;
+  background: #16202e;
+  border: 1px solid #2a3644;
+  border-radius: 0 0 9px 9px;
+}
+
+.gu-empty, .gu-desc { font-size: 11px; color: #8fa8c4; line-height: 1.5; }
+.gu-empty { color: #55606c; text-align: center; padding: 10px 0; }
+
+/* Способности: слева плитки, справа описание выбранной */
+.gu-abils { display: flex; gap: 10px; }
+.gu-tiles { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+
+.gu-tile {
+  width: 58px;
+  height: 58px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: #10151e;
+  border: 1px solid #2a3644;
+  border-radius: 9px;
+  color: #8fa8c4;
+  font-family: 'Courier New', monospace;
+}
+
+.gu-tile-icon { font-size: 19px; line-height: 1; }
+.gu-tile-label { font-size: 8px; letter-spacing: 0.5px; }
+
+.gu-tile.active {
+  border-color: #4a90d9;
+  background: #16283c;
+  color: #cfd8dc;
+  box-shadow: 0 0 0 2px rgba(74,144,217,0.25);
+}
+
+/* Недоступная способность видна, но приглушена: игрок должен знать,
+   что она есть, и понимать, почему сейчас нельзя */
+.gu-tile.locked { opacity: 0.4; }
+
+.gu-abil-info { flex: 1; min-width: 0; }
+.gu-abil-name { font-size: 12px; color: #cfd8dc; margin-bottom: 4px; }
+.gu-abil-text { font-size: 10px; color: #8fa8c4; line-height: 1.45; }
+
+.gu-abil-meta {
+  margin-top: 6px;
+  font-size: 10px;
+  color: #55606c;
+}
+
+.gu-abil-meta.warn { color: #d9a940; }
+
+.gu-abil-go {
+  width: 100%;
+  margin-top: 9px;
+  padding: 9px;
+  background: #4a90d9;
+  border: none;
+  border-radius: 7px;
+  color: #0a0d14;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.gu-abil-go:disabled { opacity: 0.35; }
+
+.gu-rows { margin-top: 10px; }

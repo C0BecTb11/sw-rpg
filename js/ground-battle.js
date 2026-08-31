@@ -283,6 +283,67 @@ function drawSettlement() {
 // над ними, иначе нижние ряды остаются недосягаемыми
 var uiBottomInset = 0;
 
+// ===== Время и очки действий =====
+// Очки считаем на клиенте: ap и ap_updated_at приходят вместе с юнитом,
+// а часы сверяем с сервером один раз при загрузке. Никаких запросов
+// раз в секунду — иначе набегали бы тысячи обращений в час.
+var gbTimeOffset = 0;
+var gbApCd = 30;
+var gbApMax = 2;
+
+function gbServerNow() {
+  return Date.now() + gbTimeOffset;
+}
+
+function syncGroundTime() {
+  return supabase.rpc('get_server_time').then(function(res) {
+    if (!res.error && res.data) {
+      gbTimeOffset = new Date(res.data).getTime() - Date.now();
+    }
+  });
+}
+
+function unitApState(unit) {
+  if (!unit || unit.ap === undefined || unit.ap === null) return null;
+
+  var elapsed = Math.floor((gbServerNow() - new Date(unit.ap_updated_at).getTime()) / 1000);
+  if (elapsed < 0) elapsed = 0;
+
+  var ap = Math.min(gbApMax, unit.ap + Math.floor(elapsed / gbApCd));
+  return {
+    ap: ap,
+    ap_max: gbApMax,
+    next_in: ap >= gbApMax ? 0 : gbApCd - (elapsed % gbApCd)
+  };
+}
+
+// Обновляем только точки и подпись, панель целиком не перерисовываем:
+// иначе каждую секунду сбрасывался бы выбор вкладки и способности
+var apTicker = null;
+
+function startApTicker(unit) {
+  if (apTicker) clearInterval(apTicker);
+
+  apTicker = setInterval(function() {
+    if (!selectedUnit || selectedUnit.id !== unit.id) {
+      clearInterval(apTicker);
+      apTicker = null;
+      return;
+    }
+
+    var st = unitApState(unit);
+    if (!st) return;
+
+    guPaintAp(st, null);
+
+    // Плитки, ставшие доступными, гасить перестаём
+    var tiles = document.querySelectorAll('.gu-tile');
+    for (var i = 0; i < tiles.length; i++) {
+      if (st.ap >= 1) tiles[i].classList.remove('locked');
+    }
+  }, 1000);
+}
+
 function setBottomInset(px) {
   var delta = px - uiBottomInset;
   uiBottomInset = px;
@@ -623,6 +684,7 @@ function drawScene(grid) {
   drawDropCells();
   drawDisembarkCells();
   drawMoveCells();
+  drawTargetCells();
   drawDisembarkCells();
   drawAttackZone();
   drawUnits();
@@ -940,6 +1002,11 @@ function handleTap(clientX, clientY) {
 
   if (disembarking) {
     handleDisembarkTap(cellX, cellY);
+    return;
+  }
+
+  if (attackingUnit || abilityUnit) {
+    handleTargetTap(cellX, cellY);
     return;
   }
 
@@ -1364,6 +1431,7 @@ function initGroundBattle() {
       });
       loadGroundSettings();
       loadGroundSides();
+      syncGroundTime();
       loadSettlement();
       loadCaptureState();
       // Базу спрашиваем редко: строка меняется только при смене расклада.
@@ -1840,6 +1908,14 @@ function offerPickup(unit) {
 // HUD наземного юнита. Устроен как панель корабля: шапка с названием
 // и состоянием, полосы прочности, точки очков действий и кнопки внизу.
 // Разворота нет — у наземных нет носа и щитовых секторов.
+// HUD наземного юнита. Слева портрет с характеристиками, справа вкладки:
+// снаряжение, способности, описание. Разделы взаимоисключающие — иначе
+// панель разрастается и закрывает карту, на которую надо тыкать.
+
+var guTab = 'abilities';      // какая вкладка открыта
+var guAbilities = [];
+var guPickedAbility = null;
+
 function showPickup(unit, ships, carriers, inside, boardable, ap, liftCarriers) {
   liftCarriers = liftCarriers || [];
   var bar = document.getElementById('pickup-bar');
@@ -1853,88 +1929,179 @@ function showPickup(unit, ships, carriers, inside, boardable, ap, liftCarriers) 
   var type = unitTypeById[unit.unit_type] || {};
   var hpPct = type.max_hp ? Math.max(0, Math.min(100, unit.hp / type.max_hp * 100)) : 100;
 
-  var html = '';
+  var role = type.is_vehicle
+    ? (type.carry_slots > 0 ? 'Техника / Транспорт' : 'Техника')
+    : (type.carry_slots > 0 ? 'Пехота / Поддержка' : 'Пехота');
 
-  // Шапка
-  html += '<div class="gu-head">' +
-    '<div class="gu-media">' +
-      (type.image ? '<img src="../' + type.image + '" alt="">' : '') +
-    '</div>' +
-    '<div class="gu-info">' +
-      '<div class="gu-name">' + (type.name || unit.unit_type) + '</div>' +
-      '<div class="gu-sub">' + unit.x + ':' + unit.y +
-        ' · ход до ' + (type.move_range || 4) + ' кл.' +
-        (type.width_cells > 1 ? ' · ' + type.width_cells + '×' + type.height_cells : '') +
+  bar.innerHTML =
+    '<div class="gu-top">' +
+      '<div class="gu-portrait">' +
+        (type.image ? '<img src="../' + type.image + '" alt="">' : '') +
       '</div>' +
+      '<div class="gu-stats">' +
+        '<div class="gu-name">' + (type.name || unit.unit_type) + '</div>' +
+        '<div class="gu-role">' + role + ' · ' + unit.x + ':' + unit.y + '</div>' +
+        '<div class="gu-hp">' +
+          '<span class="gu-hp-num">' + unit.hp + ' / ' + (type.max_hp || unit.hp) + '</span>' +
+          '<div class="gu-hp-track"><i style="width:' + hpPct + '%"></i></div>' +
+        '</div>' +
+        '<div class="gu-props">' +
+          '<span title="урон">◎ ' + (type.damage || 0) + '</span>' +
+          '<span title="дальность">➶ ' + (type.weapon_range || 0) + '</span>' +
+          '<span title="ход">⇢ ' + (type.move_range || 0) + '</span>' +
+          '<span title="обзор">◈ ' + (type.vision_range || 0) + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<button class="gu-close" id="gu-close">✕</button>' +
     '</div>' +
-    '<button class="gu-close" id="gu-close">✕</button>' +
-  '</div>';
 
-  // Прочность
-  html += '<div class="gu-bar">' +
-    '<span>Прочность</span>' +
-    '<div class="gu-track"><i style="width:' + hpPct + '%"></i></div>' +
-    '<b>' + unit.hp + '</b>' +
-  '</div>';
+    '<div class="gu-ap-row">' +
+      '<div class="gu-dots" id="gu-dots"></div>' +
+      '<div class="gu-ap-text" id="gu-ap-text"></div>' +
+    '</div>' +
 
-  // Десант внутри транспорта — своей полосой, чтобы было видно загрузку
-  if (type.carry_slots > 0) {
-    var used = inside.reduce(function(a, p) { return a + (p.slots || 1); }, 0);
-    var pct = Math.min(100, used / type.carry_slots * 100);
-    html += '<div class="gu-bar">' +
-      '<span>Десант</span>' +
-      '<div class="gu-track gu-track-cargo"><i style="width:' + pct + '%"></i></div>' +
-      '<b>' + used + '/' + type.carry_slots + '</b>' +
-    '</div>';
+    '<div class="gu-tabs">' +
+      '<button class="gu-tab" data-tab="gear">Снаряжение</button>' +
+      '<button class="gu-tab" data-tab="abilities">Способности</button>' +
+      '<button class="gu-tab" data-tab="info">Описание</button>' +
+    '</div>' +
+    '<div class="gu-panel" id="gu-panel"></div>';
+
+  // Очки действий рисуем сразу и дальше обновляем тикером
+  guPaintAp(ap, type);
+
+  var tabs = bar.querySelectorAll('.gu-tab');
+  for (var i = 0; i < tabs.length; i++) {
+    (function(btn) {
+      btn.classList.toggle('active', btn.dataset.tab === guTab);
+      btn.addEventListener('click', function() {
+        guTab = btn.dataset.tab;
+        guPickedAbility = null;
+        showPickup(unit, ships, carriers, inside, boardable, ap, liftCarriers);
+      });
+    })(tabs[i]);
   }
 
-  // Очки действий — точками, как у кораблей
-  html += '<div class="gu-ap"><div class="gu-dots">';
-  if (ap) {
-    for (var i = 0; i < ap.ap_max; i++) {
-      html += '<i class="gu-dot' + (i < ap.ap ? ' on' : '') + '"></i>';
-    }
+  var panel = document.getElementById('gu-panel');
+
+  if (guTab === 'gear') {
+    panel.innerHTML = '<div class="gu-empty">Снаряжение появится позже</div>';
+  } else if (guTab === 'info') {
+    panel.innerHTML = '<div class="gu-desc">' +
+      (type.description || 'Описание пока не заполнено') + '</div>';
+  } else {
+    guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, boardable, liftCarriers);
   }
-  html += '</div><div class="gu-ap-text">' +
-    (ap ? (ap.ap >= ap.ap_max ? 'действия готовы' : '+1 через ' + ap.next_in + ' с') : '') +
-    '</div></div>';
 
-  bar.innerHTML = html;
+  var closeBtn = document.getElementById('gu-close');
+  if (closeBtn) closeBtn.addEventListener('click', function() {
+    selectedUnit = null; hidePickup(); redrawScene();
+  });
 
-  // Кнопки
-  var actions = document.createElement('div');
-  actions.className = 'gu-actions';
+  bar.style.visibility = 'visible';
+  setBottomInset(insetFor(bar));
+  focusCell(unit.x, unit.y);
 
-  var moveBtn = document.createElement('button');
-  moveBtn.className = 'gu-btn gu-btn-go';
-  moveBtn.textContent = 'Идти';
-  moveBtn.disabled = !ap || ap.ap < 1;
-  moveBtn.addEventListener('click', function() { startGroundMove(unit); });
-  actions.appendChild(moveBtn);
+  startApTicker(unit);
+}
 
-  bar.appendChild(actions);
+function guPaintAp(ap, type) {
+  var dots = document.getElementById('gu-dots');
+  var text = document.getElementById('gu-ap-text');
+  if (!dots || !text || !ap) return;
 
-  // Списки: посадка, высадка, погрузка на корабль
+  var html = '';
+  for (var i = 0; i < ap.ap_max; i++) {
+    html += '<i class="gu-dot' + (i < ap.ap ? ' on' : '') + '"></i>';
+  }
+  dots.innerHTML = html;
+  text.textContent = ap.ap >= ap.ap_max ? 'действия готовы' : '+1 через ' + ap.next_in + ' с';
+}
+
+// Плитки способностей: слева сетка, справа описание выбранной — как
+// в пошаговых тактиках, где важно понять действие до того, как жать
+function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, boardable, lifts) {
+  panel.innerHTML = '<div class="gu-abils"><div class="gu-tiles" id="gu-tiles"></div>' +
+    '<div class="gu-abil-info" id="gu-abil-info"></div></div>' +
+    '<div class="gu-rows" id="gu-rows"></div>';
+
+  var tiles = document.getElementById('gu-tiles');
+  var info = document.getElementById('gu-abil-info');
+  var canAct = ap && ap.ap >= 1;
+
+  var addTile = function(key, icon, label, ready, onPick) {
+    var b = document.createElement('button');
+    b.className = 'gu-tile' + (guPickedAbility === key ? ' active' : '') +
+                  (ready ? '' : ' locked');
+    b.innerHTML = '<span class="gu-tile-icon">' + icon + '</span>' +
+                  '<span class="gu-tile-label">' + label + '</span>';
+    b.addEventListener('click', function() {
+      guPickedAbility = key;
+      onPick();
+    });
+    tiles.appendChild(b);
+    return b;
+  };
+
+  // Ход и атака — базовые действия, они есть у всех
+  addTile('move', '⇢', 'Идти', canAct, function() {
+    info.innerHTML = '<div class="gu-abil-name">Перемещение</div>' +
+      '<div class="gu-abil-text">До ' + (type.move_range || 4) + ' клеток за одно действие.</div>';
+    guAbilityAction(info, 'Идти', canAct, function() { startGroundMove(unit); });
+  });
+
+  addTile('attack', '◎', 'Атака', canAct, function() {
+    info.innerHTML = '<div class="gu-abil-name">Атака</div>' +
+      '<div class="gu-abil-text">Урон зависит от класса цели: ' +
+      'пехота плохо берёт броню, техника плохо достаёт авиацию.</div>';
+    guAbilityAction(info, 'Выбрать цель', canAct, function() { startGroundAttack(unit); });
+  });
+
+  // Собственные способности приходят с сервера вместе с откатом
+  supabase.rpc('get_unit_abilities', { p_unit_id: unit.id }).then(function(res) {
+    if (!selectedUnit || selectedUnit.id !== unit.id || guTab !== 'abilities') return;
+
+    guAbilities = (!res.error && res.data) ? res.data : [];
+
+    guAbilities.forEach(function(a) {
+      addTile(a.ability_id, a.icon, a.name, a.ready && canAct, function() {
+        info.innerHTML =
+          '<div class="gu-abil-name">' + a.name + '</div>' +
+          '<div class="gu-abil-text">' + (a.description || '') + '</div>' +
+          '<div class="gu-abil-meta">◷ откат ' + Math.round(a.cooldown_seconds / 60) + ' мин</div>' +
+          (a.ready ? '' :
+            '<div class="gu-abil-meta warn">не готова: ' +
+              formatLeft(a.seconds_left) + '</div>');
+
+        guAbilityAction(info, 'Выбрать цель', a.ready && canAct, function() {
+          startAbilityTargeting(unit, a);
+        });
+      });
+    });
+  });
+
+  // Погрузка и посадка остаются списком снизу: это не способности,
+  // а перемещение между техникой и кораблями
+  var rows = document.getElementById('gu-rows');
+
   var addRow = function(text, note, cls, onClick) {
     var b = document.createElement('button');
     b.className = 'gu-row' + (cls ? ' ' + cls : '');
     b.innerHTML = '<span>' + text + '</span><em>' + note + '</em>';
     if (onClick) b.addEventListener('click', function() { onClick(b); });
     else b.disabled = true;
-    bar.appendChild(b);
+    rows.appendChild(b);
   };
 
-  // Истребитель на грунте умеет вернуться в ангар носителя
-  if (type.is_vehicle && liftCarriers.length) {
-    liftCarriers.forEach(function(c) {
+  if (type.is_vehicle && lifts.length) {
+    lifts.forEach(function(c) {
       addRow('В ангар ' + c.carrier_name, 'мест ' + c.free_slots, 'ship', function(btn) {
         btn.disabled = true;
-        supabase.rpc('lift_fighter', {
-          p_unit_id: unit.id, p_carrier_id: c.carrier_id
-        }).then(function(r) {
-          if (r.error) { alert('Не удалось поднять: ' + r.error.message); btn.disabled = false; return; }
-          selectedUnit = null; hidePickup(); loadUnits(); loadDropCargo();
-        });
+        supabase.rpc('lift_fighter', { p_unit_id: unit.id, p_carrier_id: c.carrier_id })
+          .then(function(r) {
+            if (r.error) { alert('Не удалось поднять: ' + r.error.message); btn.disabled = false; return; }
+            selectedUnit = null; hidePickup(); loadUnits(); loadDropCargo();
+          });
       });
     });
   }
@@ -1946,8 +2113,7 @@ function showPickup(unit, ships, carriers, inside, boardable, ap, liftCarriers) 
       supabase.rpc('board_carrier', { p_unit_id: b.unit_id, p_carrier_id: unit.id })
         .then(function(r) {
           if (r.error) { alert('Не удалось посадить: ' + r.error.message); btn.disabled = false; return; }
-          loadUnits();
-          offerPickup(unit);
+          loadUnits(); offerPickup(unit);
         });
     });
   });
@@ -1979,15 +2145,125 @@ function showPickup(unit, ships, carriers, inside, boardable, ap, liftCarriers) 
       });
     });
   });
+}
 
-  var closeBtn = document.getElementById('gu-close');
-  if (closeBtn) closeBtn.addEventListener('click', function() {
-    selectedUnit = null; hidePickup(); redrawScene();
+function guAbilityAction(info, label, enabled, onGo) {
+  var go = document.createElement('button');
+  go.className = 'gu-abil-go';
+  go.textContent = label;
+  go.disabled = !enabled;
+  go.addEventListener('click', onGo);
+  info.appendChild(go);
+}
+
+// ===== Атака и способности с выбором цели на карте =====
+// Цель выбирается пальцем: в свалке одинаковых юнитов список бесполезен.
+
+var attackingUnit = null;
+var abilityUnit = null;
+var abilityDef = null;
+var groundTargets = [];
+
+function startGroundAttack(unit) {
+  attackingUnit = unit;
+  abilityUnit = null;
+  hidePickup();
+
+  supabase.rpc('get_ground_targets', { p_unit_id: unit.id }).then(function(res) {
+    groundTargets = (!res.error && res.data) ? res.data : [];
+    showTargetHint('Ткни в цель', groundTargets.length
+      ? groundTargets.length + ' в радиусе'
+      : 'в радиусе никого', cancelTargeting);
+    redrawScene();
   });
+}
 
-  bar.style.visibility = 'visible';
-  setBottomInset(insetFor(bar));
-  focusCell(unit.x, unit.y);
+function startAbilityTargeting(unit, ability) {
+  abilityUnit = unit;
+  abilityDef = ability;
+  attackingUnit = null;
+  hidePickup();
+
+  supabase.rpc('get_ability_targets', {
+    p_unit_id: unit.id, p_ability_id: ability.ability_id
+  }).then(function(res) {
+    groundTargets = (!res.error && res.data) ? res.data : [];
+    showTargetHint(ability.name, groundTargets.length
+      ? 'подходящих рядом: ' + groundTargets.length
+      : 'рядом некого', cancelTargeting);
+    redrawScene();
+  });
+}
+
+function showTargetHint(title, note, onCancel) {
+  var hint = document.getElementById('placement-hint');
+  hint.innerHTML = '<span>' + title + ' · ' + note + '</span>' +
+                   '<button id="target-cancel">Отмена</button>';
+  hint.style.display = 'flex';
+  document.getElementById('target-cancel').addEventListener('click', onCancel);
+  setBottomInset(insetFor(hint));
+}
+
+function cancelTargeting() {
+  attackingUnit = null;
+  abilityUnit = null;
+  abilityDef = null;
+  groundTargets = [];
+  document.getElementById('placement-hint').style.display = 'none';
+  setBottomInset(0);
+  redrawScene();
+}
+
+// Подсветка достижимых целей
+function drawTargetCells() {
+  if (!groundTargets.length) return;
+
+  groundTargets.forEach(function(t) {
+    ctx.strokeStyle = attackingUnit ? 'rgba(217,74,74,0.95)' : 'rgba(95,217,104,0.95)';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(t.x * CELL_PX + 2, t.y * CELL_PX + 2, CELL_PX - 4, CELL_PX - 4);
+  });
+}
+
+function handleTargetTap(cellX, cellY) {
+  var pick = null;
+  for (var i = 0; i < groundTargets.length; i++) {
+    var t = groundTargets[i];
+    var b = unitTypeById[t.unit_type] || {};
+    var w = b.width_cells || 1, h = b.height_cells || 1;
+    if (cellX >= t.x && cellX < t.x + w && cellY >= t.y && cellY < t.y + h) { pick = t; break; }
+  }
+
+  if (!pick) { alert('Эта цель недоступна'); return; }
+
+  if (attackingUnit) {
+    supabase.rpc('attack_unit', {
+      p_attacker_id: attackingUnit.id, p_target_id: pick.target_id
+    }).then(function(r) {
+      if (r.error) { alert(r.error.message); return; }
+      var res = (r.data && r.data.length) ? r.data[0] : null;
+      if (res) {
+        alert(!res.hit ? 'Промах'
+          : res.destroyed ? pick.name + ' уничтожен'
+          : 'Попадание · −' + res.damage + ' · осталось ' + res.target_hp);
+      }
+      cancelTargeting();
+      selectedUnit = null;
+      loadUnits();
+    });
+    return;
+  }
+
+  supabase.rpc('use_ability', {
+    p_unit_id: abilityUnit.id, p_ability_id: abilityDef.ability_id,
+    p_target_id: pick.target_id
+  }).then(function(r) {
+    if (r.error) { alert(r.error.message); return; }
+    alert(abilityDef.name + ': +' + r.data);
+    cancelTargeting();
+    selectedUnit = null;
+    loadUnits();
+  });
 }
 
 // Высадка пассажира из канонерки: тап по клетке рядом с ней.
