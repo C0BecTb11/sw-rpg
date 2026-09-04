@@ -619,3 +619,157 @@
 
 /* Урон по конкретной цели — главное число после шанса попадания */
 .sc-dmg { color: #d9a940; font-weight: normal; }
+
+/* ===== Панель корабля: портрет и вкладки =====
+   Устройство то же, что у наземной панели, — единый язык интерфейса.
+   Отличия только в том, что у кораблей есть щиты по секторам и ангар. */
+
+#ship-hud {
+  max-height: 60vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.sc-top { display: flex; gap: 11px; align-items: flex-start; }
+
+.sc-portrait {
+  flex: none;
+  width: 62px;
+  height: 78px;
+  border: 1px solid #2a3644;
+  border-radius: 9px;
+  overflow: hidden;
+  background: #0a0d14;
+}
+
+.sc-portrait img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.sc-stats { flex: 1; min-width: 0; }
+
+.sc-name {
+  font-size: 14px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #4a90d9;
+}
+
+.sc-role { margin-top: 2px; font-size: 10px; color: #55606c; }
+
+.sc-hp { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+.sc-hp-num { flex: none; font-size: 11px; color: #5fd968; }
+
+.sc-hp-track {
+  flex: 1;
+  height: 6px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.sc-hp-track i { display: block; height: 100%; background: #5fd968; }
+
+.sc-props {
+  display: flex;
+  gap: 12px;
+  margin-top: 7px;
+  font-size: 11px;
+  color: #8fa8c4;
+}
+
+.sc-close {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  background: none;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  color: #8fa8c4;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.sc-ap-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 11px 0 9px;
+  padding-top: 10px;
+  border-top: 1px solid #1c2530;
+}
+
+.sc-dots { display: flex; gap: 5px; }
+.sc-ap-text { font-size: 10px; color: #55606c; letter-spacing: 1px; }
+
+.sc-tabs { display: flex; gap: 5px; }
+
+.sc-tab {
+  flex: 1;
+  padding: 9px 4px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  color: #55606c;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.sc-tab.active { background: #16202e; color: #4a90d9; border-color: #2a3644; }
+
+.sc-panel {
+  padding: 11px;
+  background: #16202e;
+  border: 1px solid #2a3644;
+  border-radius: 0 0 9px 9px;
+}
+
+/* Плитки действий */
+.sc-abils { display: flex; gap: 10px; }
+.sc-tiles { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+
+.sc-tile {
+  width: 58px;
+  height: 58px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: #10151e;
+  border: 1px solid #2a3644;
+  border-radius: 9px;
+  color: #8fa8c4;
+  font-family: 'Courier New', monospace;
+}
+
+.sc-tile-icon { font-size: 19px; line-height: 1; }
+.sc-tile-label { font-size: 8px; letter-spacing: 0.5px; }
+
+.sc-tile.active {
+  border-color: #4a90d9;
+  background: #16283c;
+  color: #cfd8dc;
+  box-shadow: 0 0 0 2px rgba(74,144,217,0.25);
+}
+
+/* Недоступное действие видно, но приглушено: игрок должен понимать,
+   что оно есть и почему сейчас нельзя */
+.sc-tile.locked { opacity: 0.4; }
+
+.sc-abil-info { flex: 1; min-width: 0; }
+.sc-abil-name { font-size: 12px; color: #cfd8dc; margin-bottom: 4px; }
+.sc-abil-text { font-size: 10px; color: #8fa8c4; line-height: 1.45; }
+.sc-abil-meta { margin-top: 6px; font-size: 10px; color: #55606c; }
+
+.sc-desc { font-size: 11px; color: #8fa8c4; line-height: 1.5; margin-top: 8px; }
+
+#sc-confirm { margin-top: 10px; }
+#sc-dial { margin-top: 10px; }
+#sc-targets { margin-top: 10px; max-height: 30vh; overflow-y: auto; }

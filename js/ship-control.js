@@ -81,44 +81,54 @@ function scEnsureHud() {
   hud = document.createElement('div');
   hud.id = 'ship-hud';
   hud.style.display = 'none';
+  // Устройство то же, что у наземной панели: портрет с характеристиками
+  // сверху, вкладки снизу. Космос отличается щитами по секторам и ангаром,
+  // поэтому им отведены свои вкладки, а не общий список.
   hud.innerHTML =
-    '<div id="sc-head">' +
-      '<div><div id="sc-name">—</div><div id="sc-sub"></div></div>' +
-      '<button id="sc-close">✕</button>' +
+    '<div class="sc-top">' +
+      '<div class="sc-portrait"><img id="sc-portrait-img" alt=""></div>' +
+      '<div class="sc-stats">' +
+        '<div class="sc-name" id="sc-name">—</div>' +
+        '<div class="sc-role" id="sc-sub"></div>' +
+        '<div class="sc-hp">' +
+          '<span class="sc-hp-num" id="sc-hp-num"></span>' +
+          '<div class="sc-hp-track"><i id="sc-hp-fill"></i></div>' +
+        '</div>' +
+        '<div class="sc-props" id="sc-props"></div>' +
+      '</div>' +
+      '<button class="sc-close" id="sc-close">✕</button>' +
     '</div>' +
-    '<div id="sc-bars"></div>' +
-    '<div id="sc-cmd"></div>' +
-    '<div id="sc-ap"><div id="sc-ap-dots"></div><div id="sc-ap-text"></div></div>' +
-    '<div id="sc-actions">' +
-      '<button class="sc-btn" id="sc-move">Ход</button>' +
-      '<button class="sc-btn" id="sc-rotate">Разворот</button>' +
-      '<button class="sc-btn" id="sc-attack">Атака</button>' +
-      '<button class="sc-btn" id="sc-hangar-btn">Ангар</button>' +
+
+    '<div class="sc-ap-row" id="sc-ap">' +
+      '<div class="sc-dots" id="sc-ap-dots"></div>' +
+      '<div class="sc-ap-text" id="sc-ap-text"></div>' +
     '</div>' +
-    '<div id="sc-confirm">' +
-      '<button class="sc-btn sc-btn-go" id="sc-go">Идти</button>' +
-      '<button class="sc-btn" id="sc-cancel">Отмена</button>' +
+
+    '<div class="sc-tabs" id="sc-tabs"></div>' +
+    '<div class="sc-panel">' +
+      '<div id="sc-tab-actions">' +
+        '<div class="sc-abils">' +
+          '<div class="sc-tiles" id="sc-tiles"></div>' +
+          '<div class="sc-abil-info" id="sc-abil-info"></div>' +
+        '</div>' +
+        '<div id="sc-confirm">' +
+          '<button class="sc-btn sc-btn-go" id="sc-go">Идти</button>' +
+          '<button class="sc-btn" id="sc-cancel">Отмена</button>' +
+        '</div>' +
+        '<div id="sc-dial"></div>' +
+        '<div id="sc-targets"></div>' +
+      '</div>' +
+      '<div id="sc-tab-shields"></div>' +
+      '<div id="sc-tab-cargo"></div>' +
+      '<div id="sc-tab-hangar"><div id="sc-hangar"></div></div>' +
+      '<div id="sc-tab-info"><div id="sc-cmd"></div><div class="sc-desc" id="sc-desc"></div></div>' +
     '</div>' +
-    '<div id="sc-dial"></div>' +
-    '<div id="sc-targets" style="display:none;"></div>' +
-    '<div id="sc-hangar"></div>' +
-    '<div id="sc-hint"></div>';
+    '<div id="sc-hint"></div>' +
+    '<div id="sc-bars" style="display:none;"></div>';
 
   document.body.appendChild(hud);
 
   document.getElementById('sc-close').addEventListener('click', scDeselect);
-  document.getElementById('sc-move').addEventListener('click', function() {
-    scSetMode(scMode === 'move' ? null : 'move');
-  });
-  document.getElementById('sc-rotate').addEventListener('click', function() {
-    scSetMode(scMode === 'rotate' ? null : 'rotate');
-  });
-  document.getElementById('sc-attack').addEventListener('click', function() {
-    scSetMode(scMode === 'attack' ? null : 'attack');
-  });
-  document.getElementById('sc-hangar-btn').addEventListener('click', function() {
-    scSetMode(scMode === 'hangar' ? null : 'hangar');
-  });
   document.getElementById('sc-go').addEventListener('click', scConfirmMove);
   document.getElementById('sc-cancel').addEventListener('click', scCancelAim);
 
@@ -161,8 +171,28 @@ function scRenderHud() {
   }
 
   document.getElementById('sc-name').textContent = scType.name;
+
+  var role = scType.is_fighter
+    ? (scType.hull_class === 'bomber' ? 'Бомбардировщик' : 'Истребитель')
+    : (scType.hull_class === 'corvette' ? 'Корвет' : 'Крупный корабль');
+
   document.getElementById('sc-sub').textContent =
-    'позиция ' + scShip.x + ':' + scShip.y + ' · ход до ' + scType.move_range + ' кл.';
+    role + ' · ' + scShip.x + ':' + scShip.y;
+
+  var img = document.getElementById('sc-portrait-img');
+  if (img && scType.image) img.src = '../' + scType.image;
+
+  var hpPct = Math.max(0, Math.min(100, (scShip.hp / scType.max_hp) * 100));
+  document.getElementById('sc-hp-num').textContent = scShip.hp + ' / ' + scType.max_hp;
+  document.getElementById('sc-hp-fill').style.width = hpPct + '%';
+
+  document.getElementById('sc-props').innerHTML =
+    '<span title="урон">◎ ' + (scType.damage || 0) + '</span>' +
+    '<span title="дальность огня">➶ ' + (scType.weapon_range || 0) + '</span>' +
+    '<span title="ход">⇢ ' + (scType.move_range || 0) + '</span>' +
+    '<span title="обзор">◈ ' + (scType.vision_range || 0) + '</span>';
+
+  scRenderTabs();
 
   // Корпус и четыре сектора щитов
   var maxShield = scType.max_shield || 0;
@@ -193,10 +223,213 @@ function scRenderHud() {
     html += '</div>';
   }
 
-  document.getElementById('sc-bars').innerHTML = html;
+  document.getElementById('sc-tab-shields').innerHTML = html;
+
+  var desc = document.getElementById('sc-desc');
+  if (desc) desc.textContent = scType.description || 'Описание пока не заполнено';
+
   scRenderCommander();
   scRenderAp();
   scRenderMode();
+}
+
+// ===== Вкладки =====
+// Щиты и ангар вынесены отдельно: держать их на виду постоянно значит
+// закрывать карту, на которую надо тыкать при ходе и атаке.
+var scTab = 'actions';
+
+function scRenderTabs() {
+  var box = document.getElementById('sc-tabs');
+  if (!box) return;
+
+  var tabs = [{ id: 'actions', label: 'Действия' }];
+
+  if ((scType.max_shield || 0) > 0) tabs.push({ id: 'shields', label: 'Щиты' });
+  // Трюм только у тех, кто возит: у истребителя вместимость ноль
+  if ((scType.capacity || 0) > 0) tabs.push({ id: 'cargo', label: 'Трюм' });
+  if (scType.hangar_slots > 0 || scType.is_fighter) tabs.push({ id: 'hangar', label: 'Ангар' });
+  tabs.push({ id: 'info', label: 'Описание' });
+
+  // Вкладка могла исчезнуть при смене корабля — тогда возвращаемся к действиям
+  if (!tabs.some(function(t) { return t.id === scTab; })) scTab = 'actions';
+
+  box.innerHTML = '';
+  tabs.forEach(function(t) {
+    var b = document.createElement('button');
+    b.className = 'sc-tab' + (scTab === t.id ? ' active' : '');
+    b.textContent = t.label;
+    b.addEventListener('click', function() {
+      scTab = t.id;
+      if (t.id !== 'actions') scSetMode(null);
+      scRenderTabs();
+      scApplyTab();
+      if (t.id === 'hangar') scRenderHangar();
+      if (t.id === 'cargo') scRenderCargo();
+    });
+    box.appendChild(b);
+  });
+
+  scApplyTab();
+}
+
+function scApplyTab() {
+  ['actions', 'shields', 'cargo', 'hangar', 'info'].forEach(function(id) {
+    var el = document.getElementById('sc-tab-' + id);
+    if (el) el.style.display = (scTab === id) ? 'block' : 'none';
+  });
+}
+
+// Плитки действий: ход, разворот, атака. Справа — пояснение выбранного,
+// чтобы игрок понимал последствие до нажатия.
+// Трюм: пехота лежит счётчиком, техника отдельными строками. Показываем
+// обе части и даём высадить прямо отсюда. На своей планете место подбирает
+// сервер, при вторжении высадка идёт поштучно с наземной карты.
+function scRenderCargo() {
+  var box = document.getElementById('sc-tab-cargo');
+  if (!box || !scShip) return;
+
+  var forShip = scShip.id;
+  box.innerHTML = '<div class="sc-hangar-head">Трюм</div>' +
+                  '<div class="sc-hangar-empty">Загрузка…</div>';
+
+  Promise.all([
+    supabase.rpc('get_ship_holds'),
+    supabase.rpc('get_carried_units', { p_carrier_unit_id: null, p_ship_id: forShip })
+  ]).then(function(r) {
+    if (!scShip || scShip.id !== forShip || scTab !== 'cargo') return;
+
+    var holds = (!r[0].error && r[0].data) ? r[0].data : [];
+    var mine = holds.filter(function(h) { return h.ship_id === forShip && !h.is_vehicle; });
+    var vehicles = (!r[1].error && r[1].data) ? r[1].data : [];
+
+    var used = 0;
+    holds.forEach(function(h) { if (h.ship_id === forShip) used += (h.slots || 0); });
+
+    box.innerHTML = '<div class="sc-hangar-head">Трюм · ' +
+      used + ' из ' + (scType.capacity || 0) + '</div>';
+
+    if (!mine.length && !vehicles.length) {
+      var empty = document.createElement('div');
+      empty.className = 'sc-hangar-empty';
+      empty.textContent = 'Пусто';
+      box.appendChild(empty);
+      return;
+    }
+
+    vehicles.forEach(function(v) {
+      var row = document.createElement('div');
+      row.className = 'sc-hangar-row';
+      row.innerHTML = '<div class="sc-hangar-line"><span>' + v.unit_name +
+        (v.passengers ? ' · десант ' + v.passengers : '') + '</span>' +
+        '<em>' + v.slots + ' сл.</em></div>';
+
+      var b = document.createElement('button');
+      b.className = 'sc-hangar-btn wide';
+      b.textContent = 'Высадить';
+      b.addEventListener('click', function() {
+        b.disabled = true;
+        supabase.rpc('unload_vehicle_auto', { p_unit_id: v.unit_id }).then(function(res) {
+          if (res.error) { scFail(res.error.message); b.disabled = false; return; }
+          scRenderCargo();
+          loadShips();
+        });
+      });
+      row.appendChild(b);
+      box.appendChild(row);
+    });
+
+    mine.forEach(function(h) {
+      var row = document.createElement('div');
+      row.className = 'sc-hangar-row';
+      row.innerHTML = '<div class="sc-hangar-line"><span>' + h.unit_name + '</span>' +
+        '<em>×' + h.quantity + '</em></div>';
+
+      var acts = document.createElement('div');
+      acts.className = 'sc-hangar-acts';
+
+      [1, 5].forEach(function(n) {
+        if (n > h.quantity) return;
+        var b = document.createElement('button');
+        b.className = 'sc-hangar-btn';
+        b.textContent = 'Высадить ' + n;
+        b.addEventListener('click', function() {
+          b.disabled = true;
+          supabase.rpc('unload_from_ship', {
+            p_ship_id: forShip, p_unit_type: h.unit_type, p_quantity: n
+          }).then(function(res) {
+            if (res.error) { scFail(res.error.message); b.disabled = false; return; }
+            scRenderCargo();
+            loadShips();
+          });
+        });
+        acts.appendChild(b);
+      });
+
+      row.appendChild(acts);
+      box.appendChild(row);
+    });
+
+    var note = document.createElement('div');
+    note.className = 'sc-hangar-empty';
+    note.textContent = 'На чужой планете высадка идёт поштучно с наземной карты';
+    box.appendChild(note);
+  });
+}
+
+function scRenderTiles() {
+  var tiles = document.getElementById('sc-tiles');
+  var info = document.getElementById('sc-abil-info');
+  if (!tiles || !info) return;
+
+  var st = scApState(scShip);
+  var canAct = st.ap >= 1;
+  var inBand = false;
+
+  tiles.innerHTML = '';
+
+  var add = function(key, icon, label, enabled, onPick) {
+    var b = document.createElement('button');
+    b.className = 'sc-tile' + (scMode === key ? ' active' : '') + (enabled ? '' : ' locked');
+    b.innerHTML = '<span class="sc-tile-icon">' + icon + '</span>' +
+                  '<span class="sc-tile-label">' + label + '</span>';
+    b.addEventListener('click', function() {
+      scSetMode(scMode === key ? null : key);
+      onPick();
+    });
+    tiles.appendChild(b);
+  };
+
+  var describe = function(name, text, meta) {
+    info.innerHTML = '<div class="sc-abil-name">' + name + '</div>' +
+      '<div class="sc-abil-text">' + text + '</div>' +
+      (meta ? '<div class="sc-abil-meta">' + meta + '</div>' : '');
+  };
+
+  add('move', '⇢', 'Ход', canAct, function() {
+    describe('Перемещение',
+      'До ' + scType.move_range + ' клеток за одно действие. ' +
+      'Коснись клетки — корабль встанет на неё серединой.',
+      canAct ? null : 'нет очков действий');
+  });
+
+  add('rotate', '⟳', 'Разворот', canAct, function() {
+    describe('Разворот',
+      'Меняет, каким бортом корабль встречает противника. ' +
+      'Щит держится по секторам, поэтому подставлять целый борт выгоднее.',
+      canAct ? null : 'нет очков действий');
+  });
+
+  add('attack', '◎', 'Атака', canAct, function() {
+    describe('Атака',
+      'Урон зависит от класса цели: бомбардировщик рвёт крупные корабли, ' +
+      'истребитель прикрывает от них своих.',
+      canAct ? null : 'нет очков действий');
+  });
+
+  if (!scMode) {
+    describe('Действия', 'Выбери, что делает корабль.',
+      st.ap >= st.apMax ? 'действия готовы' : '+1 через ' + st.nextIn + ' с');
+  }
 }
 
 // Командир нужен только для перелётов между планетами. Корабль без
@@ -322,12 +555,30 @@ function scRenderHangar() {
   }
 
   var forShip = scShip.id;
+  box.innerHTML = '<div class="sc-hangar-head">Ангар</div>' +
+                  '<div class="sc-hangar-empty">Загрузка…</div>';
 
-  supabase.rpc('get_hangar', { p_ship_id: forShip }).then(function(res) {
-    // Пока шёл запрос, игрок мог выбрать другой корабль — тогда ответ
-    // уже не про него
-    if (!scShip || scShip.id !== forShip || scMode !== 'hangar') return;
-    var list = (!res.error && res.data) ? res.data : [];
+  // Читаем ангар прямо из таблицы: истребители внутри принадлежат игроку,
+  // права на чтение у него есть. Так убирается лишнее звено — раньше
+  // содержимое шло через функцию, и любой сбой в ней выглядел как
+  // пустой ангар, без всякого объяснения.
+  supabase.from('ships')
+    .select('id, hp, ship_type, ship_types(name, image, max_hp)')
+    .eq('carrier_ship_id', forShip)
+    .then(function(res) {
+    if (!scShip || scShip.id !== forShip || scTab !== 'hangar') return;
+
+    if (res.error) {
+      box.innerHTML = '<div class="sc-hangar-head">Ангар</div>' +
+        '<div class="sc-hangar-empty">Ошибка: ' + res.error.message + '</div>';
+      return;
+    }
+
+    var list = (res.data || []).map(function(f) {
+      var t = f.ship_types || {};
+      return { fighter_id: f.id, name: t.name || f.ship_type,
+               hp: f.hp, max_hp: t.max_hp || f.hp };
+    });
 
     var html = '<div class="sc-hangar-head">Ангар · ' +
       list.length + ' из ' + scType.hangar_slots + '</div>';
@@ -388,7 +639,7 @@ function scRenderFighterActions(box) {
   box.appendChild(loading);
 
   supabase.rpc('get_recall_carriers', { p_fighter_id: forShip }).then(function(res) {
-    if (!scShip || scShip.id !== forShip || scMode !== 'hangar') return;
+    if (!scShip || scShip.id !== forShip || scTab !== 'hangar') return;
 
     var list = (!res.error && res.data) ? res.data : [];
     box.innerHTML = '<div class="sc-hangar-head">Носитель</div>';
@@ -456,40 +707,36 @@ function scRenderAp() {
     ? 'действия готовы'
     : '+1 через ' + st.nextIn + ' с';
 
-  document.getElementById('sc-move').disabled = st.ap < 1;
-  document.getElementById('sc-rotate').disabled = st.ap < 1;
-  document.getElementById('sc-attack').disabled = st.ap < 1;
+  // Доступность действий показывают сами плитки
+  scRenderTiles();
 }
 
 function scRenderMode() {
   var dial = document.getElementById('sc-dial');
   var hint = document.getElementById('sc-hint');
-  var moveBtn = document.getElementById('sc-move');
-  var rotBtn = document.getElementById('sc-rotate');
   if (!dial) return;
 
-  var targets = document.getElementById('sc-targets');
+  // Режим живёт внутри вкладки действий: выбрал ход или атаку — вернись
+  // на неё, иначе плитки окажутся спрятаны за щитами
+  if (scMode) { scTab = 'actions'; scApplyTab(); }
+
   if (scMode === 'attack') scLoadTargets();
 
-  if (scMode === 'hangar') scRenderHangar();
+  scRenderTiles();
 
   dial.style.display = scMode === 'rotate' ? 'grid' : 'none';
 
-  // Текущее положение подсвечиваем, чтобы было видно, куда смотрит нос
   var dirs = dial.querySelectorAll('.sc-dir');
   for (var i = 0; i < dirs.length; i++) {
     var isNow = scShip && parseInt(dirs[i].dataset.deg, 10) === (scShip.facing || 0);
     dirs[i].classList.toggle('current', !!isNow);
   }
-  moveBtn.classList.toggle('active', scMode === 'move');
-  rotBtn.classList.toggle('active', scMode === 'rotate');
 
   var confirmBox = document.getElementById('sc-confirm');
   confirmBox.style.display = (scMode === 'move' && scPreview) ? 'flex' : 'none';
-  document.getElementById('sc-actions').style.display =
-    (scMode === 'move' && scPreview) ? 'none' : 'flex';
 
-  document.getElementById('sc-attack').classList.toggle('active', scMode === 'attack');
+  var targetsBox = document.getElementById('sc-targets');
+  if (targetsBox) targetsBox.style.display = scMode === 'attack' ? 'block' : 'none';
 
   if (scMode !== 'attack' && scTargets.length) {
     scTargets = [];
