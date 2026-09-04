@@ -505,38 +505,14 @@
   -webkit-overflow-scrolling: touch;
 }
 
-#ship-hud.mode-move,
-#ship-hud.mode-attack { max-height: 42vh; }
-
-#ship-hud.mode-move #sc-bars,
-#ship-hud.mode-move #sc-cmd,
-#ship-hud.mode-move #sc-hangar,
-#ship-hud.mode-rotate #sc-bars,
-#ship-hud.mode-rotate #sc-cmd,
-#ship-hud.mode-rotate #sc-hangar,
-#ship-hud.mode-attack #sc-bars,
-#ship-hud.mode-attack #sc-cmd,
-#ship-hud.mode-attack #sc-hangar,
-#ship-hud.mode-hangar #sc-bars,
-#ship-hud.mode-hangar #sc-cmd { display: none; }
-
-/* Списки показываются только в своём режиме */
-#sc-targets, #sc-hangar { display: none; }
-#ship-hud.mode-attack #sc-targets { display: block; }
-#ship-hud.mode-hangar #sc-hangar  { display: block; }
-
+/* Списки прокручиваются внутри вкладки, а не растягивают панель */
 #sc-targets, #sc-hangar {
   max-height: 34vh;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
 
-/* Четыре кнопки в ряд: подписи короче, чтобы влезли */
-#sc-actions .sc-btn {
-  padding: 11px 2px;
-  font-size: 10px;
-  letter-spacing: 0;
-}
+
 
 /* Командир свёрнут в строку: нужен редко, а места занимал много */
 .sc-cmd-head {

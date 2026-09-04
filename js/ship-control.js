@@ -247,7 +247,9 @@ function scRenderTabs() {
   if ((scType.max_shield || 0) > 0) tabs.push({ id: 'shields', label: 'Щиты' });
   // Трюм только у тех, кто возит: у истребителя вместимость ноль
   if ((scType.capacity || 0) > 0) tabs.push({ id: 'cargo', label: 'Трюм' });
-  if (scType.hangar_slots > 0 || scType.is_fighter) tabs.push({ id: 'hangar', label: 'Ангар' });
+  // Ангар только у носителей. Истребителю он не нужен: возвращаться
+  // он умеет, но это действие, а не помещение — ему место среди плиток.
+  if (scType.hangar_slots > 0) tabs.push({ id: 'hangar', label: 'Ангар' });
   tabs.push({ id: 'info', label: 'Описание' });
 
   // Вкладка могла исчезнуть при смене корабля — тогда возвращаемся к действиям
@@ -426,6 +428,17 @@ function scRenderTiles() {
       canAct ? null : 'нет очков действий');
   });
 
+  // Истребителю нужен путь домой, и это именно действие
+  if (scType.is_fighter) {
+    add('recall', '⇤', 'В ангар', true, function() {
+      describe('Возврат в ангар',
+        'Носитель должен быть рядом и со свободным местом. ' +
+        'Подбитая машина возвращается как есть — прочность не восстанавливается.',
+        null);
+      scRenderFighterActions(info);
+    });
+  }
+
   if (!scMode) {
     describe('Действия', 'Выбери, что делает корабль.',
       st.ap >= st.apMax ? 'действия готовы' : '+1 через ' + st.nextIn + ' с');
@@ -548,9 +561,10 @@ function scRenderHangar() {
   // Видимость решают классы режима на самой панели. Инлайновый стиль
   // здесь перебивал бы их: он сильнее правил из таблицы стилей, и раздел
   // оставался на экране даже в режиме хода.
+  // У истребителя ангара нет: возврат к носителю показывается плиткой
+  // среди действий, а не отдельным разделом
   if (!scType.hangar_slots) {
     box.innerHTML = '';
-    if (scType.is_fighter) scRenderFighterActions(box);
     return;
   }
 
@@ -628,7 +642,7 @@ function scRenderHangar() {
 // можно не до любого корабля с ангаром, а только до ближайшего
 // со свободным местом
 function scRenderFighterActions(box) {
-  box.innerHTML = '<div class="sc-hangar-head">Носитель</div>';
+  var head = box.innerHTML;
 
   if (!scShip) return;
   var forShip = scShip.id;
@@ -639,10 +653,11 @@ function scRenderFighterActions(box) {
   box.appendChild(loading);
 
   supabase.rpc('get_recall_carriers', { p_fighter_id: forShip }).then(function(res) {
-    if (!scShip || scShip.id !== forShip || scTab !== 'hangar') return;
+    // Возврат живёт среди действий: у истребителя своей вкладки ангара нет
+    if (!scShip || scShip.id !== forShip || scTab !== 'actions') return;
 
     var list = (!res.error && res.data) ? res.data : [];
-    box.innerHTML = '<div class="sc-hangar-head">Носитель</div>';
+    box.innerHTML = head;
 
     if (!list.length) {
       var empty = document.createElement('div');
@@ -857,6 +872,9 @@ function scDeselect() {
 // Полная очистка разделов: содержимое, состояние режимов и списки
 function scResetSections() {
   scMode = null;
+  // Каждый корабль открывается на действиях: иначе остаётся вкладка
+  // от предыдущего, а у него мог быть ангар, которого здесь нет
+  scTab = 'actions';
   scHangarMode = null;
   scHangarPick = null;
   scTargets = [];
