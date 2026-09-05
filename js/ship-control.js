@@ -428,6 +428,17 @@ function scRenderTiles() {
       canAct ? null : 'нет очков действий');
   });
 
+  // Притягивающий луч — способность, а не пассивка. Плитка появляется
+  // только там, где дополнение действительно стоит.
+  if (scShip.has_tractor) {
+    add('tractor', '⊙', 'Захват', canAct, function() {
+      describe('Притягивающие лучи',
+        'Удерживает выбранное судно на месте. Берёт на дальность обзора — ' +
+        'останавливает издалека, пока противник не сблизился.', null);
+      scRenderTractor(info);
+    });
+  }
+
   // Истребителю нужен путь домой, и это именно действие
   if (scType.is_fighter) {
     add('recall', '⇤', 'В ангар', true, function() {
@@ -641,6 +652,65 @@ function scRenderHangar() {
 // Носители, готовые принять: считает сервер, потому что дотянуться
 // можно не до любого корабля с ангаром, а только до ближайшего
 // со свободным местом
+// Цели и перезарядку считает сервер: клиент не должен решать,
+// докуда дотягивается луч
+function scRenderTractor(box) {
+  if (!scShip) return;
+
+  var forShip = scShip.id;
+  var head = box.innerHTML;
+
+  Promise.all([
+    supabase.rpc('get_ship_abilities', { p_ship_id: forShip }),
+    supabase.rpc('get_tractor_targets', { p_ship_id: forShip })
+  ]).then(function(r) {
+    if (!scShip || scShip.id !== forShip || scMode !== 'tractor') return;
+
+    var ab = (!r[0].error && r[0].data && r[0].data.length) ? r[0].data[0] : null;
+    var targets = (!r[1].error && r[1].data) ? r[1].data : [];
+
+    box.innerHTML = head;
+
+    if (ab && !ab.ready) {
+      var cd = document.createElement('div');
+      cd.className = 'sc-abil-meta warn';
+      cd.textContent = 'Излучатели перезаряжаются: ' + ab.seconds_left + ' с';
+      box.appendChild(cd);
+      return;
+    }
+
+    if (!targets.length) {
+      var empty = document.createElement('div');
+      empty.className = 'sc-abil-meta';
+      empty.textContent = 'Целей в зоне захвата нет';
+      box.appendChild(empty);
+      return;
+    }
+
+    targets.forEach(function(t) {
+      var b = document.createElement('button');
+      b.className = 'sc-hangar-btn wide';
+      b.innerHTML = t.ship_name + ' <b>' + t.x + ':' + t.y + '</b> · ' + t.gap + ' кл.' +
+        (t.held ? ' · уже держим ' + t.held_left + ' с' : '');
+      b.disabled = t.held;
+
+      b.addEventListener('click', function() {
+        b.disabled = true;
+        supabase.rpc('use_tractor', {
+          p_ship_id: forShip, p_target_id: t.target_id
+        }).then(function(res) {
+          if (res.error) { scFail(res.error.message); b.disabled = false; return; }
+          scFail('Захват держит ' + res.data + ' с');
+          loadShips();
+          scRenderTractor(box);
+        });
+      });
+
+      box.appendChild(b);
+    });
+  });
+}
+
 function scRenderFighterActions(box) {
   var head = box.innerHTML;
 
