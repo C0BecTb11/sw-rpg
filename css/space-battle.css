@@ -450,3 +450,36 @@ html, body {
 .ship-addon-btn:disabled {
   opacity: 0.3;
 }
+
+/* Выбор дополнений при заказе корабля */
+.ship-up-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  gap: 6px;
+}
+
+.ship-up {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 4px;
+  background: #10151e;
+  border: 1px solid #2a3644;
+  border-radius: 8px;
+  color: #8fa8c4;
+  font-family: 'Courier New', monospace;
+  font-size: 8px;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.ship-up img { width: 38px; height: 38px; object-fit: contain; }
+
+/* Выбранное дополнение подсвечено: набор виден с одного взгляда */
+.ship-up.active {
+  border-color: #4a90d9;
+  background: #16283c;
+  color: #cfd8dc;
+  box-shadow: 0 0 0 2px rgba(74,144,217,0.25);
+}

@@ -798,3 +798,176 @@
 .gu-abil-go:disabled { opacity: 0.35; }
 
 .gu-rows { margin-top: 10px; }
+
+/* ===== Каталог исследований ===== */
+
+#research-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 1700;
+  display: none;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(3,5,9,0.8);
+}
+
+#research-box {
+  width: 100%;
+  max-width: 480px;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 14px calc(16px + env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, #0d1119 0%, #080b11 100%);
+  border: 1px solid #1c2530;
+  border-bottom: none;
+  border-radius: 14px 14px 0 0;
+}
+
+#research-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+#research-title {
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #4a90d9;
+}
+
+#research-close {
+  width: 26px;
+  height: 26px;
+  background: none;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  color: #8fa8c4;
+  font-size: 11px;
+  line-height: 1;
+}
+
+#research-list {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.rs-cat {
+  margin: 12px 0 7px;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #55606c;
+}
+
+#research-list .rs-cat:first-child { margin-top: 0; }
+
+/* Цепочка: корень, стрелка, следующая ступень. Видно путь, а не набор
+   разрозненных плиток. */
+.rs-chain {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.rs-chain.branch { margin-left: 14px; }
+
+.rs-arrow {
+  flex: none;
+  color: #2a3644;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.rs-tile {
+  flex: none;
+  width: 92px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 5px;
+  background: #10151e;
+  border: 1px solid #2a3644;
+  border-radius: 9px;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  text-align: center;
+}
+
+.rs-icon { width: 46px; height: 46px; object-fit: contain; }
+.rs-name { font-size: 9px; line-height: 1.2; }
+.rs-note { font-size: 9px; color: #55606c; }
+
+.rs-tile.active {
+  border-color: #4a90d9;
+  box-shadow: 0 0 0 2px rgba(74,144,217,0.25);
+}
+
+/* Изученное подсвечено, недоступное приглушено, но видно: игрок должен
+   понимать, к чему стремиться */
+.rs-tile.done { border-color: #5fd968; }
+.rs-tile.done .rs-note { color: #5fd968; }
+.rs-tile.busy { border-color: #d9a940; }
+.rs-tile.busy .rs-note { color: #d9a940; }
+.rs-tile.locked { opacity: 0.45; }
+
+#research-info {
+  margin-top: 12px;
+  padding: 11px;
+  background: #16202e;
+  border: 1px solid #2a3644;
+  border-radius: 9px;
+}
+
+.rs-info-name { font-size: 12px; color: #cfd8dc; margin-bottom: 5px; }
+.rs-info-text { font-size: 10px; color: #8fa8c4; line-height: 1.5; }
+
+.rs-info-meta { margin-top: 7px; font-size: 10px; color: #55606c; }
+.rs-info-meta.ok { color: #5fd968; }
+.rs-info-meta.warn { color: #d9a940; }
+
+.rs-go {
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px;
+  background: #4a90d9;
+  border: none;
+  border-radius: 8px;
+  color: #0a0d14;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.rs-go:disabled { opacity: 0.4; }
+
+.rs-empty {
+  padding: 20px 0;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: #55606c;
+  text-align: center;
+}
+
+/* Кнопка исследований в карточке постройки */
+#building-info-research {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 10px;
+  background: #16283c;
+  border: 1px solid #4a90d9;
+  border-radius: 8px;
+  color: #4a90d9;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  letter-spacing: 1px;
+}

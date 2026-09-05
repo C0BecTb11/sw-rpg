@@ -838,7 +838,16 @@ function closeShipyard() {
 var hangarTypes = { fighter: null, bomber: null };
 var shipyardHangarSeconds = 20;
 
+// Что игрок изучил: только это можно ставить на корабль
+var shipyardUpgrades = [];
+
 function loadFighterInfo() {
+  supabase.rpc('get_researches').then(function(res) {
+    if (!res.error && res.data) {
+      shipyardUpgrades = res.data.filter(function(r) { return r.done; });
+    }
+  });
+
   Promise.all([
     supabase.from('ship_types').select('id, name, cost, hull_class, damage, max_hp')
       .eq('is_fighter', true),
@@ -896,6 +905,7 @@ function makeShipCard(type) {
   // и бомбардировщики делят одни и те же места, поэтому выбор состава —
   // это выбор между прикрытием и ударной силой.
   var pick = { fighter: 0, bomber: 0 };
+  var chosen = {};
   var slots = type.hangar_slots || 0;
   var priceEl;
   var rows = {};
@@ -903,13 +913,42 @@ function makeShipCard(type) {
   var btn = document.createElement('button');
   btn.className = 'ship-order-btn';
 
+  var upgradeCost = function() {
+    var sum = 0;
+    for (var k in chosen) sum += Math.floor(chosen[k].cost / 4);
+    return sum;
+  };
+
+  var upgradeCount = function() {
+    var n = 0;
+    for (var k in chosen) n++;
+    return n;
+  };
+
   var extraCost = function() {
     return pick.fighter * ((hangarTypes.fighter && hangarTypes.fighter.cost) || 0)
-         + pick.bomber  * ((hangarTypes.bomber  && hangarTypes.bomber.cost)  || 0);
+         + pick.bomber  * ((hangarTypes.bomber  && hangarTypes.bomber.cost)  || 0)
+         + upgradeCost();
   };
 
   var updatePrice = function() {
     btn.textContent = 'Построить · ' + (type.cost + extraCost());
+
+    // Расширенный ангар добавляет места ещё до постройки: иначе игрок
+    // не понял бы, почему третий истребитель вдруг влезает
+    var bonusSlots = 0;
+    for (var k in chosen) {
+      if (chosen[k].effect_kind === 'hangar') bonusSlots += chosen[k].effect_value;
+    }
+    slots = (type.hangar_slots || 0) + bonusSlots;
+
+    var usub = document.getElementById('ship-up-sub');
+    if (usub) {
+      usub.textContent = upgradeCount() === 0
+        ? 'Дополнения не выбраны'
+        : 'Выбрано ' + upgradeCount() + ' · +' + upgradeCost() +
+          ' кредитов и +' + (upgradeCount() * 10) + ' с к сроку';
+    }
 
     if (!priceEl) return;
 
@@ -984,11 +1023,60 @@ function makeShipCard(type) {
     body.appendChild(addon);
   }
 
+  // Дополнения ставятся из изученного. Каждое стоит четверть цены
+  // исследования и добавляет десять секунд к сроку: право ставить
+  // не значит бесплатную установку.
+  // Показываем только то, что подходит этому кораблю: ветки принадлежат
+  // конкретным классам, и чужие дополнения здесь только мешали бы
+  var mineUpgrades = shipyardUpgrades.filter(function(r) {
+    return (r.applies_to || []).indexOf(type.id) !== -1;
+  });
+
+  if (mineUpgrades.length) {
+    var up = document.createElement('div');
+    up.className = 'ship-addon';
+
+    var uhead = document.createElement('div');
+    uhead.className = 'ship-addon-head';
+    uhead.textContent = 'Дополнения · доступно ' + mineUpgrades.length;
+    up.appendChild(uhead);
+
+    var grid = document.createElement('div');
+    grid.className = 'ship-up-grid';
+
+    mineUpgrades.forEach(function(r) {
+      var t = document.createElement('button');
+      t.className = 'ship-up';
+      t.innerHTML = '<img src="../' + r.icon_image + '" alt="">' +
+        '<span>' + r.name + '</span>';
+      t.title = r.description;
+
+      t.addEventListener('click', function() {
+        if (chosen[r.id]) delete chosen[r.id];
+        else chosen[r.id] = r;
+        t.classList.toggle('active', !!chosen[r.id]);
+        updatePrice();
+      });
+
+      grid.appendChild(t);
+    });
+
+    up.appendChild(grid);
+
+    var usub = document.createElement('div');
+    usub.className = 'ship-addon-sub';
+    usub.id = 'ship-up-sub';
+    up.appendChild(usub);
+
+    body.appendChild(up);
+  }
+
   btn.addEventListener('click', function() {
     btn.disabled = true;
     supabase.rpc('order_ship', {
       p_system_id: systemId, p_ship_type: type.id,
-      p_fighters: pick.fighter, p_bombers: pick.bomber
+      p_fighters: pick.fighter, p_bombers: pick.bomber,
+      p_upgrades: Object.keys(chosen)
     }).then(function(res) {
         btn.disabled = false;
         if (res.error) { alert(res.error.message); return; }

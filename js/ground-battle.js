@@ -1079,10 +1079,15 @@ function onSlotTapped(slotIndex) {
     var ready = !existing.completes_at || new Date(existing.completes_at).getTime() <= Date.now();
     var mine = existing.owner_user_id === currentUserId;
 
-    // В обычном режиме тап по своему готовому зданию открывает наём войск,
-    // а карточка со сносом остаётся в режиме стройки.
+    var code = (existing.building_types || {}).code;
+    var isLab = code === 'rep_research' || code === 'cis_lab';
+
+    // В обычном режиме тап по своему готовому зданию открывает его занятие:
+    // у казармы это наём, у научного центра — исследования. Карточка
+    // со сносом остаётся в режиме стройки.
     if (!buildMode && mine && ready) {
-      openUnitPanel(existing);
+      if (isLab) openResearchPanel(existing);
+      else openUnitPanel(existing);
     } else {
       openBuildingInfo(existing);
     }
@@ -1124,6 +1129,19 @@ function openBuildingInfo(building) {
     refundEl.style.display = 'none';
   }
 
+  // Научный центр открывает исследования: это его единственное занятие,
+  // поэтому кнопка ведёт прямо в каталог
+  var researchBtn = document.getElementById('building-info-research');
+  var isLab = type.code === 'rep_research' || type.code === 'cis_lab';
+
+  if (researchBtn) {
+    researchBtn.style.display = (isLab && isController && !captured) ? 'block' : 'none';
+    researchBtn.onclick = function() {
+      closeBuildingInfo();
+      openResearchPanel(building);
+    };
+  }
+
   demolishBtn.style.display = isController ? 'block' : 'none';
   demolishBtn.onclick = function() {
     demolishBtn.disabled = true;
@@ -1139,6 +1157,253 @@ function openBuildingInfo(building) {
   };
 
   panel.style.display = 'flex';
+}
+
+// ===== Исследования =====
+// Каталог личный: изученное принадлежит игроку, а не фракции. Ступени
+// идут по порядку, вторая без первой не берётся.
+
+var researchBuilding = null;
+var researchTimer = null;
+var researchShip = null;        // по какому кораблю смотрим ветку
+var researchShipNames = {};
+
+function openResearchPanel(building) {
+  researchBuilding = building;
+
+  var panel = document.getElementById('research-panel');
+  if (!panel) return;
+
+  panel.style.display = 'flex';
+  document.getElementById('research-list').innerHTML =
+    '<div class="rs-empty">Загрузка…</div>';
+
+  loadResearchPanel();
+
+  if (researchTimer) clearInterval(researchTimer);
+  researchTimer = setInterval(loadResearchPanel, 5000);
+}
+
+function closeResearchPanel() {
+  var panel = document.getElementById('research-panel');
+  if (panel) panel.style.display = 'none';
+  if (researchTimer) { clearInterval(researchTimer); researchTimer = null; }
+}
+
+function formatResearchLeft(sec) {
+  if (sec >= 60) return Math.floor(sec / 60) + ' мин ' + (sec % 60) + ' с';
+  return sec + ' с';
+}
+
+function loadResearchPanel() {
+  Promise.all([
+    supabase.rpc('get_researches'),
+    supabase.from('ship_types').select('id, name').eq('is_fighter', false)
+  ]).then(function(r) {
+    var res = r[0];
+    var list = document.getElementById('research-list');
+    if (!list) return;
+
+    if (res.error) {
+      list.innerHTML = '<div class="rs-empty">Ошибка: ' + res.error.message + '</div>';
+      return;
+    }
+
+    (r[1].data || []).forEach(function(t) { researchShipNames[t.id] = t.name; });
+
+    var all = res.data || [];
+
+    // Ветки принадлежат кораблям. Показывать их одним списком нельзя:
+    // с ростом числа кораблей каталог превратится в свалку, где половина
+    // строк не относится к тому, что игрок собирается строить.
+    var ships = [];
+    all.forEach(function(x) {
+      (x.applies_to || []).forEach(function(sid) {
+        if (ships.indexOf(sid) === -1) ships.push(sid);
+      });
+    });
+
+    if (!researchShip || ships.indexOf(researchShip) === -1) researchShip = ships[0] || null;
+
+    var rows = all.filter(function(x) {
+      return (x.applies_to || []).indexOf(researchShip) !== -1;
+    });
+
+    list.innerHTML = '';
+
+    if (ships.length > 1) {
+      var picker = document.createElement('div');
+      picker.className = 'rs-ships';
+
+      ships.forEach(function(sid) {
+        var b = document.createElement('button');
+        b.className = 'rs-ship' + (sid === researchShip ? ' active' : '');
+        b.textContent = researchShipNames[sid] || sid;
+        b.addEventListener('click', function() {
+          researchShip = sid;
+          loadResearchPanel();
+        });
+        picker.appendChild(b);
+      });
+
+      list.appendChild(picker);
+    }
+
+    // Группируем по разделам, как в исходном списке
+    var order = [];
+    var byCat = {};
+    rows.forEach(function(r) {
+      if (!byCat[r.category]) { byCat[r.category] = []; order.push(r.category); }
+      byCat[r.category].push(r);
+    });
+
+    // Строим цепочки: у каждой ветки корень и то, что из него растёт.
+    // Так видно путь целиком, а не набор разрозненных плиток.
+    var byId = {};
+    rows.forEach(function(r) { byId[r.id] = r; });
+
+    var childOf = {};
+    rows.forEach(function(r) {
+      var parent = null;
+      // Предшественник известен по названию: сверяем с каталогом
+      rows.forEach(function(o) { if (o.name === r.requires_name) parent = o.id; });
+      if (parent) {
+        if (!childOf[parent]) childOf[parent] = [];
+        childOf[parent].push(r);
+      }
+      r._parent = parent;
+    });
+
+    order.forEach(function(cat) {
+      var head = document.createElement('div');
+      head.className = 'rs-cat';
+      head.textContent = cat;
+      list.appendChild(head);
+
+      byCat[cat].filter(function(r) { return !r._parent; }).forEach(function(root) {
+        var chain = document.createElement('div');
+        chain.className = 'rs-chain';
+
+        var addTile = function(r, last) {
+          chain.appendChild(makeResearchTile(r));
+          if (!last) {
+            var arrow = document.createElement('span');
+            arrow.className = 'rs-arrow';
+            arrow.textContent = '›';
+            chain.appendChild(arrow);
+          }
+        };
+
+        var line = [root];
+        var cur = root;
+        while (childOf[cur.id] && childOf[cur.id].length) {
+          cur = childOf[cur.id][0];
+          line.push(cur);
+        }
+
+        line.forEach(function(r, i) { addTile(r, i === line.length - 1); });
+        list.appendChild(chain);
+
+        // Ветки, отходящие вбок, ставим отдельной строкой под цепочкой
+        line.forEach(function(r) {
+          var kids = (childOf[r.id] || []).slice(1);
+          kids.forEach(function(k) {
+            var branch = document.createElement('div');
+            branch.className = 'rs-chain branch';
+            var from = document.createElement('span');
+            from.className = 'rs-arrow';
+            from.textContent = '↳';
+            branch.appendChild(from);
+            branch.appendChild(makeResearchTile(k));
+            list.appendChild(branch);
+          });
+        });
+      });
+    });
+  });
+}
+
+function makeResearchTile(r) {
+  var tile = document.createElement('button');
+  tile.className = 'rs-tile' +
+    (r.done ? ' done' : '') +
+    (r.in_progress ? ' busy' : '') +
+    (!r.available && !r.done ? ' locked' : '');
+
+  tile.innerHTML =
+    '<img class="rs-icon" src="../' + r.icon_image + '" alt="">' +
+    '<span class="rs-name">' + r.name + '</span>' +
+    '<span class="rs-note">' +
+      (r.done ? 'изучено'
+       : r.in_progress ? formatResearchLeft(r.seconds_left)
+       : !r.available ? 'закрыто'
+       : r.cost + ' кр') +
+    '</span>';
+
+  tile.addEventListener('click', function() { showResearchInfo(r, tile); });
+  return tile;
+}
+
+function showResearchInfo(r, tile) {
+  var info = document.getElementById('research-info');
+  if (!info) return;
+
+  var all = document.querySelectorAll('.rs-tile');
+  for (var i = 0; i < all.length; i++) all[i].classList.remove('active');
+  tile.classList.add('active');
+
+  info.innerHTML =
+    '<div class="rs-info-name">' + r.name + '</div>' +
+    '<div class="rs-info-text">' + r.description + '</div>' +
+    '<div class="rs-info-meta">' + researchEffectText(r) + '</div>';
+
+  if (r.done) {
+    info.innerHTML += '<div class="rs-info-meta ok">Изучено — можно ставить на новые корабли</div>';
+    return;
+  }
+
+  if (r.in_progress) {
+    info.innerHTML += '<div class="rs-info-meta warn">Изучается: ' +
+      formatResearchLeft(r.seconds_left) + '</div>';
+    return;
+  }
+
+  if (!r.available) {
+    info.innerHTML += '<div class="rs-info-meta warn">Сначала: ' + (r.requires_name || '') + '</div>';
+    return;
+  }
+
+  var go = document.createElement('button');
+  go.className = 'rs-go';
+  go.textContent = 'Изучить · ' + r.cost;
+  go.addEventListener('click', function() {
+    go.disabled = true;
+    supabase.rpc('start_research', {
+      p_building_id: researchBuilding.id, p_research_id: r.id
+    }).then(function(res) {
+      if (res.error) { alert(res.error.message); go.disabled = false; return; }
+      loadResearchPanel();
+      info.innerHTML = '<div class="rs-info-meta ok">Исследование запущено</div>';
+    });
+  });
+  info.appendChild(go);
+}
+
+// Человеческое описание эффекта: из вида и величины
+function researchEffectText(r) {
+  var v = r.effect_value;
+  switch (r.effect_kind) {
+    case 'hull':        return '+' + v + ' к прочности';
+    case 'shield':      return '+' + v + ' к щитам всех секторов';
+    case 'fore_shield': return '+' + v + ' к носовому щиту';
+    case 'damage':      return '+' + v + ' к урону';
+    case 'vision':      return '+' + v + ' к дальности обзора';
+    case 'move':        return '+' + v + ' к дальности хода';
+    case 'hangar':      return '+' + v + ' к местам в ангаре';
+    case 'capacity':    return '+' + v + ' к вместимости трюма';
+    case 'tractor':     return 'способность: удержание вражеского судна';
+    default:            return '';
+  }
 }
 
 function closeBuildingInfo() {
@@ -1442,6 +1707,9 @@ function initGroundBattle() {
 
       var dropBtn = document.getElementById('drop-btn');
       if (dropBtn) dropBtn.addEventListener('click', openDropPanel);
+      var rsClose = document.getElementById('research-close');
+      if (rsClose) rsClose.addEventListener('click', closeResearchPanel);
+
       var stlClose = document.getElementById('settlement-close');
       if (stlClose) stlClose.addEventListener('click', closeSettlementPanel);
 
