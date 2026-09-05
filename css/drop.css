@@ -971,3 +971,6 @@
   font-size: 11px;
   letter-spacing: 1px;
 }
+
+/* Предупреждение о своих под ударом: цена броска должна быть заметна */
+.warn-own { color: #d94a4a; font-weight: normal; }

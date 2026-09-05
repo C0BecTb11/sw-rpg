@@ -1005,6 +1005,11 @@ function handleTap(clientX, clientY) {
     return;
   }
 
+  if (upgradeAbility) {
+    handleUpgradeAbilityTap(cellX, cellY);
+    return;
+  }
+
   if (attackingUnit || abilityUnit) {
     handleTargetTap(cellX, cellY);
     return;
@@ -1198,7 +1203,8 @@ function formatResearchLeft(sec) {
 function loadResearchPanel() {
   Promise.all([
     supabase.rpc('get_researches'),
-    supabase.from('ship_types').select('id, name').eq('is_fighter', false)
+    supabase.from('ship_types').select('id, name').eq('is_fighter', false),
+    supabase.from('unit_types').select('id, name')
   ]).then(function(r) {
     var res = r[0];
     var list = document.getElementById('research-list');
@@ -1210,15 +1216,16 @@ function loadResearchPanel() {
     }
 
     (r[1].data || []).forEach(function(t) { researchShipNames[t.id] = t.name; });
+    (r[2].data || []).forEach(function(t) { researchShipNames[t.id] = t.name; });
 
     var all = res.data || [];
 
-    // Ветки принадлежат кораблям. Показывать их одним списком нельзя:
-    // с ростом числа кораблей каталог превратится в свалку, где половина
+    // Ветки принадлежат конкретной технике — кораблю или бойцу. Показывать
+    // их одним списком нельзя: каталог превратится в свалку, где половина
     // строк не относится к тому, что игрок собирается строить.
     var ships = [];
     all.forEach(function(x) {
-      (x.applies_to || []).forEach(function(sid) {
+      (x.applies_to || []).concat(x.applies_units || []).forEach(function(sid) {
         if (ships.indexOf(sid) === -1) ships.push(sid);
       });
     });
@@ -1226,7 +1233,8 @@ function loadResearchPanel() {
     if (!researchShip || ships.indexOf(researchShip) === -1) researchShip = ships[0] || null;
 
     var rows = all.filter(function(x) {
-      return (x.applies_to || []).indexOf(researchShip) !== -1;
+      return (x.applies_to || []).indexOf(researchShip) !== -1
+          || (x.applies_units || []).indexOf(researchShip) !== -1;
     });
 
     list.innerHTML = '';
@@ -1392,6 +1400,28 @@ function showResearchInfo(r, tile) {
 // Человеческое описание эффекта: из вида и величины
 function researchEffectText(r) {
   var v = r.effect_value;
+  var d = r.ability_damage;
+
+  switch (r.effect_kind) {
+    case 'hp':           return '+' + v + ' к прочности';
+    case 'hp_slow':      return '+' + v + ' к прочности, −1 к дальности хода';
+    case 'move':         return '+' + v + ' к дальности хода';
+    case 'weapon_range': return '+' + v + ' к дальности атаки';
+
+    case 'ability_grenade':
+      return 'урон ' + d + ' по области ' + v + '×' + v;
+    case 'ability_he':
+      return 'урон ' + d + ' по области ' + v + '×' + v + ', только по пехоте';
+    case 'ability_suppression':
+      return 'урон ' + d + ' по области ' + v + '×' + v + ' и залегание: цель не ходит и не стреляет';
+    case 'ability_stun':
+      return v >= 100 ? 'оглушает цель наверняка' : 'шанс ' + v + '% оглушить цель';
+    case 'ability_ap':   return 'двойной урон по технике';
+    case 'ability_headshot': return 'уничтожает выбранную цель';
+    case 'ability_twin':
+      return 'бьёт первую цель, вторую рядом с шансом ' + v + '%';
+  }
+
   switch (r.effect_kind) {
     case 'hull':        return '+' + v + ' к прочности';
     case 'shield':      return '+' + v + ' к щитам всех секторов';
@@ -1806,6 +1836,19 @@ function setUnitButtonsEnabled(on) {
   for (var i = 0; i < btns.length; i++) btns[i].disabled = !on;
 }
 
+// Что изучено для пехоты: показываем только подходящее этому бойцу
+var unitUpgradesDone = [];
+
+function loadUnitUpgrades() {
+  return supabase.rpc('get_researches').then(function(res) {
+    if (!res.error && res.data) {
+      unitUpgradesDone = res.data.filter(function(r) {
+        return r.done && r.scope === 'unit';
+      });
+    }
+  });
+}
+
 function openUnitPanel(building) {
   unitPanelBuilding = building;
   var panel = document.getElementById('unit-panel');
@@ -1824,6 +1867,8 @@ function openUnitPanel(building) {
 
   // Предел партии задан типом постройки: казарма делает пятёрками,
   // завод техники — по одной машине
+  loadUnitUpgrades();
+
   Promise.all([
     supabase.from('unit_types').select('*').eq('produced_by', code),
     supabase.from('building_types').select('max_per_order').eq('code', code).maybeSingle()
@@ -1922,16 +1967,74 @@ function buildUnitCard(unit) {
   order.className = 'unit-order-btn';
   footer.appendChild(order);
 
+  // Дополнения ставятся на каждого бойца и оплачиваются за каждого:
+  // изучение даёт право, а не скидку на всю армию
+  var chosen = {};
+
+  var mine = unitUpgradesDone.filter(function(r) {
+    return (r.applies_units || []).indexOf(unit.id) !== -1;
+  });
+
+  if (mine.length) {
+    var box = document.createElement('div');
+    box.className = 'unit-up';
+
+    var head = document.createElement('div');
+    head.className = 'unit-up-head';
+    head.textContent = 'Дополнения · доступно ' + mine.length;
+    box.appendChild(head);
+
+    var grid = document.createElement('div');
+    grid.className = 'unit-up-grid';
+
+    mine.forEach(function(r) {
+      var t = document.createElement('button');
+      t.className = 'unit-up-tile';
+      t.innerHTML = '<img src="../' + r.icon_image + '" alt="">';
+      t.title = r.name + ' — ' + r.description;
+      t.addEventListener('click', function() {
+        if (chosen[r.id]) delete chosen[r.id]; else chosen[r.id] = r;
+        t.classList.toggle('active', !!chosen[r.id]);
+        updatePrice();
+      });
+      grid.appendChild(t);
+    });
+
+    box.appendChild(grid);
+
+    var sub = document.createElement('div');
+    sub.className = 'unit-up-sub';
+    box.appendChild(sub);
+
+    body.appendChild(box);
+    var subEl = sub;
+  }
+
+  function upgradeCost() {
+    var sum = 0;
+    for (var k in chosen) sum += Math.floor(chosen[k].cost / 4);
+    return sum;
+  }
+
   function updatePrice() {
     var n = parseInt(val.textContent, 10);
-    order.textContent = 'Нанять · ' + (unit.cost * n);
+    order.textContent = 'Нанять · ' + ((unit.cost + upgradeCost()) * n);
+
+    var sub = body.querySelector('.unit-up-sub');
+    if (sub) {
+      var names = [];
+      for (var k in chosen) names.push(chosen[k].name);
+      sub.textContent = names.length
+        ? names.join(', ') + ' · +' + upgradeCost() + ' на бойца'
+        : 'Дополнения не выбраны';
+    }
   }
   updatePrice();
 
   order.addEventListener('click', function() {
     var n = parseInt(val.textContent, 10);
     // Сначала выбираем место на карте, заказ уходит после выбора клетки.
-    startPlacement(unit.id, n);
+    startPlacement(unit.id, n, Object.keys(chosen));
   });
 
   body.appendChild(footer);
@@ -2297,12 +2400,15 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
   var info = document.getElementById('gu-abil-info');
   var canAct = ap && ap.ap >= 1;
 
-  var addTile = function(key, icon, label, ready, onPick) {
+  var addTile = function(key, icon, label, ready, onPick, image) {
     var b = document.createElement('button');
     b.className = 'gu-tile' + (guPickedAbility === key ? ' active' : '') +
                   (ready ? '' : ' locked');
-    b.innerHTML = '<span class="gu-tile-icon">' + icon + '</span>' +
-                  '<span class="gu-tile-label">' + label + '</span>';
+    // У веток есть своя картинка, у базовых действий — знак
+    b.innerHTML = (image
+        ? '<img class="gu-tile-img" src="../' + image + '" alt="">'
+        : '<span class="gu-tile-icon">' + icon + '</span>') +
+      '<span class="gu-tile-label">' + label + '</span>';
     b.addEventListener('click', function() {
       guPickedAbility = key;
       onPick();
@@ -2323,6 +2429,27 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
       '<div class="gu-abil-text">Урон зависит от класса цели: ' +
       'пехота плохо берёт броню, техника плохо достаёт авиацию.</div>';
     guAbilityAction(info, 'Выбрать цель', canAct, function() { startGroundAttack(unit); });
+  });
+
+  // Способности из дополнений: приходят с сервера вместе с откатом
+  supabase.rpc('get_unit_upgrade_abilities', { p_unit_id: unit.id }).then(function(res) {
+    if (!selectedUnit || selectedUnit.id !== unit.id || guTab !== 'abilities') return;
+
+    (res.error ? [] : (res.data || [])).forEach(function(a) {
+      addTile(a.research_id, null, a.name, a.ready && canAct, function() {
+        info.innerHTML =
+          '<div class="gu-abil-name">' + a.name + '</div>' +
+          '<div class="gu-abil-text">' + (a.description || '') + '</div>' +
+          '<div class="gu-abil-meta">' + upgradeAbilityHint(a) + '</div>' +
+          (a.ready ? '' :
+            '<div class="gu-abil-meta warn">не готова: ' + formatLeft(a.seconds_left) + '</div>');
+
+        guAbilityAction(info, isAreaAbility(a.kind) ? 'Выбрать клетку' : 'Выбрать цель',
+                        a.ready && canAct, function() {
+          startUpgradeAbility(unit, a);
+        });
+      }, a.icon_image);
+    });
   });
 
   // Собственные способности приходят с сервера вместе с откатом
@@ -2427,6 +2554,7 @@ function guAbilityAction(info, label, enabled, onGo) {
 // ===== Атака и способности с выбором цели на карте =====
 // Цель выбирается пальцем: в свалке одинаковых юнитов список бесполезен.
 
+var upgradeAbility = null;      // выбранная способность из ветки
 var attackingUnit = null;
 var abilityUnit = null;
 var abilityDef = null;
@@ -2442,6 +2570,190 @@ function startGroundAttack(unit) {
     showTargetHint('Ткни в цель', groundTargets.length
       ? groundTargets.length + ' в радиусе'
       : 'в радиусе никого', cancelTargeting);
+    redrawScene();
+  });
+}
+
+// Площадные бьют по клетке, прицельные по бойцу — от этого зависит,
+// что подсвечивать и что отправлять на сервер
+function isAreaAbility(kind) {
+  return kind === 'ability_grenade' || kind === 'ability_he'
+      || kind === 'ability_suppression';
+}
+
+function upgradeAbilityHint(a) {
+  switch (a.kind) {
+    case 'ability_grenade':     return 'область ' + a.power + '×' + a.power;
+    case 'ability_he':          return 'область ' + a.power + '×' + a.power + ', только пехота';
+    case 'ability_suppression': return 'область ' + a.power + '×' + a.power + ' и залегание';
+    case 'ability_stun':        return a.power >= 100 ? 'оглушает наверняка'
+                                                      : 'шанс оглушить ' + a.power + '%';
+    case 'ability_ap':          return 'двойной урон по технике';
+    case 'ability_headshot':    return 'уничтожает цель';
+    case 'ability_twin':        return 'вторая цель с шансом ' + a.power + '%';
+    default:                    return '';
+  }
+}
+
+var areaPreview = null;      // намеченная область до подтверждения
+var twinFirst = null;        // первая цель спаренного выстрела
+
+// Область показываем до броска: игрок должен видеть, кого зацепит
+function showAreaConfirm(a) {
+  var hint = document.getElementById('placement-hint');
+  var hit = countInArea(areaPreview, upgradeAbility.unit);
+
+  hint.innerHTML = '<span>' + a.name + ' · ' + a.power + '×' + a.power +
+                   ' · врагов ' + hit.enemy +
+                   (hit.own ? ' · <b class="warn-own">своих ' + hit.own + '</b>' : '') +
+                   '</span>' +
+                   '<button id="area-go">Применить</button>' +
+                   '<button id="area-cancel">Отмена</button>';
+  hint.style.display = 'flex';
+
+  document.getElementById('area-cancel').addEventListener('click', cancelTargeting);
+  document.getElementById('area-go').addEventListener('click', function() {
+    var u = upgradeAbility.unit;
+    supabase.rpc('use_unit_ability', {
+      p_unit_id: u.id, p_research_id: a.research_id,
+      p_x: areaPreview.x, p_y: areaPreview.y
+    }).then(function(r) {
+      if (r.error) { alert(r.error.message); return; }
+      var res = (r.data && r.data.length) ? r.data[0] : null;
+      if (res) alert(res.note);
+      cancelTargeting();
+      selectedUnit = null;
+      loadUnits();
+    });
+  });
+
+  setBottomInset(insetFor(hint));
+}
+
+// Кто попадёт под удар: взрыв не разбирает своих и чужих, поэтому
+// считаем обе стороны отдельно — игрок должен видеть цену броска
+function countInArea(area, self) {
+  var res = { enemy: 0, own: 0 };
+  if (!area) return res;
+
+  unitsOnMap.forEach(function(u) {
+    if (u.x === null || u.x === undefined) return;
+    if (self && u.id === self.id) return;
+    if (u.x >= area.x && u.x < area.x + area.size &&
+        u.y >= area.y && u.y < area.y + area.size) {
+      if (u.faction === myFaction) res.own++; else res.enemy++;
+    }
+  });
+  return res;
+}
+
+function startUpgradeAbility(unit, a) {
+  areaPreview = null;
+  twinFirst = null;
+  upgradeAbility = { unit: unit, ability: a };
+  attackingUnit = null;
+  abilityUnit = null;
+  hidePickup();
+
+  if (isAreaAbility(a.kind)) {
+    groundTargets = [];
+    showTargetHint(a.name, 'ткни в клетку — область ' + a.power + '×' + a.power,
+                   cancelTargeting);
+    redrawScene();
+    return;
+  }
+
+  supabase.rpc('get_ground_targets', { p_unit_id: unit.id }).then(function(res) {
+    groundTargets = (!res.error && res.data) ? res.data : [];
+    showTargetHint(a.name, groundTargets.length
+      ? 'целей рядом: ' + groundTargets.length
+      : 'целей нет', cancelTargeting);
+    redrawScene();
+  });
+}
+
+function handleUpgradeAbilityTap(cellX, cellY) {
+  var a = upgradeAbility.ability;
+  var unit = upgradeAbility.unit;
+
+  // Площадные наводятся в два касания: первое намечает область, второе
+  // подтверждает. Иначе на телефоне не видно, куда именно ляжет удар.
+  if (isAreaAbility(a.kind)) {
+    areaPreview = { x: cellX, y: cellY, size: a.power };
+    showAreaConfirm(a);
+    redrawScene();
+    return;
+  }
+
+  var args = { p_unit_id: unit.id, p_research_id: a.research_id };
+
+  {
+    var pick = null;
+    for (var i = 0; i < groundTargets.length; i++) {
+      var t = groundTargets[i];
+      var b = unitTypeById[t.unit_type] || {};
+      var w = b.width_cells || 1, h = b.height_cells || 1;
+      if (cellX >= t.x && cellX < t.x + w && cellY >= t.y && cellY < t.y + h) { pick = t; break; }
+    }
+    if (!pick) { alert('Эта цель недоступна'); return; }
+
+    // Спаренный: первая цель выбрана, теперь предлагаем вторую рядом с ней
+    if (a.kind === 'ability_twin' && !twinFirst) {
+      twinFirst = pick;
+      startTwinSecond(unit, a, pick);
+      return;
+    }
+
+    args.p_target_id = twinFirst ? twinFirst.target_id : pick.target_id;
+    if (twinFirst) args.p_second_id = pick.target_id;
+  }
+
+  supabase.rpc('use_unit_ability', args).then(function(r) {
+    if (r.error) { alert(r.error.message); return; }
+    var res = (r.data && r.data.length) ? r.data[0] : null;
+    if (res) alert(res.note + (res.damage ? ' · урон ' + res.damage : ''));
+    cancelTargeting();
+    selectedUnit = null;
+    loadUnits();
+  });
+}
+
+// Вторая цель спаренного выстрела: только те, кто рядом с первой
+function startTwinSecond(unit, a, first) {
+  supabase.rpc('get_twin_candidates', {
+    p_unit_id: unit.id, p_first_id: first.target_id
+  }).then(function(res) {
+    var list = (!res.error && res.data) ? res.data : [];
+
+    // Приводим к тому же виду, что обычные цели, чтобы тап работал так же
+    groundTargets = list.map(function(c) {
+      return { target_id: c.target_id, name: c.name, x: c.x, y: c.y,
+               hp: c.hp, gap: c.gap, unit_type: null };
+    });
+
+    var hint = document.getElementById('placement-hint');
+    hint.innerHTML = '<span>Вторая цель · шанс ' + a.power + '% · рядом: ' +
+                     groundTargets.length + '</span>' +
+                     '<button id="twin-skip">Только первая</button>' +
+                     '<button id="twin-cancel">Отмена</button>';
+    hint.style.display = 'flex';
+
+    document.getElementById('twin-cancel').addEventListener('click', cancelTargeting);
+    document.getElementById('twin-skip').addEventListener('click', function() {
+      supabase.rpc('use_unit_ability', {
+        p_unit_id: unit.id, p_research_id: a.research_id,
+        p_target_id: first.target_id
+      }).then(function(r) {
+        if (r.error) { alert(r.error.message); return; }
+        var res = (r.data && r.data.length) ? r.data[0] : null;
+        if (res) alert(res.note);
+        cancelTargeting();
+        selectedUnit = null;
+        loadUnits();
+      });
+    });
+
+    setBottomInset(insetFor(hint));
     redrawScene();
   });
 }
@@ -2473,6 +2785,9 @@ function showTargetHint(title, note, onCancel) {
 }
 
 function cancelTargeting() {
+  upgradeAbility = null;
+  areaPreview = null;
+  twinFirst = null;
   attackingUnit = null;
   abilityUnit = null;
   abilityDef = null;
@@ -2484,6 +2799,36 @@ function cancelTargeting() {
 
 // Подсветка достижимых целей
 function drawTargetCells() {
+  // Намеченная область: видно, куда ляжет удар и кого зацепит
+  if (areaPreview) {
+    // Красная заливка, если под ударом окажутся свои
+    var inArea = countInArea(areaPreview, upgradeAbility && upgradeAbility.unit);
+    ctx.fillStyle = inArea.own
+      ? 'rgba(217,74,74,0.30)'
+      : 'rgba(217,169,64,0.28)';
+    ctx.fillRect(areaPreview.x * CELL_PX, areaPreview.y * CELL_PX,
+                 areaPreview.size * CELL_PX, areaPreview.size * CELL_PX);
+    ctx.strokeStyle = inArea.own ? 'rgba(217,74,74,0.95)' : 'rgba(217,169,64,0.95)';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(areaPreview.x * CELL_PX, areaPreview.y * CELL_PX,
+                   areaPreview.size * CELL_PX, areaPreview.size * CELL_PX);
+  }
+
+  // Площадная способность: подсвечиваем радиус броска, а не цели
+  if (upgradeAbility && isAreaAbility(upgradeAbility.ability.kind)) {
+    var u = upgradeAbility.unit;
+    var type = unitTypeById[u.unit_type] || {};
+    var r = (type.weapon_range || 3) + (u.bonus_range || 0);
+
+    ctx.strokeStyle = 'rgba(217,169,64,0.7)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([7, 5]);
+    ctx.strokeRect((u.x - r) * CELL_PX, (u.y - r) * CELL_PX,
+                   (r * 2 + 1) * CELL_PX, (r * 2 + 1) * CELL_PX);
+    ctx.setLineDash([]);
+    return;
+  }
+
   if (!groundTargets.length) return;
 
   groundTargets.forEach(function(t) {
@@ -2940,8 +3285,9 @@ function handleDropTap(cellX, cellY) {
 }
 
 // Режим выбора клетки: подсвечиваем свободные места в зонах.
-function startPlacement(unitTypeId, quantity) {
-  placingOrder = { unitType: unitTypeId, quantity: quantity };
+function startPlacement(unitTypeId, quantity, upgrades) {
+  placingOrder = { unitType: unitTypeId, quantity: quantity,
+                   upgrades: upgrades || [] };
   closeUnitPanel();
 
   var hint = document.getElementById('placement-hint');
@@ -3003,7 +3349,8 @@ function handlePlacementTap(cellX, cellY) {
     p_unit_type: order.unitType,
     p_quantity: order.quantity,
     p_target_x: cellX,
-    p_target_y: cellY
+    p_target_y: cellY,
+    p_upgrades: order.upgrades || []
   }).then(function(res) {
     if (res.error) {
       alert('Не удалось нанять: ' + res.error.message);
