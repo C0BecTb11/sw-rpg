@@ -55,6 +55,7 @@ var PROCESS_KINDS = {
   unit:         { label: 'производство', cls: 'unit' },
   ship:         { label: 'верфь',        cls: 'ship' },
   construction: { label: 'стройка',      cls: 'construction' },
+  research:     { label: 'наука',        cls: 'research' },
   idle:         { label: 'простой',      cls: 'idle' }
 };
 

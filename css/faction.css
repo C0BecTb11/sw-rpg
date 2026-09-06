@@ -566,3 +566,7 @@
 .process-row.construction .process-track i { background: #d9a940; }
 
 .process-left { margin-top: 5px; font-size: 10px; color: #55606c; }
+
+/* Исследования в процессах: свой цвет, чтобы не путать с производством */
+.process-row.research { border-left-color: #a06fd9; }
+.process-tag.research { color: #a06fd9; }
