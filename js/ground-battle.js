@@ -2424,6 +2424,18 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
     guAbilityAction(info, 'Идти', canAct, function() { startGroundMove(unit); });
   });
 
+  // Разведчик уходит на соседнюю планету сам, без командира
+  if (type.is_scout) {
+    addTile('scout', '➶', 'Разведка', canAct, function() {
+      info.innerHTML =
+        '<div class="gu-abil-name">Перелёт на соседнюю планету</div>' +
+        '<div class="gu-abil-text">Уходит по нити на связанную планету. ' +
+        'К своим прибывает в зону высадки, к чужим — в полосу вторжения. ' +
+        'Отправлять можно только со стороны десанта.</div>';
+      guScoutDestinations(info, unit);
+    });
+  }
+
   addTile('attack', '◎', 'Атака', canAct, function() {
     info.innerHTML = '<div class="gu-abil-name">Атака</div>' +
       '<div class="gu-abil-text">Урон зависит от класса цели: ' +
@@ -2538,6 +2550,60 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
         if (r.error) { alert('Не удалось: ' + r.error.message); btn.disabled = false; return; }
         selectedUnit = null; hidePickup(); loadUnits(); loadDropCargo();
       });
+    });
+  });
+}
+
+// Куда можно улететь: список считает сервер по нитям
+function guScoutDestinations(info, unit) {
+  var loading = document.createElement('div');
+  loading.className = 'gu-abil-meta';
+  loading.textContent = 'Ищем маршруты…';
+  info.appendChild(loading);
+
+  supabase.rpc('get_scout_destinations', { p_unit_id: unit.id }).then(function(res) {
+    if (!selectedUnit || selectedUnit.id !== unit.id) return;
+
+    loading.remove();
+
+    if (res.error) {
+      var err = document.createElement('div');
+      err.className = 'gu-abil-meta warn';
+      err.textContent = res.error.message;
+      info.appendChild(err);
+      return;
+    }
+
+    var list = res.data || [];
+
+    if (!list.length) {
+      var empty = document.createElement('div');
+      empty.className = 'gu-abil-meta';
+      empty.textContent = 'Связанных планет нет';
+      info.appendChild(empty);
+      return;
+    }
+
+    list.forEach(function(d) {
+      var b = document.createElement('button');
+      b.className = 'gu-row ' + (d.friendly ? 'board' : 'ship');
+      b.innerHTML = '<span>' + d.name + '</span><em>' +
+        (d.friendly ? 'своя' : 'чужая') + ' · ' + d.seconds + ' с</em>';
+
+      b.addEventListener('click', function() {
+        b.disabled = true;
+        supabase.rpc('start_scout_move', {
+          p_unit_id: unit.id, p_target_system: d.system_id
+        }).then(function(r) {
+          if (r.error) { alert(r.error.message); b.disabled = false; return; }
+          alert('Разведчик в пути: ' + r.data + ' с');
+          selectedUnit = null;
+          hidePickup();
+          loadUnits();
+        });
+      });
+
+      info.appendChild(b);
     });
   });
 }
