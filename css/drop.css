@@ -974,3 +974,82 @@
 
 /* Предупреждение о своих под ударом: цена броска должна быть заметна */
 .warn-own { color: #d94a4a; font-weight: normal; }
+
+/* Иконка в плитке способности: без явного размера картинка рисуется
+   в натуральную величину и разносит панель */
+.gu-tile-img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
+
+/* Переключатель техники в каталоге исследований */
+.rs-ships {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 12px;
+}
+
+.rs-ship {
+  padding: 7px 11px;
+  background: #10151e;
+  border: 1px solid #2a3644;
+  border-radius: 7px;
+  color: #8fa8c4;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+}
+
+.rs-ship.active {
+  background: #16283c;
+  border-color: #4a90d9;
+  color: #cfd8dc;
+}
+
+/* Выбор дополнений при найме */
+.unit-up {
+  margin-top: 9px;
+  padding: 9px 10px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 8px;
+}
+
+.unit-up-head {
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #8fa8c4;
+  margin-bottom: 7px;
+}
+
+.unit-up-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.unit-up-tile {
+  width: 46px;
+  height: 46px;
+  padding: 3px;
+  background: #10151e;
+  border: 1px solid #2a3644;
+  border-radius: 8px;
+}
+
+.unit-up-tile img { width: 100%; height: 100%; object-fit: contain; }
+
+.unit-up-tile.active {
+  border-color: #4a90d9;
+  box-shadow: 0 0 0 2px rgba(74,144,217,0.25);
+}
+
+.unit-up-sub {
+  margin-top: 7px;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  color: #55606c;
+  line-height: 1.4;
+}
+
+/* Страховка на будущее: любая картинка внутри панели не вылезает
+   за её пределы, даже если для неё забыли задать размер */
+#pickup-bar img { max-width: 100%; }
