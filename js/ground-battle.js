@@ -1834,7 +1834,7 @@ function renderProductionSlot(building, maxPerOrder) {
       var pct = Math.max(0, Math.min(100, (1 - left / draw.total) * 100));
 
       box.innerHTML =
-        '<div class="prod-slot-title">' + (q.unit_name || 'Производство') +
+        '<div class="prod-slot-title">' + escHtml(q.unit_name || 'Производство') +
           ' ×' + q.quantity + (q.mine ? '' : ' <em>чужой заказ</em>') + '</div>' +
         '<div class="prod-slot-track"><i style="width:' + pct + '%"></i></div>' +
         '<div class="prod-slot-sub">Готово через ' + formatLeft(left) + '</div>';
@@ -1921,8 +1921,83 @@ function openUnitPanel(building) {
     }
     unitPanelTypes = res.data;
     list.innerHTML = '';
+
+    // Если постройка готовит одарённых, над карточкой найма встаёт список
+    // уже нанятых — живые с их счётом и павшие, которых храм помнит.
+    var hasHero = res.data.some(function(u) { return u.is_hero; });
+    if (hasHero) {
+      var roster = document.createElement('div');
+      roster.className = 'hero-roster';
+      roster.innerHTML = '<div class="hero-roster-empty">Загрузка...</div>';
+      list.appendChild(roster);
+      loadHeroRoster(building, roster);
+    }
+
     res.data.forEach(function(unit) {
       list.appendChild(buildUnitCard(unit));
+    });
+  });
+}
+
+// Список одарённых игрока. Он общий, а не привязан к планете: герой,
+// нанятый на одной планете, виден в любом храме своей фракции.
+function loadHeroRoster(building, box) {
+  supabase.rpc('get_hero_roster', { p_building_id: building.id }).then(function(res) {
+    if (res.error) {
+      box.innerHTML = '<div class="hero-roster-empty">Не удалось прочитать список</div>';
+      return;
+    }
+
+    var rows = res.data || [];
+    if (!rows.length) {
+      box.innerHTML = '<div class="hero-roster-empty">Одарённых пока нет</div>';
+      return;
+    }
+
+    var live = rows.filter(function(h) { return !h.died_at; });
+    var fallen = rows.filter(function(h) { return h.died_at; });
+
+    box.innerHTML = '<div class="hero-roster-head">Одарённые · ' + live.length +
+                    (fallen.length ? ' · павших ' + fallen.length : '') + '</div>';
+
+    rows.forEach(function(h) {
+      var row = document.createElement('div');
+      row.className = 'hero-row' + (h.died_at ? ' fallen' : '');
+
+      var where = h.died_at ? 'Пал на планете ' + (h.died_system_id || '—')
+                : (h.on_map ? 'В бою · ' + (h.system_id || '') : 'В пути');
+
+      row.innerHTML =
+        '<div class="hero-face"><img src="../' + h.portrait + '" alt=""></div>' +
+        '<div class="hero-info">' +
+          '<div class="hero-nick">' + escHtml(h.name) + '</div>' +
+          '<div class="hero-where">' + where + '</div>' +
+        '</div>' +
+        '<div class="hero-kills">' + h.kills + '<span>убито</span></div>';
+
+      // Переименовать можно только живого: павшего храм помнит под тем
+      // именем, под которым он погиб.
+      if (!h.died_at) {
+        var rename = document.createElement('button');
+        rename.className = 'hero-rename';
+        rename.textContent = '✎';
+        rename.title = 'Сменить кличку';
+        rename.addEventListener('click', function() {
+          var next = prompt('Новая кличка для ' + h.name, h.name);
+          if (next === null) return;
+          rename.disabled = true;
+          supabase.rpc('rename_hero', { p_hero_id: h.hero_id, p_name: next.trim() })
+            .then(function(r2) {
+              rename.disabled = false;
+              if (r2.error) { alert('Не вышло: ' + r2.error.message); return; }
+              loadHeroRoster(building, box);
+              loadUnits();
+            });
+        });
+        row.appendChild(rename);
+      }
+
+      box.appendChild(row);
     });
   });
 }
@@ -1974,6 +2049,23 @@ function buildUnitCard(unit) {
   var footer = document.createElement('div');
   footer.className = 'unit-card-footer';
 
+  // Одарённый нанимается поштучно и под собственной кличкой, поэтому
+  // вместо счётчика количества у него поле имени. Кличку сервер проверит
+  // ещё раз: длину и занятость среди живых героев игрока.
+  var heroInput = null;
+
+  if (unit.is_hero) {
+    var nameBox = document.createElement('div');
+    nameBox.className = 'hero-name-box';
+    heroInput = document.createElement('input');
+    heroInput.className = 'hero-name-input';
+    heroInput.type = 'text';
+    heroInput.maxLength = 24;
+    heroInput.placeholder = 'Кличка';
+    nameBox.appendChild(heroInput);
+    body.appendChild(nameBox);
+  }
+
   var qty = document.createElement('div');
   qty.className = 'unit-qty';
   var minus = document.createElement('button');
@@ -1997,7 +2089,7 @@ function buildUnitCard(unit) {
     updatePrice();
   });
   qty.appendChild(minus); qty.appendChild(val); qty.appendChild(plus);
-  footer.appendChild(qty);
+  if (!unit.is_hero) footer.appendChild(qty);
 
   var order = document.createElement('button');
   order.className = 'unit-order-btn';
@@ -2069,7 +2161,19 @@ function buildUnitCard(unit) {
 
   order.addEventListener('click', function() {
     var n = parseInt(val.textContent, 10);
-    // Сначала выбираем место на карте, заказ уходит после выбора клетки.
+
+    if (unit.is_hero) {
+      var nick = (heroInput.value || '').trim();
+      if (nick.length < 2) {
+        alert('Придумай кличку — хотя бы два символа');
+        heroInput.focus();
+        return;
+      }
+      // Сначала выбираем место на карте, заказ уходит после выбора клетки.
+      startPlacement(unit.id, 1, [], nick);
+      return;
+    }
+
     startPlacement(unit.id, n, Object.keys(chosen));
   });
 
@@ -2176,6 +2280,18 @@ function unitBox(u) {
   return { w: (t && t.width_cells) || 1, h: (t && t.height_cells) || 1 };
 }
 
+// Кличку одарённого придумывает игрок, а видят её и союзники, и враги.
+// Всё, что от игрока, перед вставкой в разметку обязано пройти здесь,
+// иначе чужое имя со скобками выполнится в чужом браузере.
+function escHtml(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // Карта занятых клеток с учётом корпуса: техника 2x2 закрывает четыре
 // клетки, а не одну. Считать по одной верхней левой клетке нельзя —
 // сервер в is_ground_box_free проверяет пересечение прямоугольников,
@@ -2217,7 +2333,8 @@ function drawUnits() {
     var mine = u.owner_user_id === currentUserId;
     var color = mine ? '#5fd968' : '#4a90d9';
     var type = unitTypeById[u.unit_type];
-    var img = type ? getUnitImage(type.image) : null;
+    // У одарённого своё лицо, закреплённое при найме. У остальных — картинка типа.
+    var img = type ? getUnitImage(u.portrait || type.image) : null;
 
     var inset = 2;
     var boxW = CELL_PX * size.w - inset * 2;
@@ -2366,17 +2483,28 @@ function showPickup(unit, ships, carriers, inside, boardable, ap, liftCarriers) 
   var type = unitTypeById[unit.unit_type] || {};
   var hpPct = type.max_hp ? Math.max(0, Math.min(100, unit.hp / type.max_hp * 100)) : 100;
 
+  // Одарённый: в шапке стоит его кличка, а название типа уходит в строку роли.
+  // Вкладка убитых есть только у него, поэтому при переходе на обычного бойца
+  // её надо снять, иначе останется пустая панель без единой активной вкладки.
+  var isHero = !!unit.hero_id;
+  if (guTab === 'kills' && !isHero) guTab = 'abilities';
+
+  var portrait = unit.portrait || type.image;
+  var title = isHero ? (unit.hero_name || type.name) : (type.name || unit.unit_type);
+
   var role = type.is_vehicle
     ? (type.carry_slots > 0 ? 'Техника / Транспорт' : 'Техника')
     : (type.carry_slots > 0 ? 'Пехота / Поддержка' : 'Пехота');
 
+  if (isHero) role = type.name || 'Одарённый';
+
   bar.innerHTML =
     '<div class="gu-top">' +
-      '<div class="gu-portrait">' +
-        (type.image ? '<img src="../' + type.image + '" alt="">' : '') +
+      '<div class="gu-portrait' + (isHero ? ' hero' : '') + '">' +
+        (portrait ? '<img src="../' + portrait + '" alt="">' : '') +
       '</div>' +
       '<div class="gu-stats">' +
-        '<div class="gu-name">' + (type.name || unit.unit_type) + '</div>' +
+        '<div class="gu-name">' + escHtml(title) + '</div>' +
         '<div class="gu-role">' + role + ' · ' + unit.x + ':' + unit.y + '</div>' +
         '<div class="gu-hp">' +
           '<span class="gu-hp-num">' + unit.hp + ' / ' + (type.max_hp || unit.hp) + '</span>' +
@@ -2400,6 +2528,7 @@ function showPickup(unit, ships, carriers, inside, boardable, ap, liftCarriers) 
     '<div class="gu-tabs">' +
       '<button class="gu-tab" data-tab="gear">Снаряжение</button>' +
       '<button class="gu-tab" data-tab="abilities">Способности</button>' +
+      (isHero ? '<button class="gu-tab" data-tab="kills">Убитые</button>' : '') +
       '<button class="gu-tab" data-tab="info">Описание</button>' +
     '</div>' +
     '<div class="gu-panel" id="gu-panel"></div>';
@@ -2423,6 +2552,8 @@ function showPickup(unit, ships, carriers, inside, boardable, ap, liftCarriers) 
 
   if (guTab === 'gear') {
     panel.innerHTML = '<div class="gu-empty">Снаряжение появится позже</div>';
+  } else if (guTab === 'kills') {
+    guRenderKills(panel, unit);
   } else if (guTab === 'info') {
     panel.innerHTML = '<div class="gu-desc">' +
       (type.description || 'Описание пока не заполнено') + '</div>';
@@ -2453,6 +2584,44 @@ function guPaintAp(ap, type) {
   }
   dots.innerHTML = html;
   text.textContent = ap.ap >= ap.ap_max ? 'действия готовы' : '+1 через ' + ap.next_in + ' с';
+}
+
+// Кого именно убил этот одарённый. Список нужен не для похвальбы:
+// на нём позже будет строиться прокачка способностей в храме.
+function guRenderKills(panel, unit) {
+  panel.innerHTML = '<div class="gu-empty">Загрузка...</div>';
+
+  supabase.rpc('get_hero_kills', { p_hero_id: unit.hero_id }).then(function(res) {
+    if (!selectedUnit || selectedUnit.id !== unit.id) return;
+
+    if (res.error) {
+      panel.innerHTML = '<div class="gu-empty">Не удалось прочитать список</div>';
+      return;
+    }
+
+    var rows = res.data || [];
+    if (!rows.length) {
+      panel.innerHTML = '<div class="gu-empty">Счёт пока не открыт</div>';
+      return;
+    }
+
+    var total = 0;
+    rows.forEach(function(k) { total += k.kills; });
+
+    var html = '<div class="hk-total">Всего убито: ' + total + '</div><div class="hk-list">';
+
+    rows.forEach(function(k) {
+      html += '<div class="hk-row">' +
+        '<div class="hk-face">' +
+          (k.victim_image ? '<img src="../' + k.victim_image + '" alt="">' : '') +
+        '</div>' +
+        '<div class="hk-name">' + k.victim_name + '</div>' +
+        '<div class="hk-count">×' + k.kills + '</div>' +
+      '</div>';
+    });
+
+    panel.innerHTML = html + '</div>';
+  });
 }
 
 // Плитки способностей: слева сетка, справа описание выбранной — как
@@ -3395,15 +3564,15 @@ function handleDropTap(cellX, cellY) {
 }
 
 // Режим выбора клетки: подсвечиваем свободные места в зонах.
-function startPlacement(unitTypeId, quantity, upgrades) {
+function startPlacement(unitTypeId, quantity, upgrades, heroName) {
   placingOrder = { unitType: unitTypeId, quantity: quantity,
-                   upgrades: upgrades || [] };
+                   upgrades: upgrades || [], heroName: heroName || null };
   closeUnitPanel();
 
   var hint = document.getElementById('placement-hint');
   var t = unitTypeById[unitTypeId];
   hint.innerHTML = '<span>Выбери клетку в зоне высадки для: ' +
-                   ((t && t.name) || 'юнита') + ' ×' + quantity + '</span>' +
+                   (heroName ? escHtml(heroName) : ((t && t.name) || 'юнита') + ' ×' + quantity) + '</span>' +
                    '<button id="placement-cancel">Отмена</button>';
   hint.style.display = 'flex';
   document.getElementById('placement-cancel').addEventListener('click', cancelPlacement);
@@ -3452,6 +3621,24 @@ function handlePlacementTap(cellX, cellY) {
 
   var order = placingOrder;
   cancelPlacement();
+
+  // Одарённого нанимает отдельная функция: у неё своя проверка клички
+  // и своё время подготовки, взятое из типа, а не из общей настройки.
+  if (order.heroName) {
+    supabase.rpc('hire_hero', {
+      p_building_id: unitPanelBuilding.id,
+      p_name: order.heroName,
+      p_target_x: cellX,
+      p_target_y: cellY
+    }).then(function(res) {
+      if (res.error) {
+        alert('Не удалось нанять: ' + res.error.message);
+        return;
+      }
+      loadUnitOrders();
+    });
+    return;
+  }
 
   supabase.rpc('order_unit', {
     p_building_id: unitPanelBuilding.id,

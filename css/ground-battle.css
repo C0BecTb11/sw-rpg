@@ -486,3 +486,122 @@ html, body {
   border-radius: 14px;
   cursor: pointer;
 }
+
+/* ===== Храм: поле клички и список одарённых ===== */
+
+.hero-name-box { margin-top: 10px; }
+
+.hero-name-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 11px;
+  background: #0a0d14;
+  border: 1px solid #2a3644;
+  border-radius: 7px;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+.hero-name-input:focus { outline: none; border-color: #d9a940; }
+.hero-name-input::placeholder { color: #55606c; }
+
+.hero-roster {
+  margin-bottom: 12px;
+  padding: 10px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 9px;
+}
+
+.hero-roster-head {
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #d9a940;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid #1c2530;
+}
+
+.hero-roster-empty {
+  font-size: 11px;
+  color: #55606c;
+  text-align: center;
+  padding: 6px 0;
+}
+
+.hero-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 0;
+  border-bottom: 1px solid #1c2530;
+}
+
+.hero-row:last-child { border-bottom: none; }
+
+/* Павшего храм помнит, но показывает приглушённо */
+.hero-row.fallen { opacity: 0.55; }
+.hero-row.fallen .hero-face { filter: grayscale(1); }
+
+.hero-face {
+  flex: none;
+  width: 34px;
+  height: 42px;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #0a0d14;
+}
+
+.hero-face img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  display: block;
+}
+
+.hero-info { flex: 1; min-width: 0; }
+
+.hero-nick {
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #cfd8dc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hero-where { margin-top: 3px; font-size: 10px; color: #55606c; }
+
+.hero-kills {
+  flex: none;
+  text-align: right;
+  font-size: 14px;
+  color: #d9a940;
+  line-height: 1.1;
+}
+
+.hero-kills span {
+  display: block;
+  font-size: 8px;
+  letter-spacing: 1px;
+  color: #55606c;
+}
+
+.hero-rename {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  background: none;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  color: #8fa8c4;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.hero-rename:disabled { opacity: 0.4; }

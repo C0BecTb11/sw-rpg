@@ -1085,3 +1085,54 @@
 
 /* Тот, кто ещё в пути, отмечен отдельно: это предупреждение, а не факт */
 #scout-bar i.scout-soon { color: #d9a940; }
+
+/* ===== Одарённые: портрет и список убитых в HUD ===== */
+
+/* Портрет героя обведён золотом — на карте и в панели он не рядовой */
+.gu-portrait.hero { border-color: #d9a940; }
+
+.hk-total {
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #d9a940;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid #1c2530;
+}
+
+.hk-list { display: flex; flex-direction: column; gap: 6px; }
+
+.hk-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 7px;
+}
+
+.hk-face {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  overflow: hidden;
+  background: #0a0d14;
+}
+
+.hk-face img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  display: block;
+}
+
+.hk-name { flex: 1; min-width: 0; font-size: 11px; color: #8fa8c4; }
+
+.hk-count {
+  flex: none;
+  font-size: 12px;
+  color: #cfd8dc;
+}
