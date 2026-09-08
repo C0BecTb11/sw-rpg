@@ -76,6 +76,32 @@ function formatCaptureLeft(sec) {
   return sec + ' с';
 }
 
+// ===== Разведсводка =====
+// Единственный способ узнать о вражеском командире: свой разведчик
+// на планете. Полоса появляется только когда есть что сообщить.
+function loadScoutReport() {
+  supabase.rpc('get_scouted_commanders', { p_system_id: systemId }).then(function(res) {
+    var bar = document.getElementById('scout-bar');
+    if (!bar) return;
+
+    var list = (!res.error && res.data) ? res.data : [];
+
+    if (!list.length) { bar.style.display = 'none'; return; }
+
+    var lines = list.map(function(c) {
+      var who = c.commander_name + (c.player_name ? ' · ' + c.player_name : '');
+      return c.arriving
+        ? '<i class="scout-soon">' + who + ' — прибудет через ' +
+          formatLeft(c.seconds_left) + '</i>'
+        : '<i>' + who + ' — здесь</i>';
+    });
+
+    bar.innerHTML = '<div class="scout-title">Разведка: вражеский командир</div>' +
+                    lines.join('');
+    bar.style.display = 'block';
+  });
+}
+
 function renderCaptureBar() {
   var bar = document.getElementById('capture-bar');
   if (!bar) return;
@@ -1726,6 +1752,8 @@ function initGroundBattle() {
       });
       loadGroundSettings();
       loadGroundSides();
+      loadScoutReport();
+      setInterval(loadScoutReport, 20000);
       syncGroundTime();
       loadSettlement();
       loadCaptureState();

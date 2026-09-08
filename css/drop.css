@@ -1053,3 +1053,35 @@
 /* Страховка на будущее: любая картинка внутри панели не вылезает
    за её пределы, даже если для неё забыли задать размер */
 #pickup-bar img { max-width: 100%; }
+
+/* Разведсводка: то, что видно только благодаря разведчику */
+#scout-bar {
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  top: 148px;
+  z-index: 1390;
+  padding: 9px 12px;
+  background: rgba(13,17,25,0.95);
+  border: 1px solid #1c2530;
+  border-left: 3px solid #a06fd9;
+  border-radius: 10px;
+  font-family: 'Courier New', monospace;
+}
+
+.scout-title {
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #a06fd9;
+  margin-bottom: 4px;
+}
+
+#scout-bar i {
+  display: block;
+  font-style: normal;
+  font-size: 11px;
+  color: #cfd8dc;
+}
+
+/* Тот, кто ещё в пути, отмечен отдельно: это предупреждение, а не факт */
+#scout-bar i.scout-soon { color: #d9a940; }
