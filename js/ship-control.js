@@ -385,7 +385,6 @@ function scRenderTiles() {
 
   var st = scApState(scShip);
   var canAct = st.ap >= 1;
-  var inBand = false;
 
   tiles.innerHTML = '';
 
@@ -452,7 +451,7 @@ function scRenderTiles() {
 
   if (!scMode) {
     describe('Действия', 'Выбери, что делает корабль.',
-      st.ap >= st.apMax ? 'действия готовы' : '+1 через ' + st.nextIn + ' с');
+      st.ap >= st.max ? 'действия готовы' : '+1 через ' + st.nextIn + ' с');
   }
 }
 

@@ -1041,8 +1041,10 @@ function makeShipCard(type) {
     uhead.textContent = 'Дополнения · доступно ' + mineUpgrades.length;
     up.appendChild(uhead);
 
-    var grid = document.createElement('div');
-    grid.className = 'ship-up-grid';
+    // Имя upGrid, а не grid: локальная grid перекрывала бы глобальную
+    // ссылку на саму космическую карту внутри всей этой функции
+    var upGrid = document.createElement('div');
+    upGrid.className = 'ship-up-grid';
 
     mineUpgrades.forEach(function(r) {
       var t = document.createElement('button');
@@ -1058,10 +1060,10 @@ function makeShipCard(type) {
         updatePrice();
       });
 
-      grid.appendChild(t);
+      upGrid.appendChild(t);
     });
 
-    up.appendChild(grid);
+    up.appendChild(upGrid);
 
     var usub = document.createElement('div');
     usub.className = 'ship-addon-sub';

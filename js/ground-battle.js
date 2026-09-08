@@ -602,11 +602,16 @@ function loadGroundSides() {
       supabase.from('profiles').select('faction').eq('id', res.data.session.user.id).maybeSingle(),
       supabase.from('systems').select('faction').eq('id', systemId).maybeSingle()
     ]).then(function(r) {
+      // Обе фракции читаем до первого использования: раньше sysFaction
+      // присваивался выше объявления sys и из-за подъёма переменной
+      // всегда получал undefined — трофейные постройки не распознавались.
       var mine = r[0].data && r[0].data.faction;
+      var sys = r[1].data && r[1].data.faction;
+
       myFaction = mine || null;
       sysFaction = sys || null;
       renderCaptureBar();
-      var sys = r[1].data && r[1].data.faction;
+
       if (!mine) return;
       iAmAttacker = (sys !== mine);
 
@@ -629,6 +634,15 @@ function loadGroundSettings() {
     res.data.forEach(function(row) {
       if (row.key === 'ground_attack_zone_height') {
         ATTACK_ZONE_H = parseInt(row.value, 10) || 4;
+      }
+      // Те же ключи, по которым считает сервер в unit_ap_state
+      // и spend_unit_action. Раньше здесь стояли зашитые 30 и 2,
+      // и после правки баланса панель показывала бы неправду.
+      if (row.key === 'ship_action_cooldown_seconds') {
+        gbApCd = parseInt(row.value, 10) || 30;
+      }
+      if (row.key === 'ship_action_max') {
+        gbApMax = parseInt(row.value, 10) || 2;
       }
     });
     // Перерисовываем, только если значение реально отличается от того,
@@ -711,7 +725,6 @@ function drawScene(grid) {
   drawDisembarkCells();
   drawMoveCells();
   drawTargetCells();
-  drawDisembarkCells();
   drawAttackZone();
   drawUnits();
 }
@@ -1043,11 +1056,6 @@ function handleTap(clientX, clientY) {
 
   if (movingUnit) {
     handleGroundMoveTap(cellX, cellY);
-    return;
-  }
-
-  if (disembarking) {
-    handleDisembarkTap(cellX, cellY);
     return;
   }
 
@@ -2168,6 +2176,36 @@ function unitBox(u) {
   return { w: (t && t.width_cells) || 1, h: (t && t.height_cells) || 1 };
 }
 
+// Карта занятых клеток с учётом корпуса: техника 2x2 закрывает четыре
+// клетки, а не одну. Считать по одной верхней левой клетке нельзя —
+// сервер в is_ground_box_free проверяет пересечение прямоугольников,
+// и подсветка обещала бы место, которого нет.
+function buildOccupancy(ignoreUnitId) {
+  var map = {};
+  unitsOnMap.forEach(function(u) {
+    if (u.x === null || u.x === undefined) return;
+    if (ignoreUnitId && u.id === ignoreUnitId) return;
+    var b = unitBox(u);
+    for (var dx = 0; dx < b.w; dx++) {
+      for (var dy = 0; dy < b.h; dy++) {
+        map[(u.x + dx) + ':' + (u.y + dy)] = true;
+      }
+    }
+  });
+  return map;
+}
+
+// Влезает ли прямоугольник w×h в клетку x,y: и по краям карты, и по соседям
+function isBoxFree(occupied, x, y, w, h) {
+  if (x < 0 || y < 0 || x + w > GRID_SIZE || y + h > GRID_SIZE) return false;
+  for (var dx = 0; dx < w; dx++) {
+    for (var dy = 0; dy < h; dy++) {
+      if (occupied[(x + dx) + ':' + (y + dy)]) return false;
+    }
+  }
+  return true;
+}
+
 function drawUnits() {
   unitsOnMap.forEach(function(u) {
     // Перевозимые на карте не стоят — они внутри транспорта или в трюме
@@ -3005,19 +3043,11 @@ function drawDisembarkCells() {
 
   var c = disembarking.carrier;
   var size = unitBox(c);
-  var occupied = {};
-  unitsOnMap.forEach(function(u) {
-    if (u.x === null || u.x === undefined) return;
-    var b = unitBox(u);
-    for (var dx = 0; dx < b.w; dx++)
-      for (var dy = 0; dy < b.h; dy++)
-        occupied[(u.x + dx) + ':' + (u.y + dy)] = true;
-  });
+  var occupied = buildOccupancy();
 
   for (var y = c.y - 1; y <= c.y + size.h; y++) {
     for (var x = c.x - 1; x <= c.x + size.w; x++) {
-      if (x < 0 || y < 0 || x >= GRID_SIZE || y >= GRID_SIZE) continue;
-      if (occupied[x + ':' + y]) continue;
+      if (!isBoxFree(occupied, x, y, 1, 1)) continue;
       ctx.fillStyle = 'rgba(95,217,104,0.25)';
       ctx.fillRect(x * CELL_PX + 3, y * CELL_PX + 3, CELL_PX - 6, CELL_PX - 6);
     }
@@ -3314,27 +3344,12 @@ function drawDropCells() {
   var vw = droppingVehicle ? droppingVehicle.width_cells : 1;
   var vh = droppingVehicle ? droppingVehicle.height_cells : 1;
 
-  var occupied = {};
-  unitsOnMap.forEach(function(u) {
-    if (u.x === null || u.x === undefined) return;
-    var b = unitBox(u);
-    for (var dx = 0; dx < b.w; dx++)
-      for (var dy = 0; dy < b.h; dy++)
-        occupied[(u.x + dx) + ':' + (u.y + dy)] = true;
-  });
-
-  var boxFree = function(x, y) {
-    if (y + vh > GRID_SIZE || x + vw > GRID_SIZE) return false;
-    for (var dx = 0; dx < vw; dx++)
-      for (var dy = 0; dy < vh; dy++)
-        if (occupied[(x + dx) + ':' + (y + dy)]) return false;
-    return true;
-  };
+  var occupied = buildOccupancy();
 
   var y0 = GRID_SIZE - ATTACK_ZONE_H;
   for (var cy = y0; cy < GRID_SIZE; cy++) {
     for (var cx = 0; cx < GRID_SIZE; cx++) {
-      if (!boxFree(cx, cy)) continue;
+      if (!isBoxFree(occupied, cx, cy, vw, vh)) continue;
       ctx.fillStyle = 'rgba(217,74,74,0.22)';
       ctx.fillRect(cx * CELL_PX + 3, cy * CELL_PX + 3,
                    CELL_PX * vw - 6, CELL_PX * vh - 6);
@@ -3348,7 +3363,8 @@ function handleDropTap(cellX, cellY) {
   if (cellY < GRID_SIZE - ATTACK_ZONE_H || cellY >= GRID_SIZE) return;
   if (cellX < 0 || cellX >= GRID_SIZE) return;
 
-  if (unitsOnMap.some(function(u) { return u.x === cellX && u.y === cellY; })) {
+  // Клетка под корпусом техники тоже занята, хотя её угол стоит в другой
+  if (!isBoxFree(buildOccupancy(), cellX, cellY, 1, 1)) {
     alert('Клетка занята');
     return;
   }
@@ -3404,8 +3420,7 @@ function cancelPlacement() {
 function drawPlacementCells() {
   if (!placingOrder) return;
 
-  var occupied = {};
-  unitsOnMap.forEach(function(u) { occupied[u.x + ':' + u.y] = true; });
+  var occupied = buildOccupancy();
 
   deployZones.forEach(function(zone) {
     var size = zone.size || DEPLOY_SIZE;
@@ -3429,7 +3444,7 @@ function handlePlacementTap(cellX, cellY) {
 
   if (!inZone) return;
 
-  var taken = unitsOnMap.some(function(u) { return u.x === cellX && u.y === cellY; });
+  var taken = !!buildOccupancy()[cellX + ':' + cellY];
   if (taken) {
     alert('Клетка занята');
     return;
