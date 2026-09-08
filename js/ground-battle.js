@@ -1933,8 +1933,93 @@ function openUnitPanel(building) {
       loadHeroRoster(building, roster);
     }
 
+    // Медцентр и ремцех штопают пехоту, заводы техники — машины.
+    // Ремонт делит производственную линию с наймом, поэтому блок стоит
+    // рядом с карточками, а не в отдельном окне.
+    if (REPAIR_BUILDINGS[code]) {
+      var repairBox = document.createElement('div');
+      repairBox.className = 'rp-box';
+      repairBox.innerHTML = '<div class="rp-empty">Загрузка...</div>';
+      list.appendChild(repairBox);
+      loadRepairList(building, repairBox);
+    }
+
     res.data.forEach(function(unit) {
       list.appendChild(buildUnitCard(unit));
+    });
+  });
+}
+
+// Постройки, у которых есть ремонтное место, и что именно они чинят.
+// Тот же список продублирован на сервере в repair_building_kind —
+// клиент только рисует, решение принимает база.
+var REPAIR_BUILDINGS = {
+  rep_medical: 'infantry',
+  cis_repair: 'infantry',
+  rep_vehicle: 'vehicle',
+  cis_vehicle: 'vehicle'
+};
+
+function loadRepairList(building, box) {
+  var kind = REPAIR_BUILDINGS[(building.building_types || {}).code];
+  var title = kind === 'vehicle' ? 'Ремонтный док' : 'Лазарет';
+
+  supabase.rpc('get_repairable_units', { p_building_id: building.id }).then(function(res) {
+    if (res.error) {
+      box.innerHTML = '<div class="rp-empty">Не удалось прочитать список</div>';
+      return;
+    }
+
+    var rows = res.data || [];
+    box.innerHTML = '<div class="rp-head">' + title + '</div>';
+
+    if (!rows.length) {
+      var hint = document.createElement('div');
+      hint.className = 'rp-empty';
+      hint.textContent = kind === 'vehicle'
+        ? 'Побитой техники в зонах высадки нет'
+        : 'Раненых в зонах высадки нет';
+      box.appendChild(hint);
+      return;
+    }
+
+    rows.forEach(function(u) {
+      var pct = u.full_hp ? Math.max(0, Math.min(100, u.hp / u.full_hp * 100)) : 100;
+
+      var row = document.createElement('div');
+      row.className = 'rp-row';
+      row.innerHTML =
+        '<div class="rp-face">' +
+          ((u.portrait || u.image) ? '<img src="../' + (u.portrait || u.image) + '" alt="">' : '') +
+        '</div>' +
+        '<div class="rp-info">' +
+          '<div class="rp-name">' + escHtml(u.hero_name || u.name) + '</div>' +
+          '<div class="rp-hp">' +
+            '<span>' + u.hp + ' / ' + u.full_hp + '</span>' +
+            '<div class="rp-track"><i style="width:' + pct + '%"></i></div>' +
+          '</div>' +
+          '<div class="rp-sub">' + u.x + ':' + u.y + ' · ' + formatLeft(u.seconds) + '</div>' +
+        '</div>';
+
+      var btn = document.createElement('button');
+      btn.className = 'rp-go';
+      btn.innerHTML = 'Чинить<span>' + u.cost + '</span>';
+      btn.addEventListener('click', function() {
+        btn.disabled = true;
+        supabase.rpc('start_repair', {
+          p_building_id: building.id,
+          p_unit_id: u.unit_id
+        }).then(function(r2) {
+          btn.disabled = false;
+          if (r2.error) { alert('Не вышло: ' + r2.error.message); return; }
+          renderProductionSlot(building, unitPanelMax);
+          loadRepairList(building, box);
+          updateDeployCounter();
+        });
+      });
+
+      row.appendChild(btn);
+      box.appendChild(row);
     });
   });
 }

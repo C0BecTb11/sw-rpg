@@ -605,3 +605,105 @@ html, body {
 }
 
 .hero-rename:disabled { opacity: 0.4; }
+
+/* ===== Лазарет и ремонтный док в панели постройки ===== */
+
+.rp-box {
+  margin-bottom: 12px;
+  padding: 10px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 9px;
+}
+
+.rp-head {
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #5fd968;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid #1c2530;
+}
+
+.rp-empty {
+  font-size: 11px;
+  color: #55606c;
+  text-align: center;
+  padding: 6px 0;
+}
+
+.rp-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 0;
+  border-bottom: 1px solid #1c2530;
+}
+
+.rp-row:last-child { border-bottom: none; }
+
+.rp-face {
+  flex: none;
+  width: 34px;
+  height: 42px;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #0a0d14;
+}
+
+.rp-face img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  display: block;
+}
+
+.rp-info { flex: 1; min-width: 0; }
+
+.rp-name {
+  font-size: 12px;
+  color: #cfd8dc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rp-hp { display: flex; align-items: center; gap: 7px; margin-top: 5px; }
+.rp-hp span { flex: none; font-size: 10px; color: #d94a4a; }
+
+.rp-track {
+  flex: 1;
+  height: 5px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.rp-track i { display: block; height: 100%; background: #d94a4a; }
+
+.rp-sub { margin-top: 4px; font-size: 10px; color: #55606c; }
+
+.rp-go {
+  flex: none;
+  padding: 8px 10px;
+  background: #5fd968;
+  border: none;
+  border-radius: 7px;
+  color: #0a0d14;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  font-weight: bold;
+  line-height: 1.3;
+  text-align: center;
+}
+
+.rp-go span {
+  display: block;
+  font-weight: normal;
+  font-size: 9px;
+}
+
+.rp-go:disabled { opacity: 0.5; }
