@@ -483,3 +483,101 @@ html, body {
   color: #cfd8dc;
   box-shadow: 0 0 0 2px rgba(74,144,217,0.25);
 }
+
+/* ===== Док: ремонт, модернизация и пополнение ангара ===== */
+
+.dock-box {
+  margin-bottom: 14px;
+  padding: 11px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 10px;
+}
+
+.dock-head {
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #4a90d9;
+  padding-bottom: 9px;
+  margin-bottom: 9px;
+  border-bottom: 1px solid #1c2530;
+}
+
+.dock-empty {
+  font-size: 11px;
+  color: #55606c;
+  text-align: center;
+  padding: 8px 0;
+}
+
+.dock-card {
+  padding: 10px 0;
+  border-bottom: 1px solid #1c2530;
+}
+
+.dock-card:last-child { border-bottom: none; }
+
+.dock-top { display: flex; align-items: center; gap: 10px; }
+
+.dock-face {
+  flex: none;
+  width: 46px;
+  height: 46px;
+  border: 1px solid #2a3644;
+  border-radius: 7px;
+  overflow: hidden;
+  background: #0a0d14;
+}
+
+.dock-face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.dock-info { flex: 1; min-width: 0; }
+
+.dock-name {
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #cfd8dc;
+}
+
+.dock-hp { display: flex; align-items: center; gap: 7px; margin-top: 5px; }
+.dock-hp span { flex: none; font-size: 10px; color: #d94a4a; }
+
+.dock-track {
+  flex: 1;
+  height: 5px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.dock-track i { display: block; height: 100%; background: #d94a4a; }
+
+.dock-sub { margin-top: 4px; font-size: 10px; color: #55606c; }
+
+.dock-lock {
+  margin-top: 8px;
+  padding: 8px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 7px;
+  font-size: 10px;
+  color: #55606c;
+  text-align: center;
+}
+
+.dock-go {
+  display: block;
+  width: 100%;
+  margin-top: 9px;
+  padding: 10px;
+  background: #4a90d9;
+  border: none;
+  border-radius: 7px;
+  color: #0a0d14;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.dock-go:disabled { background: #1c2530; color: #55606c; }

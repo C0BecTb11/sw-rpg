@@ -822,11 +822,264 @@ function openShipyard() {
         return;
       }
       list.innerHTML = '';
+
+      // Док стоит над стапелем: чинить и дооснащать уже построенное
+      // обычно нужнее, чем закладывать новый корпус.
+      var dock = document.createElement('div');
+      dock.className = 'dock-box';
+      dock.innerHTML = '<div class="dock-empty">Загрузка...</div>';
+      list.appendChild(dock);
+      loadDock(dock);
+
       res.data.forEach(function(type) {
         list.appendChild(makeShipCard(type));
       });
     });
   });
+}
+
+// ===== Док: ремонт корпуса, модернизация, пополнение ангара =====
+// Стапель и док делят одну очередь, поэтому после любой отправки
+// карточки перерисовываются целиком.
+function loadDock(box) {
+  supabase.rpc('get_dock_ships', { p_system_id: systemId }).then(function(res) {
+    if (res.error) {
+      box.innerHTML = '<div class="dock-empty">Не удалось прочитать список</div>';
+      return;
+    }
+
+    var ships = res.data || [];
+    box.innerHTML = '<div class="dock-head">Док</div>';
+
+    if (!ships.length) {
+      var hint = document.createElement('div');
+      hint.className = 'dock-empty';
+      hint.textContent = 'В этой системе нет твоих кораблей';
+      box.appendChild(hint);
+      return;
+    }
+
+    ships.forEach(function(s) { box.appendChild(makeDockCard(s, box)); });
+  });
+}
+
+function makeDockCard(s, box) {
+  var card = document.createElement('div');
+  card.className = 'dock-card';
+
+  var pct = s.full_hp ? Math.max(0, Math.min(100, s.hp / s.full_hp * 100)) : 100;
+
+  var head = document.createElement('div');
+  head.className = 'dock-top';
+  head.innerHTML =
+    '<div class="dock-face">' +
+      (s.image ? '<img src="../' + s.image + '" alt="">' : '') +
+    '</div>' +
+    '<div class="dock-info">' +
+      '<div class="dock-name">' + s.name + '</div>' +
+      '<div class="dock-hp">' +
+        '<span>' + s.hp + ' / ' + s.full_hp + '</span>' +
+        '<div class="dock-track"><i style="width:' + pct + '%"></i></div>' +
+      '</div>' +
+      '<div class="dock-sub">Ангар: ' + s.hangar_used + ' из ' + s.hangar_max + '</div>' +
+    '</div>';
+  card.appendChild(head);
+
+  // Корабль не у причала или уже в работе — показываем причину
+  // и ничего не предлагаем, вместо отказа после нажатия
+  if (s.busy || !s.at_dock) {
+    var lock = document.createElement('div');
+    lock.className = 'dock-lock';
+    lock.textContent = s.busy
+      ? 'Уже в работе'
+      : 'Подведи корабль к станции — док работает только у причала';
+    card.appendChild(lock);
+    return card;
+  }
+
+  var refresh = function() { loadDock(box); };
+
+  // --- ремонт корпуса ---
+  var fix = document.createElement('button');
+  fix.className = 'dock-go';
+  if (s.missing > 0) {
+    fix.textContent = 'Починить · ' + s.repair_cost + ' · ' + formatDockLeft(s.repair_seconds);
+    fix.addEventListener('click', function() {
+      fix.disabled = true;
+      supabase.rpc('start_ship_repair', { p_ship_id: s.ship_id }).then(function(r) {
+        fix.disabled = false;
+        if (r.error) { alert('Не вышло: ' + r.error.message); return; }
+        refresh();
+      });
+    });
+  } else {
+    fix.textContent = 'Корпус цел';
+    fix.disabled = true;
+  }
+  card.appendChild(fix);
+
+  // --- модернизация: только изученное, подходящее и ещё не стоящее ---
+  var installed = s.upgrades || [];
+  var mine = shipyardUpgrades.filter(function(r) {
+    return (r.applies_to || []).indexOf(s.ship_type) !== -1
+        && installed.indexOf(r.id) === -1;
+  });
+
+  if (mine.length) {
+    var chosen = {};
+
+    var up = document.createElement('div');
+    up.className = 'ship-addon';
+    up.innerHTML = '<div class="ship-addon-head">Модернизация · доступно ' + mine.length + '</div>';
+
+    var grid = document.createElement('div');
+    grid.className = 'ship-up-grid';
+
+    var sub = document.createElement('div');
+    sub.className = 'ship-addon-sub';
+
+    var go = document.createElement('button');
+    go.className = 'dock-go';
+
+    var recount = function() {
+      var ids = Object.keys(chosen), sum = 0;
+      ids.forEach(function(k) { sum += Math.floor(chosen[k].cost / 4); });
+      sub.textContent = ids.length
+        ? 'Выбрано ' + ids.length + ' · ' + sum + ' кредитов'
+        : 'Ничего не выбрано';
+      go.textContent = 'Установить · ' + sum;
+      go.disabled = ids.length === 0;
+    };
+
+    mine.forEach(function(r) {
+      var t = document.createElement('button');
+      t.className = 'ship-up';
+      t.innerHTML = '<img src="../' + r.icon_image + '" alt="">' +
+                    '<span>' + r.name + '</span>';
+      t.title = r.description || '';
+      t.addEventListener('click', function() {
+        if (chosen[r.id]) delete chosen[r.id]; else chosen[r.id] = r;
+        t.classList.toggle('active', !!chosen[r.id]);
+        recount();
+      });
+      grid.appendChild(t);
+    });
+
+    go.addEventListener('click', function() {
+      go.disabled = true;
+      supabase.rpc('start_ship_refit', {
+        p_ship_id: s.ship_id,
+        p_upgrades: Object.keys(chosen)
+      }).then(function(r) {
+        go.disabled = false;
+        if (r.error) { alert('Не вышло: ' + r.error.message); return; }
+        refresh();
+      });
+    });
+
+    up.appendChild(grid);
+    up.appendChild(sub);
+    up.appendChild(go);
+    card.appendChild(up);
+    recount();
+  }
+
+  // --- пополнение ангара ---
+  var free = Math.max(0, s.hangar_max - s.hangar_used);
+  if (free > 0 && (hangarTypes.fighter || hangarTypes.bomber)) {
+    var pick = { fighter: 0, bomber: 0 };
+
+    var han = document.createElement('div');
+    han.className = 'ship-addon';
+    han.innerHTML = '<div class="ship-addon-head">Ангар · свободно ' + free + '</div>';
+
+    var hsub = document.createElement('div');
+    hsub.className = 'ship-addon-sub';
+
+    var hgo = document.createElement('button');
+    hgo.className = 'dock-go';
+
+    var rows = {};
+
+    var hcount = function() {
+      var total = pick.fighter + pick.bomber;
+      var sum = pick.fighter * ((hangarTypes.fighter && hangarTypes.fighter.cost) || 0)
+              + pick.bomber * ((hangarTypes.bomber && hangarTypes.bomber.cost) || 0);
+
+      hsub.textContent = total
+        ? 'Займут ' + total + ' из ' + free + ' мест'
+        : 'Ничего не выбрано';
+      hgo.textContent = 'Пополнить · ' + sum;
+      hgo.disabled = total === 0;
+
+      // Гасим то, что уже не влезет: правило видно до нажатия
+      ['fighter', 'bomber'].forEach(function(kind) {
+        if (!rows[kind]) return;
+        var other = kind === 'fighter' ? pick.bomber : pick.fighter;
+        var all = rows[kind].querySelectorAll('.ship-addon-btn');
+        for (var i = 0; i < all.length; i++) {
+          var n = parseInt(all[i].textContent, 10);
+          all[i].disabled = (n + other) > free;
+          all[i].classList.toggle('active', n === pick[kind]);
+        }
+      });
+    };
+
+    var addRow = function(kind, label, t) {
+      if (!t) return;
+      var line = document.createElement('div');
+      line.className = 'ship-addon-line';
+      line.innerHTML = '<span>' + label + '</span><em>' + t.cost + ' кр</em>';
+      han.appendChild(line);
+
+      var row = document.createElement('div');
+      row.className = 'ship-addon-row';
+      rows[kind] = row;
+
+      for (var i = 0; i <= free; i++) {
+        (function(n) {
+          var b = document.createElement('button');
+          b.className = 'ship-addon-btn' + (n === 0 ? ' active' : '');
+          b.textContent = n;
+          b.addEventListener('click', function() {
+            if (b.disabled) return;
+            pick[kind] = n;
+            hcount();
+          });
+          row.appendChild(b);
+        })(i);
+      }
+      han.appendChild(row);
+    };
+
+    addRow('fighter', 'Истребители', hangarTypes.fighter);
+    addRow('bomber', 'Бомбардировщики', hangarTypes.bomber);
+
+    hgo.addEventListener('click', function() {
+      hgo.disabled = true;
+      supabase.rpc('start_hangar_restock', {
+        p_ship_id: s.ship_id,
+        p_fighters: pick.fighter,
+        p_bombers: pick.bomber
+      }).then(function(r) {
+        hgo.disabled = false;
+        if (r.error) { alert('Не вышло: ' + r.error.message); return; }
+        refresh();
+      });
+    });
+
+    han.appendChild(hsub);
+    han.appendChild(hgo);
+    card.appendChild(han);
+    hcount();
+  }
+
+  return card;
+}
+
+function formatDockLeft(sec) {
+  if (sec >= 60) return Math.floor(sec / 60) + ' мин ' + (sec % 60) + ' с';
+  return sec + ' с';
 }
 
 function closeShipyard() {
