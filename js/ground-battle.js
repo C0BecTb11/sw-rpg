@@ -1781,6 +1781,7 @@ function initGroundBattle() {
 
       var dropClose = document.getElementById('drop-panel-close');
       if (dropClose) dropClose.addEventListener('click', closeDropPanel);
+      initTreeGestures();
       loadBuildings();
       loadUnitOrders();
       setInterval(loadUnitOrders, 5000);
@@ -2050,6 +2051,8 @@ function loadHeroRoster(building, box) {
       row.className = 'hero-row' + (h.died_at ? ' fallen' : '');
 
       var where = h.died_at ? 'Пал на планете ' + (h.died_system_id || '—')
+                : h.training_name ? 'Обучение: ' + h.training_name +
+                                    ' · ' + formatLeft(h.training_left || 0)
                 : (h.on_map ? 'В бою · ' + (h.system_id || '') : 'В пути');
 
       row.innerHTML =
@@ -2715,6 +2718,16 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
   panel.innerHTML = '<div class="gu-abils"><div class="gu-tiles" id="gu-tiles"></div>' +
     '<div class="gu-abil-info" id="gu-abil-info"></div></div>' +
     '<div class="gu-rows" id="gu-rows"></div>';
+
+  // У одарённого сверху своя кнопка: древо развития открывается
+  // отдельным полотном, в тесной панели его не разглядеть.
+  if (unit.hero_id) {
+    var tree = document.createElement('button');
+    tree.className = 'gu-tree-btn';
+    tree.textContent = 'Древо развития';
+    tree.addEventListener('click', function() { openHeroTree(unit); });
+    panel.insertBefore(tree, panel.firstChild);
+  }
 
   var tiles = document.getElementById('gu-tiles');
   var info = document.getElementById('gu-abil-info');
@@ -3756,4 +3769,280 @@ function initBuildToggle(isSpace) {
     var page = isSpace ? 'space-battle.html' : 'ground-battle.html';
     window.location.href = page + '?system=' + systemId + (buildMode ? '' : '&mode=build');
   });
+}
+
+// ===== Древо развития одарённого =====
+// Полотно листается и масштабируется как галактическая карта: узлов
+// двенадцать у джедая и тринадцать у ситха, списком это не читается.
+
+var TREE_STEP_X = 150;      // расстояние между ветками
+var TREE_STEP_Y = 165;      // расстояние между ступенями
+var TREE_NODE = 96;         // сторона узла
+var TREE_PAD = 70;          // поля вокруг полотна
+
+var treeUnit = null;
+var treeNodes = [];
+var treeSelected = null;
+var treePan = { x: 0, y: 0, scale: 1 };
+
+function openHeroTree(unit) {
+  treeUnit = unit;
+  treeSelected = null;
+
+  var panel = document.getElementById('tree-panel');
+  var title = document.getElementById('tree-title');
+  var info = document.getElementById('tree-info');
+
+  title.textContent = 'Развитие · ' + escHtml(unit.hero_name || 'одарённый');
+  info.innerHTML = '<div class="tree-hint">Загрузка...</div>';
+  panel.style.display = 'flex';
+
+  supabase.rpc('get_hero_tree', { p_hero_id: unit.hero_id }).then(function(res) {
+    if (res.error) {
+      info.innerHTML = '<div class="tree-hint">Не удалось прочитать древо</div>';
+      return;
+    }
+    treeNodes = res.data || [];
+    buildHeroTree();
+  });
+}
+
+function closeHeroTree() {
+  document.getElementById('tree-panel').style.display = 'none';
+  treeUnit = null;
+  treeNodes = [];
+  treeSelected = null;
+}
+
+function buildHeroTree() {
+  var world = document.getElementById('tree-world');
+  var nodesBox = document.getElementById('tree-nodes');
+  var svg = document.getElementById('tree-links');
+
+  var maxCol = 0, maxRow = 0;
+  treeNodes.forEach(function(n) {
+    maxCol = Math.max(maxCol, parseFloat(n.tree_col));
+    maxRow = Math.max(maxRow, parseFloat(n.tree_row));
+  });
+
+  var w = TREE_PAD * 2 + maxCol * TREE_STEP_X + TREE_NODE;
+  var h = TREE_PAD * 2 + maxRow * TREE_STEP_Y + TREE_NODE;
+
+  world.style.width = w + 'px';
+  world.style.height = h + 'px';
+  svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+  svg.setAttribute('width', w);
+  svg.setAttribute('height', h);
+
+  var pos = {};
+  treeNodes.forEach(function(n) {
+    pos[n.ability_id] = {
+      x: TREE_PAD + parseFloat(n.tree_col) * TREE_STEP_X,
+      y: TREE_PAD + parseFloat(n.tree_row) * TREE_STEP_Y
+    };
+  });
+
+  // Связи рисуем первыми, чтобы узлы легли поверх
+  var links = '';
+  treeNodes.forEach(function(n) {
+    (n.requires || []).forEach(function(req) {
+      var a = pos[req], b = pos[n.ability_id];
+      if (!a || !b) return;
+      var x1 = a.x + TREE_NODE / 2, y1 = a.y + TREE_NODE;
+      var x2 = b.x + TREE_NODE / 2, y2 = b.y;
+      var mid = (y1 + y2) / 2;
+      var done = n.learned || n.unlocked;
+      links += '<path d="M' + x1 + ' ' + y1 +
+               ' C' + x1 + ' ' + mid + ' ' + x2 + ' ' + mid + ' ' + x2 + ' ' + y2 + '" ' +
+               'class="tree-link' + (done ? ' open' : '') + '"/>';
+    });
+  });
+  svg.innerHTML = links;
+
+  nodesBox.innerHTML = '';
+  treeNodes.forEach(function(n) {
+    var p = pos[n.ability_id];
+    var el = document.createElement('button');
+
+    var state = n.learned ? 'learned'
+              : n.in_training ? 'training'
+              : n.unlocked ? 'open' : 'locked';
+
+    el.className = 'tree-node ' + state;
+    el.style.left = p.x + 'px';
+    el.style.top = p.y + 'px';
+    el.innerHTML = '<img src="../' + n.icon + '" alt="">' +
+                   '<span class="tree-node-name">' + n.name + '</span>' +
+                   (n.kind === 'passive' ? '<i class="tree-node-kind">пассив</i>' : '');
+
+    el.addEventListener('click', function(e) {
+      e.stopPropagation();
+      selectTreeNode(n.ability_id);
+    });
+
+    nodesBox.appendChild(el);
+  });
+
+  // Ставим полотно так, чтобы первый доступный узел был на виду
+  var vp = document.getElementById('tree-viewport');
+  treePan.scale = 1;
+  treePan.x = (vp.clientWidth - w) / 2;
+  treePan.y = 20;
+  clampTreePan();
+  applyTreePan();
+
+  var first = null;
+  for (var i = 0; i < treeNodes.length; i++) {
+    if (!treeNodes[i].learned && treeNodes[i].unlocked) { first = treeNodes[i]; break; }
+  }
+  selectTreeNode(first ? first.ability_id : (treeNodes[0] || {}).ability_id);
+}
+
+function selectTreeNode(id) {
+  treeSelected = id;
+
+  var nodes = document.querySelectorAll('.tree-node');
+  var idx = 0;
+  treeNodes.forEach(function(n) {
+    if (nodes[idx]) nodes[idx].classList.toggle('active', n.ability_id === id);
+    idx++;
+  });
+
+  var n = null;
+  treeNodes.forEach(function(x) { if (x.ability_id === id) n = x; });
+
+  var info = document.getElementById('tree-info');
+  if (!n) { info.innerHTML = ''; return; }
+
+  var lack = [];
+  if (!n.unlocked) lack.push('нужна предыдущая ступень');
+  if (n.kills_have < n.kills_required) {
+    lack.push('убитых ' + n.kills_have + ' из ' + n.kills_required);
+  }
+
+  var head = '<div class="tree-info-head">' +
+      '<span class="tree-info-name">' + n.name + '</span>' +
+      '<span class="tree-info-branch">' + n.branch + ' · ступень ' + n.tier + '</span>' +
+    '</div>' +
+    '<div class="tree-info-desc">' + n.description + '</div>';
+
+  var meta = '<div class="tree-info-meta">' +
+      '<span>' + n.cost_credits + ' кр</span>' +
+      '<span>' + n.kills_required + ' убитых</span>' +
+      '<span>' + formatLeft(n.train_seconds) + '</span>' +
+    '</div>';
+
+  info.innerHTML = head + meta;
+
+  if (n.learned) {
+    info.innerHTML += '<div class="tree-hint done">Освоено</div>';
+    return;
+  }
+  if (n.in_training) {
+    info.innerHTML += '<div class="tree-hint">Обучение идёт</div>';
+    return;
+  }
+  if (lack.length) {
+    info.innerHTML += '<div class="tree-hint">Не хватает: ' + lack.join(', ') + '</div>';
+    return;
+  }
+
+  var go = document.createElement('button');
+  go.className = 'tree-go';
+  go.textContent = 'Начать обучение · ' + n.cost_credits;
+  go.addEventListener('click', function() {
+    go.disabled = true;
+    supabase.rpc('start_hero_training', {
+      p_unit_id: treeUnit.id,
+      p_ability_id: n.ability_id
+    }).then(function(r) {
+      go.disabled = false;
+      if (r.error) { alert('Не вышло: ' + r.error.message); return; }
+      closeHeroTree();
+      selectedUnit = null;
+      hidePickup();
+      loadUnits();
+    });
+  });
+  info.appendChild(go);
+}
+
+// ===== панорамирование и масштаб полотна =====
+
+function clampTreePan() {
+  var vp = document.getElementById('tree-viewport');
+  var world = document.getElementById('tree-world');
+  var w = world.offsetWidth * treePan.scale;
+  var h = world.offsetHeight * treePan.scale;
+
+  // Если полотно уже влезает — держим по центру, иначе не даём уехать за край
+  if (w <= vp.clientWidth) treePan.x = (vp.clientWidth - w) / 2;
+  else treePan.x = Math.min(0, Math.max(vp.clientWidth - w, treePan.x));
+
+  if (h <= vp.clientHeight) treePan.y = (vp.clientHeight - h) / 2;
+  else treePan.y = Math.min(0, Math.max(vp.clientHeight - h, treePan.y));
+}
+
+function applyTreePan() {
+  var world = document.getElementById('tree-world');
+  world.style.transform = 'translate(' + treePan.x + 'px,' + treePan.y + 'px) ' +
+                          'scale(' + treePan.scale + ')';
+}
+
+function initTreeGestures() {
+  var vp = document.getElementById('tree-viewport');
+  var drag = null, pinch = null, moved = 0;
+
+  var dist = function(t) {
+    var dx = t[0].clientX - t[1].clientX, dy = t[0].clientY - t[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  };
+  var mid = function(t) {
+    return { x: (t[0].clientX + t[1].clientX) / 2,
+             y: (t[0].clientY + t[1].clientY) / 2 };
+  };
+
+  vp.addEventListener('touchstart', function(e) {
+    if (e.touches.length === 2) {
+      var m = mid(e.touches), r = vp.getBoundingClientRect();
+      pinch = { d: dist(e.touches), scale: treePan.scale,
+                ax: m.x - r.left, ay: m.y - r.top,
+                wx: (m.x - r.left - treePan.x) / treePan.scale,
+                wy: (m.y - r.top - treePan.y) / treePan.scale };
+      drag = null;
+    } else if (e.touches.length === 1) {
+      drag = { x: e.touches[0].clientX - treePan.x,
+               y: e.touches[0].clientY - treePan.y };
+      pinch = null;
+      moved = 0;
+    }
+  }, { passive: true });
+
+  vp.addEventListener('touchmove', function(e) {
+    if (pinch && e.touches.length === 2) {
+      var k = dist(e.touches) / (pinch.d || 1);
+      treePan.scale = Math.max(0.45, Math.min(1.6, pinch.scale * k));
+      // Тянем к пальцам: точка под пинчем остаётся на месте
+      treePan.x = pinch.ax - pinch.wx * treePan.scale;
+      treePan.y = pinch.ay - pinch.wy * treePan.scale;
+      clampTreePan();
+      applyTreePan();
+      e.preventDefault();
+    } else if (drag && e.touches.length === 1) {
+      var nx = e.touches[0].clientX - drag.x;
+      var ny = e.touches[0].clientY - drag.y;
+      moved += Math.abs(nx - treePan.x) + Math.abs(ny - treePan.y);
+      treePan.x = nx; treePan.y = ny;
+      clampTreePan();
+      applyTreePan();
+      if (moved > 8) e.preventDefault();
+    }
+  }, { passive: false });
+
+  vp.addEventListener('touchend', function(e) {
+    if (e.touches.length === 0) { drag = null; pinch = null; }
+  }, { passive: true });
+
+  document.getElementById('tree-close')
+    .addEventListener('click', closeHeroTree);
 }
