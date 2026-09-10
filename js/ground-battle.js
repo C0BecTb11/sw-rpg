@@ -2469,6 +2469,16 @@ function drawUnits() {
     ctx.lineWidth = 2;
     ctx.strokeRect(px + inset, py + inset, boxW, boxH);
 
+    // Подчинённый чужой воле: рамка обведена вторым контуром,
+    // чтобы своих временных бойцов было видно с одного взгляда
+    if (u.control_until) {
+      ctx.strokeStyle = '#a34ad9';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 3]);
+      ctx.strokeRect(px + inset - 3, py + inset - 3, boxW + 6, boxH + 6);
+      ctx.setLineDash([]);
+    }
+
     // Сколько десанта в транспорте — цифрой прямо на карте
     if (mine && type && type.carry_slots > 0 && u.passengers) {
       ctx.fillStyle = '#d9a940';
@@ -2590,6 +2600,13 @@ function showPickup(unit, ships, carriers, inside, boardable, ap, liftCarriers) 
     : (type.carry_slots > 0 ? 'Пехота / Поддержка' : 'Пехота');
 
   if (isHero) role = type.name || 'Одарённый';
+
+  // Временно наш: показываем, сколько осталось до возврата хозяину
+  if (unit.control_until) {
+    var left = Math.max(0, Math.round(
+      (new Date(unit.control_until).getTime() - Date.now()) / 1000));
+    role = 'Подчинён · ' + formatLeft(left);
+  }
 
   bar.innerHTML =
     '<div class="gu-top">' +
