@@ -2838,7 +2838,9 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
             '<div class="gu-abil-name">' + a.name + '</div>' +
             '<div class="gu-abil-text">' + (a.description || '') + '</div>' +
             '<div class="gu-abil-meta">' +
-              (a.target_mode === 'ally' ? 'на своего' : 'на врага') +
+              (a.target_mode === 'ally' ? 'на своего'
+               : a.target_mode === 'self' ? 'вокруг себя'
+               : a.target_mode === 'area' ? 'по площади' : 'на врага') +
               ' · до ' + a.range_cells + ' кл · откат ' +
               Math.round(a.cooldown_seconds / 60) + ' мин</div>' +
             (a.implemented ? '' :
@@ -2847,9 +2849,10 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
               '<div class="gu-abil-meta warn">не готова: ' +
                 formatLeft(a.seconds_left) + '</div>');
 
-          guAbilityAction(info, 'Выбрать цель', usable, function() {
-            startHeroAbility(unit, a);
-          });
+          guAbilityAction(info,
+            a.target_mode === 'self' ? 'Применить'
+            : a.target_mode === 'area' ? 'Выбрать клетку' : 'Выбрать цель',
+            usable, function() { startHeroAbility(unit, a); });
         }, a.icon);
       });
     });
@@ -4098,6 +4101,31 @@ function startHeroAbility(unit, a) {
   areaPreview = null;
   hidePickup();
 
+  // Купол накрывает своих вокруг героя — целиться некуда
+  if (a.target_mode === 'self') {
+    heroAbility = null;
+    supabase.rpc('use_hero_ability', {
+      p_unit_id: unit.id, p_ability_id: a.ability_id
+    }).then(function(r) {
+      if (r.error) { alert(r.error.message); return; }
+      var res = (r.data && r.data.length) ? r.data[0] : null;
+      if (res) alert(res.note);
+      cancelTargeting();
+      selectedUnit = null;
+      loadUnits();
+    });
+    return;
+  }
+
+  // Площадная: бьём по клетке, а не по юниту
+  if (a.target_mode === 'area') {
+    groundTargets = [];
+    showTargetHint(a.name, 'ткни в клетку — накроет радиус ' +
+                   (a.range_cells) + ' от тебя', cancelTargeting);
+    redrawScene();
+    return;
+  }
+
   if (a.target_mode === 'ally') {
     // Свои раненые в радиусе. Сервер всё равно перепроверит,
     // здесь только подсветка, чтобы не тыкать вслепую.
@@ -4148,6 +4176,21 @@ function heroGapTo(a, b) {
 function handleHeroAbilityTap(cellX, cellY) {
   var a = heroAbility.ability;
   var unit = heroAbility.unit;
+
+  if (a.target_mode === 'area') {
+    supabase.rpc('use_hero_ability', {
+      p_unit_id: unit.id, p_ability_id: a.ability_id,
+      p_x: cellX, p_y: cellY
+    }).then(function(r) {
+      if (r.error) { alert(r.error.message); return; }
+      var res = (r.data && r.data.length) ? r.data[0] : null;
+      if (res) alert(res.note);
+      cancelTargeting();
+      selectedUnit = null;
+      loadUnits();
+    });
+    return;
+  }
 
   var pick = null;
   for (var i = 0; i < groundTargets.length; i++) {
