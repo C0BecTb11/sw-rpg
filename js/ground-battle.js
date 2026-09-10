@@ -1044,6 +1044,11 @@ function handleTap(clientX, clientY) {
     return;
   }
 
+  if (heroAbility) {
+    handleHeroAbilityTap(cellX, cellY);
+    return;
+  }
+
   if (upgradeAbility) {
     handleUpgradeAbilityTap(cellX, cellY);
     return;
@@ -2820,6 +2825,36 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
     });
   });
 
+  // Боевые способности из древа: приходят с сервера вместе с откатом
+  if (unit.hero_id) {
+    supabase.rpc('get_hero_ability_list', { p_unit_id: unit.id }).then(function(res) {
+      if (!selectedUnit || selectedUnit.id !== unit.id || guTab !== 'abilities') return;
+
+      (res.error ? [] : (res.data || [])).forEach(function(a) {
+        var usable = a.implemented && a.ready && canAct;
+
+        addTile(a.ability_id, null, a.name, usable, function() {
+          info.innerHTML =
+            '<div class="gu-abil-name">' + a.name + '</div>' +
+            '<div class="gu-abil-text">' + (a.description || '') + '</div>' +
+            '<div class="gu-abil-meta">' +
+              (a.target_mode === 'ally' ? 'на своего' : 'на врага') +
+              ' · до ' + a.range_cells + ' кл · откат ' +
+              Math.round(a.cooldown_seconds / 60) + ' мин</div>' +
+            (a.implemented ? '' :
+              '<div class="gu-abil-meta warn">пока не действует в бою</div>') +
+            (a.ready || !a.implemented ? '' :
+              '<div class="gu-abil-meta warn">не готова: ' +
+                formatLeft(a.seconds_left) + '</div>');
+
+          guAbilityAction(info, 'Выбрать цель', usable, function() {
+            startHeroAbility(unit, a);
+          });
+        }, a.icon);
+      });
+    });
+  }
+
   // Погрузка и посадка остаются списком снизу: это не способности,
   // а перемещение между техникой и кораблями
   var rows = document.getElementById('gu-rows');
@@ -3184,6 +3219,7 @@ function showTargetHint(title, note, onCancel) {
 }
 
 function cancelTargeting() {
+  heroAbility = null;
   upgradeAbility = null;
   areaPreview = null;
   twinFirst = null;
@@ -4045,4 +4081,101 @@ function initTreeGestures() {
 
   document.getElementById('tree-close')
     .addEventListener('click', closeHeroTree);
+}
+
+// ===== Боевые способности одарённого =====
+// Наведение устроено как у остальных способностей: подсвеченные цели
+// плюс подсказка снизу. Разница в том, что цель бывает и своя —
+// лечение наводится на союзника, поэтому список целей собираем сами.
+
+var heroAbility = null;
+
+function startHeroAbility(unit, a) {
+  heroAbility = { unit: unit, ability: a };
+  upgradeAbility = null;
+  attackingUnit = null;
+  abilityUnit = null;
+  areaPreview = null;
+  hidePickup();
+
+  if (a.target_mode === 'ally') {
+    // Свои раненые в радиусе. Сервер всё равно перепроверит,
+    // здесь только подсветка, чтобы не тыкать вслепую.
+    groundTargets = [];
+    unitsOnMap.forEach(function(u) {
+      if (u.id === unit.id) return;
+      if (u.x === null || u.x === undefined) return;
+      if (u.owner_user_id !== currentUserId) return;
+
+      var t = unitTypeById[u.unit_type] || {};
+      if (u.hp >= (t.max_hp || 0) + (u.bonus_hp || 0)) return;
+      if (heroGapTo(unit, u) > a.range_cells) return;
+
+      groundTargets.push({ target_id: u.id, name: t.name, x: u.x, y: u.y,
+                           hp: u.hp, unit_type: u.unit_type });
+    });
+
+    showTargetHint(a.name, groundTargets.length
+      ? 'раненых рядом: ' + groundTargets.length
+      : 'рядом все целы', cancelTargeting);
+    redrawScene();
+    return;
+  }
+
+  supabase.rpc('get_ground_targets', { p_unit_id: unit.id }).then(function(res) {
+    var all = (!res.error && res.data) ? res.data : [];
+
+    // Обычная атака бьёт на дальность оружия, а у способности своя
+    groundTargets = all.filter(function(t) {
+      return t.gap === null || t.gap === undefined || t.gap <= a.range_cells;
+    });
+
+    showTargetHint(a.name, groundTargets.length
+      ? 'целей в радиусе: ' + groundTargets.length
+      : 'целей в радиусе нет', cancelTargeting);
+    redrawScene();
+  });
+}
+
+// Зазор между корпусами двух юнитов — то же правило, что на сервере
+function heroGapTo(a, b) {
+  var ba = unitBox(a), bb = unitBox(b);
+  var gx = Math.max(b.x - (a.x + ba.w - 1), a.x - (b.x + bb.w - 1), 0);
+  var gy = Math.max(b.y - (a.y + ba.h - 1), a.y - (b.y + bb.h - 1), 0);
+  return Math.max(gx, gy);
+}
+
+function handleHeroAbilityTap(cellX, cellY) {
+  var a = heroAbility.ability;
+  var unit = heroAbility.unit;
+
+  var pick = null;
+  for (var i = 0; i < groundTargets.length; i++) {
+    var t = groundTargets[i];
+    var b = unitTypeById[t.unit_type] || {};
+    var w = b.width_cells || 1, h = b.height_cells || 1;
+    if (cellX >= t.x && cellX < t.x + w && cellY >= t.y && cellY < t.y + h) {
+      pick = t; break;
+    }
+  }
+
+  if (!pick) { alert('Эта цель недоступна'); return; }
+
+  supabase.rpc('use_hero_ability', {
+    p_unit_id: unit.id,
+    p_ability_id: a.ability_id,
+    p_target_id: pick.target_id
+  }).then(function(r) {
+    if (r.error) { alert(r.error.message); return; }
+
+    var res = (r.data && r.data.length) ? r.data[0] : null;
+    if (res) {
+      alert(res.note + (res.damage ? ' · урон ' + res.damage : '') +
+            (res.killed ? ' · цель уничтожена' : ''));
+    }
+
+    cancelTargeting();
+    selectedUnit = null;
+    loadUnits();
+  });
 }
