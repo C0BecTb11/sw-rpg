@@ -1484,6 +1484,10 @@ function openBuildPanel(slotIndex) {
   var list = document.getElementById('build-panel-list');
   list.innerHTML = '';
 
+  // Запас планеты обновляем при каждом открытии: решение, что строить,
+  // принимается именно здесь, и цифры должны быть свежими
+  loadPlanetStock(function() { renderStockStrip(slotIndex); });
+
   // Показываем только постройки своей фракции и только наземные —
   // космическая станция ставится на орбитальной карте.
   var available = buildingTypes.filter(function(t) {
@@ -1531,11 +1535,36 @@ function openBuildPanel(slotIndex) {
     var costEl = document.createElement('div');
     costEl.className = 'build-panel-cost';
     costEl.textContent = type.cost + ' кр.';
+
+    // Что постройка даёт планете
+    if (type.produces_resource) {
+      var rate = stockRateFor(type);
+      costEl.textContent += ' · ' + resourceName(type.produces_resource) +
+                            ' ' + rate + ' в сутки';
+    } else if (type.storage_bonus > 0) {
+      costEl.textContent += ' · запас +' + type.storage_bonus;
+    }
     info.appendChild(costEl);
 
     item.appendChild(info);
 
+    // Добывающую нельзя ставить там, где сырья нет. Сервер это отобьёт,
+    // но честнее сказать заранее, чем после нажатия.
+    var blocked = type.needs_local_resource && !planetHasResource(type.produces_resource);
+
+    if (blocked) {
+      item.classList.add('blocked');
+      var why = document.createElement('div');
+      why.className = 'build-panel-why';
+      why.textContent = 'На этой планете нет такого сырья';
+      info.appendChild(why);
+    }
+
     item.addEventListener('click', function() {
+      if (blocked) {
+        alert('На этой планете нет такого сырья');
+        return;
+      }
       constructBuilding(slotIndex, type.id);
     });
     list.appendChild(item);
@@ -4238,4 +4267,88 @@ function handleHeroAbilityTap(cellX, cellY) {
     selectedUnit = null;
     loadUnits();
   });
+}
+
+// ===== Запас планеты =====
+// Ресурсы лежат на планете, а не в кошельке, поэтому показываем их там,
+// где принимается решение — прямо в панели строительства.
+
+var planetStock = [];
+
+function loadPlanetStock(done) {
+  supabase.rpc('get_planet_stock', { p_system_id: systemId }).then(function(res) {
+    planetStock = (res.error || !res.data) ? [] : res.data;
+    if (done) done();
+  });
+}
+
+function stockRow(resourceId) {
+  for (var i = 0; i < planetStock.length; i++) {
+    if (planetStock[i].resource === resourceId) return planetStock[i];
+  }
+  return null;
+}
+
+function resourceName(resourceId) {
+  var r = stockRow(resourceId);
+  return r ? r.name : resourceId;
+}
+
+// Есть ли на планете это сырьё — основное или попутное
+function planetHasResource(resourceId) {
+  var r = stockRow(resourceId);
+  return !!r && (r.is_primary || r.is_secondary);
+}
+
+// Попутное сырьё добывается вдвое медленнее — то же правило, что на сервере
+function stockRateFor(type) {
+  var r = stockRow(type.produces_resource);
+  if (r && r.is_secondary && !r.is_primary) return Math.floor(type.produces_per_day / 2);
+  return type.produces_per_day;
+}
+
+function renderStockStrip(slotIndex) {
+  var box = document.getElementById('build-panel-box');
+  var old = document.getElementById('stock-strip');
+  if (old) old.remove();
+
+  if (!planetStock.length) return;
+
+  var strip = document.createElement('div');
+  strip.id = 'stock-strip';
+
+  var cap = planetStock[0].cap;
+  strip.innerHTML = '<div class="stock-head">Запас планеты · предел ' + cap + '</div>';
+
+  var row = document.createElement('div');
+  row.className = 'stock-row';
+
+  planetStock.forEach(function(r) {
+    // Чего на планете нет и не производится — не засоряем строку
+    if (!r.amount && !r.per_day && !r.is_primary && !r.is_secondary) return;
+
+    var cell = document.createElement('div');
+    cell.className = 'stock-cell';
+
+    if (r.is_primary) cell.classList.add('primary');
+    else if (r.is_secondary) cell.classList.add('secondary');
+
+    if (r.cap && r.amount >= r.cap) cell.classList.add('full');
+
+    cell.innerHTML =
+      '<span class="stock-name">' + r.name + '</span>' +
+      '<span class="stock-val">' + r.amount + '</span>' +
+      '<span class="stock-rate">' +
+        (r.per_day ? '+' + r.per_day + ' в сутки'
+         : r.is_primary ? 'нужна добыча'
+         : r.is_secondary ? 'попутное' : '') +
+      '</span>';
+
+    row.appendChild(cell);
+  });
+
+  strip.appendChild(row);
+
+  var title = box.querySelector('.build-panel-title');
+  box.insertBefore(strip, title ? title.nextSibling : box.firstChild);
 }

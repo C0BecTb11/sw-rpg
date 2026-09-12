@@ -707,3 +707,54 @@ html, body {
 }
 
 .rp-go:disabled { opacity: 0.5; }
+
+/* ===== Запас планеты в панели строительства ===== */
+
+#stock-strip {
+  margin: 0 0 12px;
+  padding: 10px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 9px;
+}
+
+.stock-head {
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #55606c;
+  margin-bottom: 8px;
+}
+
+.stock-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.stock-cell {
+  flex: 1 1 30%;
+  min-width: 92px;
+  padding: 7px 8px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Основное сырьё планеты выделено, попутное приглушено */
+.stock-cell.primary { border-color: #4a90d9; }
+.stock-cell.secondary { border-color: #2a3644; }
+
+/* Склад полон — добыча уходит впустую */
+.stock-cell.full { border-color: #d94a4a; }
+.stock-cell.full .stock-val { color: #d94a4a; }
+
+.stock-name { font-size: 9px; color: #8fa8c4; }
+.stock-val { font-size: 14px; color: #cfd8dc; }
+.stock-rate { font-size: 9px; color: #55606c; }
+
+/* Постройка, которую здесь поставить нельзя */
+.build-panel-item.blocked { opacity: 0.45; }
+.build-panel-why { margin-top: 4px; font-size: 10px; color: #d94a4a; }
