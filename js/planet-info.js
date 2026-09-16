@@ -39,7 +39,8 @@ function openPlanetInfo(systemId) {
       supabase.from('system_control').select('controller_user_id').eq('system_id', systemId).maybeSingle(),
       supabase.rpc('get_system_buildings', { p_system_id: systemId }),
       supabase.from('space_stations').select('id').eq('system_id', systemId).maybeSingle(),
-      supabase.rpc('get_my_profile')
+      supabase.rpc('get_my_profile'),
+      supabase.rpc('get_system_resources', { p_system_id: systemId })
     ]).then(function(r) {
       var sys = r[0].data;
       if (r[0].error || !sys) {
@@ -51,6 +52,7 @@ function openPlanetInfo(systemId) {
       var buildings = r[2].error ? [] : (r[2].data || []);
       var station = r[3].error ? null : r[3].data;
       var myFaction = (!r[4].error && r[4].data && r[4].data.length) ? r[4].data[0].faction : null;
+      var sysResources = r[5].error ? [] : (r[5].data || []);
 
       var accent = FACTION_COLORS_INFO[sys.faction] || '#8fa8c4';
 
@@ -102,6 +104,20 @@ function openPlanetInfo(systemId) {
       var sameFaction = myFaction && sys.faction === myFaction;
       var stats = document.getElementById('pi-stats');
       stats.innerHTML = '';
+
+      // Что залегает на планете — знание общедоступное и показывается
+      // по любой системе: без него карта не читается стратегически.
+      // Сам запас при этом виден только владельцу планеты.
+      if (sysResources.length) {
+        sysResources.forEach(function(res) {
+          stats.appendChild(makePiStat(
+            res.role === 'primary' ? 'Основное сырьё' : 'Попутное сырьё',
+            res.name));
+        });
+      } else {
+        stats.appendChild(makePiStat('Сырьё', 'нет залежей'));
+      }
+
       if (sameFaction) {
         stats.appendChild(makePiStat('Постройки', buildings.length + ' / 7'));
         stats.appendChild(makePiStat('Орбитальная станция', station ? 'есть' : 'нет'));

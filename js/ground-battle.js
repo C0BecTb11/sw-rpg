@@ -1539,8 +1539,10 @@ function openBuildPanel(slotIndex) {
     // Что постройка даёт планете
     if (type.produces_resource) {
       var rate = stockRateFor(type);
-      costEl.textContent += ' · ' + resourceName(type.produces_resource) +
-                            ' ' + rate + ' в сутки';
+      var eats = consumesText(type.consumes);
+      costEl.textContent += eats
+        ? ' · ' + eats + ' → ' + resourceName(type.produces_resource) + ' ' + rate
+        : ' · ' + resourceName(type.produces_resource) + ' ' + rate + ' в сутки';
     } else if (type.storage_bonus > 0) {
       costEl.textContent += ' · запас +' + type.storage_bonus;
     }
@@ -4298,6 +4300,17 @@ function resourceName(resourceId) {
 function planetHasResource(resourceId) {
   var r = stockRow(resourceId);
   return !!r && (r.is_primary || r.is_secondary);
+}
+
+// Что цех потребляет за сутки: {"ore":60} превращается в «60 руды»
+function consumesText(consumes) {
+  if (!consumes) return '';
+  var parts = [];
+  for (var key in consumes) {
+    if (!Object.prototype.hasOwnProperty.call(consumes, key)) continue;
+    parts.push(consumes[key] + ' ' + resourceName(key).toLowerCase());
+  }
+  return parts.join(' + ');
 }
 
 // Попутное сырьё добывается вдвое медленнее — то же правило, что на сервере
