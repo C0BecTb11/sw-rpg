@@ -4942,11 +4942,92 @@ function loadIntel(building, box) {
           '<div class="intel-eta">' + formatLeft(t.seconds_left) + '</div>';
 
         box.appendChild(row);
+
+        // Выйти наперехват можно только с конца того же пути: прыжок идёт
+        // по прямой, из другого угла карты не дотянуться
+        var reachable = t.lane_system &&
+          (t.from_system === building.system_id || t.to_system === building.system_id);
+
+        if (reachable) {
+          var go = document.createElement('button');
+          go.className = 'intel-go';
+          go.textContent = 'Выйти на перехват';
+          go.addEventListener('click', function() {
+            go.disabled = true;
+            showInterceptChoice(building, t, box, go);
+          });
+          box.appendChild(go);
+        }
       });
 
       var note = document.createElement('div');
       note.className = 'intel-note';
       note.textContent = 'Сводка охватывает пути через эту систему и соседние.';
       box.appendChild(note);
+    });
+}
+
+// Выбор командира для перехвата. Отдельным списком под строкой сводки:
+// важно видеть, сколько кораблей у каждого уже стоит в зоне прыжка.
+function showInterceptChoice(building, transit, box, btn) {
+  var old = document.getElementById('intercept-choice');
+  if (old) old.remove();
+
+  supabase.rpc('get_my_commanders_at', { p_system_id: building.system_id })
+    .then(function(res) {
+      btn.disabled = false;
+
+      var wrap = document.createElement('div');
+      wrap.id = 'intercept-choice';
+      wrap.className = 'intel-choice';
+
+      var free = (res.error ? [] : (res.data || [])).filter(function(c) {
+        return !c.busy && c.ships > 0;
+      });
+
+      if (!free.length) {
+        wrap.innerHTML = '<div class="intel-empty">Свободных командиров с флотом ' +
+                         'на этой планете нет</div>';
+        box.insertBefore(wrap, btn.nextSibling);
+        return;
+      }
+
+      wrap.innerHTML = '<div class="intel-choice-head">Кого отправить</div>';
+
+      free.forEach(function(c) {
+        var row = document.createElement('div');
+        row.className = 'intel-cmd';
+
+        var ok = c.ready === c.ships;
+        row.innerHTML =
+          '<div class="intel-info">' +
+            '<div class="intel-route">' + escHtml(c.name || 'Без имени') + '</div>' +
+            '<div class="intel-sub' + (ok ? '' : ' warn') + '">' +
+              'в зоне прыжка ' + c.ready + ' из ' + c.ships + '</div>' +
+          '</div>';
+
+        var send = document.createElement('button');
+        send.className = 'intel-go small';
+        send.textContent = 'Вперёд';
+        send.addEventListener('click', function() {
+          send.disabled = true;
+          supabase.rpc('start_interception', {
+            p_commander_id: c.commander_id,
+            p_target_commander: transit.commander_id
+          }).then(function(r2) {
+            send.disabled = false;
+            if (r2.error) { alert(r2.error.message); return; }
+            alert('Флот вышел на перехват. Встреча в пустоте на пути ' +
+                  transit.from_name + ' — ' + transit.to_name + '.');
+            wrap.remove();
+            loadIntel(building, box);
+          });
+        });
+
+        row.appendChild(send);
+        wrap.appendChild(row);
+      });
+
+      box.insertBefore(wrap, btn.nextSibling);
     });
 }

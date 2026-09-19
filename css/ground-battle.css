@@ -998,3 +998,46 @@ html, body {
   font-size: 10px;
   color: #55606c;
 }
+
+/* Перехват: кнопка и выбор командира */
+.intel-go {
+  display: block;
+  width: 100%;
+  margin-top: 9px;
+  padding: 10px;
+  background: #d94a4a;
+  border: none;
+  border-radius: 7px;
+  color: #0a0d14;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.intel-go.small { width: auto; margin: 0; padding: 8px 12px; font-size: 10px; }
+.intel-go:disabled { opacity: 0.5; }
+
+.intel-choice {
+  margin-top: 9px;
+  padding: 9px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 7px;
+}
+
+.intel-choice-head {
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #8fa8c4;
+  margin-bottom: 7px;
+}
+
+.intel-cmd {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 0;
+}
+
+/* Не весь флот в полосе — прыжок не состоится, сервер откажет */
+.intel-sub.warn { color: #d9a940; }
