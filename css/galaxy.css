@@ -1053,3 +1053,20 @@ body {
   padding: 12px 14px 16px;
   -webkit-overflow-scrolling: touch;
 }
+
+/* ===== Ресурсы в трюме ===== */
+
+.cargo-section {
+  margin: 14px 0 6px;
+  padding-bottom: 6px;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #d9a940;
+  border-bottom: 1px solid #1c2530;
+}
+
+/* У ресурса нет картинки, поэтому строка идёт без миниатюры
+   и отмечена цветной кромкой слева */
+.cargo-row.cargo-resource { border-left: 3px solid #4a90d9; }
+
+.cargo-resource .cargo-qty-value { min-width: 38px; }

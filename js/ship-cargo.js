@@ -53,15 +53,37 @@ function renderLoadable() {
       list.innerHTML = '<div class="cargo-empty">' + res.error.message + '</div>';
       return;
     }
+    // Войск может не быть, а склад при этом полон — ресурсы показываем всё равно
     if (!res.data || res.data.length === 0) {
       list.innerHTML = '<div class="cargo-empty">В зоне высадки этой планеты нет твоих войск</div>';
+      renderLoadableResources(list);
       return;
     }
     list.innerHTML = '';
     res.data.forEach(function(row) {
       list.appendChild(makeShipCargoRow(row, row.available, 'Погрузить', row.slot_size));
     });
+    renderLoadableResources(list);
   });
+}
+
+// Склад планеты, над которой стоит корабль. Сервер отдаёт запас только
+// тому, кто держит планету, поэтому чужой склад сюда просто не придёт.
+function renderLoadableResources(list) {
+  if (!cargoShip || !cargoShip.system_id) return;
+
+  supabase.rpc('get_planet_stock', { p_system_id: cargoShip.system_id })
+    .then(function(res) {
+      if (res.error || !res.data) return;
+
+      var rows = res.data.filter(function(r) { return r.amount > 0; });
+      if (!rows.length) return;
+
+      list.appendChild(makeCargoSection('Склад планеты'));
+      rows.forEach(function(r) {
+        list.appendChild(makeResourceCargoRow(r.resource, r.name, r.amount, 'Погрузить'));
+      });
+    });
 }
 
 function renderCargo() {
@@ -70,7 +92,8 @@ function renderCargo() {
   // пассажиров. Собираем обе части одной функцией.
   Promise.all([
     supabase.rpc('get_ship_holds'),
-    supabase.rpc('get_carried_units', { p_carrier_unit_id: null, p_ship_id: cargoShip.id })
+    supabase.rpc('get_carried_units', { p_carrier_unit_id: null, p_ship_id: cargoShip.id }),
+    supabase.rpc('get_ship_resource_cargo', { p_ship_id: cargoShip.id })
   ]).then(function(r) {
     var list = document.getElementById('shipcargo-list');
 
@@ -78,7 +101,9 @@ function renderCargo() {
     var mine = holds.filter(function(h) { return h.ship_id === cargoShip.id; });
     var vehicles = (!r[1].error && r[1].data) ? r[1].data : [];
 
-    if (!mine.length && !vehicles.length) {
+    var cargoRes = (!r[2].error && r[2].data) ? r[2].data : [];
+
+    if (!mine.length && !vehicles.length && !cargoRes.length) {
       list.innerHTML = '<div class="cargo-empty">Трюм пуст</div>';
       return;
     }
@@ -95,7 +120,100 @@ function renderCargo() {
         unit_type: h.unit_type, name: h.unit_name, image: h.unit_image
       }, h.quantity, 'Высадить', h.slots / Math.max(1, h.quantity)));
     });
+
+    if (cargoRes.length) {
+      list.appendChild(makeCargoSection('Груз'));
+      cargoRes.forEach(function(c) {
+        list.appendChild(makeResourceCargoRow(c.resource, c.name, c.amount, 'Выгрузить'));
+      });
+    }
   });
+}
+
+function makeCargoSection(title) {
+  var head = document.createElement('div');
+  head.className = 'cargo-section';
+  head.textContent = title;
+  return head;
+}
+
+// Ресурс считается десятками, поэтому шаг у счётчика крупнее, чем у войск,
+// и есть кнопка «всё» — иначе набирать сотню рудой по единице невозможно.
+function makeResourceCargoRow(resourceId, label, available, actionLabel) {
+  var row = document.createElement('div');
+  row.className = 'cargo-row cargo-resource';
+
+  var info = document.createElement('div');
+  info.className = 'cargo-info';
+
+  var name = document.createElement('div');
+  name.className = 'cargo-name';
+  name.textContent = label;
+  info.appendChild(name);
+
+  var avail = document.createElement('div');
+  avail.className = 'cargo-available';
+  avail.textContent = 'Доступно: ' + available + ' · 2 единицы на слот';
+  info.appendChild(avail);
+
+  var controls = document.createElement('div');
+  controls.className = 'cargo-controls';
+
+  var qty = document.createElement('div');
+  qty.className = 'cargo-qty';
+
+  var minus = document.createElement('button');
+  minus.className = 'cargo-qty-btn';
+  minus.textContent = '−';
+
+  var val = document.createElement('span');
+  val.className = 'cargo-qty-value';
+  val.textContent = Math.min(10, available);
+
+  var plus = document.createElement('button');
+  plus.className = 'cargo-qty-btn';
+  plus.textContent = '+';
+
+  var all = document.createElement('button');
+  all.className = 'cargo-qty-btn';
+  all.textContent = 'всё';
+
+  minus.addEventListener('click', function() {
+    val.textContent = Math.max(1, parseInt(val.textContent, 10) - 10);
+  });
+  plus.addEventListener('click', function() {
+    val.textContent = Math.min(available, parseInt(val.textContent, 10) + 10);
+  });
+  all.addEventListener('click', function() {
+    val.textContent = available;
+  });
+
+  qty.appendChild(minus); qty.appendChild(val); qty.appendChild(plus); qty.appendChild(all);
+  controls.appendChild(qty);
+
+  var act = document.createElement('button');
+  act.className = 'cargo-action';
+  act.textContent = actionLabel;
+  act.addEventListener('click', function() {
+    var n = parseInt(val.textContent, 10);
+    act.disabled = true;
+
+    var fn = cargoTab === 'load' ? 'load_resource_to_ship' : 'unload_resource_from_ship';
+    supabase.rpc(fn, {
+      p_ship_id: cargoShip.id,
+      p_resource: resourceId,
+      p_amount: n
+    }).then(function(res) {
+      act.disabled = false;
+      if (res.error) { alert(res.error.message); return; }
+      setCargoTab(cargoTab);
+    });
+  });
+  controls.appendChild(act);
+
+  info.appendChild(controls);
+  row.appendChild(info);
+  return row;
 }
 
 // У техники нет счётчика: каждая машина отдельная, со своей прочностью
