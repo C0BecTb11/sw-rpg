@@ -14,6 +14,13 @@ var FACTION_COLORS = {
 
 var OWN_COMMANDER_COLOR = '#5fd968';  // зелёный — свой командир
 var ALLY_COMMANDER_COLOR = '#4a90d9'; // синий — союзный командир
+var ENEMY_COMMANDER_COLOR = '#d94a4a'; // красный — вражеский, виден только разведке
+
+// Чужие командиры не приходят вместе со своими: их показывает разведка,
+// и только там, где стоит наш разведчик. Держим отдельно, чтобы случайно
+// не подмешать в общий список и не выдать больше, чем игрок заслужил.
+var scoutedEnemies = {};
+var lastCommanders = null;
 
 var currentUserId = null;
 var currentUserFaction = null;
@@ -267,7 +274,9 @@ function initPlanets() {
         renderRotatingPlanet(canvas, tex, planet.radius, planet.speed);
       });
 
+      lastCommanders = commanders;
       renderCommanderMarkers(commanders);
+      loadScoutedEnemies();
       syncServerTime(function() {
         renderFlights(commanders);
       });
@@ -346,6 +355,32 @@ function renderCommanderMarkers(commanders) {
       els.markerBoxEl.appendChild(makeCommanderMarker(counts.ally, ALLY_COMMANDER_COLOR));
     }
   });
+
+  // Разведанные чужие — поверх, чтобы бросались в глаза
+  Object.keys(scoutedEnemies).forEach(function(systemId) {
+    var els = planetElements[systemId];
+    if (!els) return;
+
+    var info = scoutedEnemies[systemId];
+    var marker = makeCommanderMarker(info.enemies, ENEMY_COMMANDER_COLOR);
+    marker.title = 'Разведка: ' + info.names;
+    els.markerBoxEl.appendChild(marker);
+  });
+}
+
+// Разведданные обновляем отдельно: они меняются реже своих фишек
+// и требуют разведчика на месте, а не просто открытой карты.
+function loadScoutedEnemies() {
+  supabase.rpc('get_scouted_commanders_map').then(function(res) {
+    scoutedEnemies = {};
+    (res.error ? [] : (res.data || [])).forEach(function(row) {
+      scoutedEnemies[row.system_id] = { enemies: row.enemies, names: row.names };
+    });
+
+    if (typeof lastCommanders !== 'undefined' && lastCommanders) {
+      renderCommanderMarkers(lastCommanders);
+    }
+  });
 }
 
 function makeCommanderMarker(count, color) {
@@ -409,7 +444,9 @@ function subscribeToCommanderChanges() {
       if (!currentUserFaction) return;
       supabase.from('commanders').select('*').eq('unlocked', true).eq('faction', currentUserFaction).then(function(res) {
         if (res.error) return;
+        lastCommanders = res.data;
         renderCommanderMarkers(res.data);
+        loadScoutedEnemies();
         renderFlights(res.data);
       });
     })
@@ -446,7 +483,9 @@ function reloadCommanders() {
       console.error('Не удалось перечитать командиров:', res.error);
       return;
     }
+    lastCommanders = res.data;
     renderCommanderMarkers(res.data);
+    loadScoutedEnemies();
     renderFlights(res.data);
   });
 }
