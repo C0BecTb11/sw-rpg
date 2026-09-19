@@ -1099,3 +1099,199 @@ body {
 
 /* Попутное сырьё вдвое медленнее — и выглядит вполсилы */
 .pi-chip.weak { opacity: 0.55; }
+
+/* ===== Лента событий ===== */
+
+#feed-bell {
+  position: fixed;
+  right: 14px;
+  bottom: 96px;
+  z-index: 1200;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: #0e131c;
+  border: 1px solid #2a3644;
+  color: #55606c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Есть непрочитанное — колокол оживает, иначе он приглушён */
+#feed-bell.has-unseen { color: #d9a940; border-color: #d9a940; }
+
+#feed-bell-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: #d94a4a;
+  color: #0a0d14;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  font-style: normal;
+  line-height: 18px;
+  text-align: center;
+  display: none;
+}
+
+#feed-bell.has-unseen #feed-bell-count { display: block; }
+
+#feed-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 2300;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(5, 8, 13, 0.75);
+}
+
+#feed-box {
+  width: 100%;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  background: #0d1119;
+  border-top: 1px solid #1c2530;
+  border-radius: 14px 14px 0 0;
+}
+
+#feed-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 14px;
+  border-bottom: 1px solid #1c2530;
+}
+
+#feed-title { font-size: 12px; letter-spacing: 1px; color: #cfd8dc; }
+
+#feed-close {
+  background: none;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  color: #8fa8c4;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  width: 30px;
+  height: 30px;
+}
+
+#feed-tabs {
+  flex: none;
+  display: flex;
+  gap: 5px;
+  padding: 10px 14px 0;
+}
+
+.feed-tab {
+  flex: 1;
+  position: relative;
+  padding: 9px 2px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 7px;
+  color: #55606c;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+}
+
+.feed-tab.active { border-color: #4a90d9; color: #cfd8dc; }
+
+.feed-badge {
+  position: absolute;
+  top: -5px;
+  right: -3px;
+  min-width: 16px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: #d94a4a;
+  color: #0a0d14;
+  font-size: 9px;
+  font-style: normal;
+  line-height: 16px;
+}
+
+#feed-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 14px 18px;
+}
+
+.feed-empty {
+  font-size: 11px;
+  color: #55606c;
+  text-align: center;
+  padding: 24px 0;
+}
+
+.feed-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0 9px 9px;
+  border-bottom: 1px solid #1c2530;
+  border-left: 3px solid transparent;
+}
+
+.feed-row:last-child { border-bottom: none; }
+
+/* Тон события читается кромкой, без пестроты в тексте */
+.feed-row.tone-bad { border-left-color: #d94a4a; }
+.feed-row.tone-warn { border-left-color: #d9a940; }
+.feed-row.tone-good { border-left-color: #5fd968; }
+.feed-row.tone-neutral { border-left-color: #2a3644; }
+
+/* Непрочитанное чуть ярче, но не кричит */
+.feed-row.fresh { background: rgba(74, 144, 217, 0.06); }
+
+.feed-info { flex: 1; min-width: 0; }
+.feed-title { font-size: 12px; color: #cfd8dc; }
+.feed-line { margin-top: 3px; font-size: 11px; color: #8fa8c4; }
+.feed-meta { margin-top: 3px; font-size: 10px; color: #55606c; }
+.feed-meta.warn { color: #d9a940; }
+
+.feed-go {
+  flex: none;
+  padding: 8px 12px;
+  background: #1c2530;
+  border: 1px solid #2a3644;
+  border-radius: 7px;
+  color: #8fa8c4;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+}
+
+.feed-income {
+  flex: none;
+  font-size: 14px;
+  color: #d9a940;
+}
+
+.feed-income-head {
+  padding: 10px 0 14px;
+  text-align: center;
+  border-bottom: 1px solid #1c2530;
+  margin-bottom: 8px;
+}
+
+.feed-income-head b {
+  display: block;
+  font-size: 22px;
+  color: #d9a940;
+  font-weight: normal;
+}
+
+.feed-income-head span { font-size: 10px; color: #55606c; }
+
+/* Куда перенесла карта — подсвечиваем, иначе непонятно, что изменилось */
+.planet-flash { animation: planetFlash 2.2s ease-out; }
+
+@keyframes planetFlash {
+  0%, 100% { filter: none; }
+  20%, 60% { filter: drop-shadow(0 0 12px #d9a940); }
+}

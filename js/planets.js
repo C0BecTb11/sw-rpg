@@ -567,6 +567,29 @@ function applyGalaxyTransform() {
     'translate(' + galaxyPanX + 'px, ' + galaxyPanY + 'px) scale(' + galaxyScale + ')';
 }
 
+// Перенос карты к системе: нужен ленте событий, чтобы кнопка «показать»
+// приводила туда, где всё случилось.
+function focusGalaxySystem(systemId) {
+  if (!galaxyViewport || !galaxyWorld) return false;
+
+  var el = document.querySelector('.planet-wrapper[data-planet-id="' + systemId + '"]');
+  if (!el) return false;
+
+  // Обёртка сдвинута на половину себя, поэтому её левый край — уже центр
+  var x = el.offsetLeft;
+  var y = el.offsetTop;
+
+  galaxyPanX = galaxyViewport.clientWidth / 2 - x * galaxyScale;
+  galaxyPanY = galaxyViewport.clientHeight / 2 - y * galaxyScale;
+
+  clampGalaxyPan();
+  applyGalaxyTransform();
+
+  el.classList.add('planet-flash');
+  setTimeout(function() { el.classList.remove('planet-flash'); }, 2200);
+  return true;
+}
+
 function clampGalaxyPan() {
   var vw = galaxyViewport.clientWidth;
   var vh = galaxyViewport.clientHeight;
