@@ -1550,6 +1550,17 @@ function openBuildPanel(slotIndex) {
     }
     info.appendChild(costEl);
 
+    // Цена в ресурсах отдельной строкой: её платит склад планеты,
+    // а не кошелёк, и нехватка видна сразу по красному
+    var resCost = consumesText(type.cost_resources);
+    if (resCost) {
+      var rc = document.createElement('div');
+      rc.className = 'build-panel-rescost' +
+                     (canAffordResources(type.cost_resources) ? '' : ' short');
+      rc.textContent = 'Со склада: ' + resCost;
+      info.appendChild(rc);
+    }
+
     item.appendChild(info);
 
     // Добывающую нельзя ставить там, где сырья нет. Сервер это отобьёт,
@@ -1938,6 +1949,8 @@ function loadUnitUpgrades() {
 }
 
 function openUnitPanel(building) {
+  // Запас нужен, чтобы подставить названия ресурсов и подсветить нехватку
+  loadPlanetStock();
   unitPanelBuilding = building;
   var panel = document.getElementById('unit-panel');
   var list = document.getElementById('unit-panel-list');
@@ -2183,6 +2196,16 @@ function buildUnitCard(unit) {
     relay.className = 'unit-card-relay';
     relay.textContent = '⌖ Держит связь: делится обзором с союзниками';
     body.appendChild(relay);
+  }
+
+  // Ресурсы со склада планеты — отдельной строкой перед кнопкой найма
+  var unitRes = consumesText(unit.cost_resources);
+  if (unitRes) {
+    var urc = document.createElement('div');
+    urc.className = 'build-panel-rescost' +
+                    (canAffordResources(unit.cost_resources) ? '' : ' short');
+    urc.textContent = 'Со склада: ' + unitRes;
+    body.appendChild(urc);
   }
 
   var footer = document.createElement('div');
@@ -4329,6 +4352,16 @@ function consumesText(consumes) {
 }
 
 // Попутное сырьё добывается вдвое медленнее — то же правило, что на сервере
+function canAffordResources(cost) {
+  if (!cost) return true;
+  for (var key in cost) {
+    if (!Object.prototype.hasOwnProperty.call(cost, key)) continue;
+    var row = stockRow(key);
+    if (!row || row.amount < cost[key]) return false;
+  }
+  return true;
+}
+
 function stockRateFor(type) {
   var r = stockRow(type.produces_resource);
   if (r && r.is_secondary && !r.is_primary) return Math.floor(type.produces_per_day / 2);

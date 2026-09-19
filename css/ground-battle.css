@@ -923,3 +923,12 @@ html, body {
 
 .logi-state { flex: none; font-size: 10px; color: #4a90d9; text-align: right; }
 .logi-state.bad { color: #d94a4a; }
+
+/* Цена в ресурсах: платит склад планеты, а не кошелёк игрока */
+.build-panel-rescost {
+  margin-top: 4px;
+  font-size: 10px;
+  color: #4a90d9;
+}
+
+.build-panel-rescost.short { color: #d94a4a; }
