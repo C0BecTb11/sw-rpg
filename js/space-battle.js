@@ -55,7 +55,7 @@ function loadStationSlot() {
     .then(function(res) {
       if (res.error) {
         console.error('Не удалось загрузить слот станции:', res.error);
-      } else if (!res.data) {
+      } else if (!res.data && !isDeepSpace) {
         console.error('Для этой системы нет записи в station_slots — выполни sql/ships.sql');
       }
       stationSlot = (res.error || !res.data) ? null : res.data;
@@ -228,11 +228,19 @@ function loadHyperspaceZone() {
 
     return Promise.all([
       supabase.from('profiles').select('faction').eq('id', res.data.session.user.id).maybeSingle(),
-      supabase.from('systems').select('faction').eq('id', systemId).maybeSingle(),
+      supabase.from('systems').select('faction, is_deep_space, name').eq('id', systemId).maybeSingle(),
       supabase.from('game_settings').select('key, value')
     ]).then(function(r) {
       var myFaction = (r[0].data && r[0].data.faction) || null;
       sysFaction = (r[1].data && r[1].data.faction) || null;
+      isDeepSpace = !!(r[1].data && r[1].data.is_deep_space);
+
+      // У пустоты фракция стоит 'neutral' только потому, что поле
+      // не допускает пустого значения. Хозяина у неё нет, и стороны
+      // должны раскладываться как в ничейной системе.
+      if (sysFaction === 'neutral') sysFaction = null;
+
+      if (isDeepSpace) markDeepSpace(r[1].data.name);
 
       (r[2].data || []).forEach(function(row) {
         if (row.key === 'hyperspace_zone_height') ZONE_HEIGHT = parseInt(row.value, 10) || 14;
@@ -258,6 +266,9 @@ function loadHyperspaceZone() {
 // Площадки сброса десанта. Показываем только нападающему — обороняющийся
 // не должен видеть, что там стоит, иначе он просто караулил бы обе.
 function loadOrbitalDropZones() {
+  // В пустоте сбрасывать нечего и некуда: поверхности нет
+  if (isDeepSpace) return;
+
   // Рисуем площадки обеим сторонам: их расположение фиксировано и секретом
   // не является, а переброска десанта теперь идёт через них у всех.
   // Скрытым остаётся содержимое — за это отвечает can_see_space в базе,
@@ -1384,4 +1395,24 @@ function initBuildToggle(isSpace) {
     var page = isSpace ? 'space-battle.html' : 'ground-battle.html';
     window.location.href = page + '?system=' + systemId + (buildMode ? '' : '&mode=build');
   });
+}
+
+// ===== Открытый космос =====
+// Точка на гиперпути: ни планеты, ни станции, ни площадок сброса.
+// Помечаем это явно, иначе пустая сетка выглядит поломкой.
+
+var isDeepSpace = false;
+
+function markDeepSpace(name) {
+  document.body.classList.add('deep-space');
+
+  var old = document.getElementById('deep-space-mark');
+  if (old) old.remove();
+
+  var el = document.createElement('div');
+  el.id = 'deep-space-mark';
+  el.innerHTML = '<b>Открытый космос</b>' +
+                 '<span>' + (name || 'Точка на гиперпути') + '</span>' +
+                 '<i>Ни планеты, ни станции. Только то, что привели с собой.</i>';
+  document.body.appendChild(el);
 }

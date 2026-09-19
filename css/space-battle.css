@@ -581,3 +581,47 @@ html, body {
 }
 
 .dock-go:disabled { background: #1c2530; color: #55606c; }
+
+/* ===== Открытый космос ===== */
+
+#deep-space-mark {
+  position: fixed;
+  left: 50%;
+  top: 92px;
+  transform: translateX(-50%);
+  z-index: 900;
+  max-width: 82vw;
+  padding: 10px 16px;
+  background: rgba(10, 13, 20, 0.82);
+  border: 1px solid #1c2530;
+  border-radius: 10px;
+  text-align: center;
+  font-family: 'Courier New', monospace;
+  pointer-events: none;
+}
+
+#deep-space-mark b {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: #8fa8c4;
+  font-weight: normal;
+}
+
+#deep-space-mark span {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  color: #55606c;
+}
+
+#deep-space-mark i {
+  display: block;
+  margin-top: 6px;
+  font-style: normal;
+  font-size: 9px;
+  color: #3c4652;
+}
+
+/* В пустоте нет планеты внизу — убираем её свечение из фона сетки */
+body.deep-space #space-grid { background-image: none; }
