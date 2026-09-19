@@ -1126,6 +1126,7 @@ function onSlotTapped(slotIndex) {
     var code = (existing.building_types || {}).code;
     var isLab = code === 'rep_research' || code === 'cis_lab';
     var isHub = code === 'rep_logistics' || code === 'cis_logistics';
+    var isTrade = code === 'rep_trade' || code === 'cis_trade';
 
     // В обычном режиме тап по своему готовому зданию открывает его занятие:
     // у казармы это наём, у научного центра — исследования. Карточка
@@ -1133,6 +1134,7 @@ function onSlotTapped(slotIndex) {
     if (!buildMode && mine && ready) {
       if (isLab) openResearchPanel(existing);
       else if (isHub) openLogisticsPanel(existing);
+      else if (isTrade) openTradePanel(existing);
       else openUnitPanel(existing);
     } else {
       openBuildingInfo(existing);
@@ -4435,6 +4437,7 @@ function openLogisticsPanel(building) {
 
 function closeLogisticsPanel() {
   document.getElementById('logi-panel').style.display = 'none';
+  document.getElementById('logi-tabs').style.display = '';
   logiBuilding = null;
 }
 
@@ -4800,4 +4803,89 @@ function renderLogiMine(body) {
       body.appendChild(row);
     });
   });
+}
+
+// ===== Торговый пост =====
+// Клапан для забитых складов: сбыть излишки сразу в кредиты, без поиска
+// покупателя и без перевозки. Платит меньше рынка — в этом и смысл.
+// Окно переиспользует панель узла, только без вкладок.
+
+function openTradePanel(building) {
+  logiBuilding = building;
+  document.getElementById('logi-panel').style.display = 'flex';
+  document.getElementById('logi-tabs').style.display = 'none';
+  document.getElementById('logi-title').textContent =
+    (building.building_types || {}).name || 'Торговый пост';
+  renderTradePanel();
+}
+
+function renderTradePanel() {
+  var body = document.getElementById('logi-body');
+  body.innerHTML = '<div class="logi-empty">Загрузка...</div>';
+
+  supabase.rpc('get_trade_prices', { p_system_id: logiBuilding.system_id })
+    .then(function(res) {
+      if (res.error) {
+        body.innerHTML = '<div class="logi-empty">' + res.error.message + '</div>';
+        return;
+      }
+
+      var rows = (res.data || []).filter(function(r) { return r.amount > 0; });
+
+      body.innerHTML = '';
+      body.appendChild(logiSection('Скупка излишков'));
+
+      if (!rows.length) {
+        var e = document.createElement('div');
+        e.className = 'logi-empty';
+        e.textContent = 'На складе планеты пусто';
+        body.appendChild(e);
+        return;
+      }
+
+      rows.forEach(function(r) {
+        var row = document.createElement('div');
+        row.className = 'logi-row';
+        if (r.color) row.style.borderLeft = '3px solid ' + r.color;
+        row.style.paddingLeft = r.color ? '8px' : '';
+
+        var info = document.createElement('div');
+        info.className = 'logi-info';
+        info.innerHTML =
+          '<div class="logi-name">' + r.name + ' · ' + r.price + ' кр за ед.</div>' +
+          '<div class="logi-sub">На складе ' + r.amount +
+            ' · за всё ' + r.total + ' кр</div>';
+        row.appendChild(info);
+
+        var qty = logiAmount(r.amount);
+        row.appendChild(qty);
+
+        var sell = document.createElement('button');
+        sell.className = 'logi-go small';
+        sell.textContent = 'Продать';
+        sell.addEventListener('click', function() {
+          var n = parseInt(qty.valueEl.textContent, 10);
+          sell.disabled = true;
+          supabase.rpc('sell_to_trade_post', {
+            p_system_id: logiBuilding.system_id,
+            p_resource: r.resource,
+            p_amount: n
+          }).then(function(r2) {
+            sell.disabled = false;
+            if (r2.error) { alert(r2.error.message); return; }
+            // Счётчик кредитов обновится сам: он слушает profiles по realtime
+            renderTradePanel();
+          });
+        });
+        row.appendChild(sell);
+
+        body.appendChild(row);
+      });
+
+      var note = document.createElement('div');
+      note.className = 'logi-note';
+      note.textContent = 'Пост платит меньше, чем можно выручить на рынке. ' +
+                         'Зато сразу и без перевозки.';
+      body.appendChild(note);
+    });
 }
