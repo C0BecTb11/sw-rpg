@@ -932,3 +932,69 @@ html, body {
 }
 
 .build-panel-rescost.short { color: #d94a4a; }
+
+/* ===== Сводка разведки в панели штаба ===== */
+
+.intel-box {
+  margin-bottom: 12px;
+  padding: 10px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 9px;
+}
+
+.intel-head {
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #d9a940;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid #1c2530;
+}
+
+.intel-empty {
+  font-size: 11px;
+  color: #55606c;
+  text-align: center;
+  padding: 6px 0;
+}
+
+.intel-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 0;
+  border-bottom: 1px solid #1c2530;
+}
+
+.intel-row:last-of-type { border-bottom: none; }
+
+/* Гружёный флот — то, ради чего разведка и нужна */
+.intel-row.loaded { border-left: 3px solid #d9a940; padding-left: 8px; }
+
+.intel-info { flex: 1; min-width: 0; }
+
+.intel-route {
+  font-size: 12px;
+  color: #cfd8dc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.intel-sub { margin-top: 3px; font-size: 10px; color: #8fa8c4; }
+.intel-sub.dim { color: #55606c; }
+.intel-cargo { margin-top: 3px; font-size: 10px; color: #d9a940; }
+
+.intel-eta {
+  flex: none;
+  font-size: 11px;
+  color: #4a90d9;
+  text-align: right;
+}
+
+.intel-note {
+  margin-top: 8px;
+  font-size: 10px;
+  color: #55606c;
+}

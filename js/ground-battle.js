@@ -2000,6 +2000,17 @@ function openUnitPanel(building) {
       loadHeroRoster(building, roster);
     }
 
+    // Штаб не заменяет наём, а дополняет его: сводка разведки встаёт
+    // над карточками офицеров и разведдроидов, ничего не вытесняя.
+    if (code === 'rep_hq' || code === 'cis_control') {
+      var intelBox = document.createElement('div');
+      intelBox.className = 'intel-box';
+      intelBox.innerHTML = '<div class="intel-head">Разведка</div>' +
+                           '<div class="intel-empty">Загрузка...</div>';
+      list.appendChild(intelBox);
+      loadIntel(building, intelBox);
+    }
+
     // Медцентр и ремцех штопают пехоту, заводы техники — машины.
     // Ремонт делит производственную линию с наймом, поэтому блок стоит
     // рядом с карточками, а не в отдельном окне.
@@ -4887,5 +4898,55 @@ function renderTradePanel() {
       note.textContent = 'Пост платит меньше, чем можно выручить на рынке. ' +
                          'Зато сразу и без перевозки.';
       body.appendChild(note);
+    });
+}
+
+// ===== Разведка: чужие флоты на ближних гиперпутях =====
+// Перехватить можно только то, о чём знаешь. Штаб показывает, кто идёт
+// рядом, с чем и сколько ему осталось лететь.
+
+function loadIntel(building, box) {
+  supabase.rpc('get_enemy_transits', { p_system_id: building.system_id })
+    .then(function(res) {
+      if (res.error) {
+        box.innerHTML = '<div class="intel-head">Разведка</div>' +
+                        '<div class="intel-empty">Не удалось получить сводку</div>';
+        return;
+      }
+
+      var rows = res.data || [];
+      box.innerHTML = '<div class="intel-head">Разведка · чужие перелёты рядом</div>';
+
+      if (!rows.length) {
+        var e = document.createElement('div');
+        e.className = 'intel-empty';
+        e.textContent = 'Движения не замечено';
+        box.appendChild(e);
+        return;
+      }
+
+      rows.forEach(function(t) {
+        var row = document.createElement('div');
+        row.className = 'intel-row' + (t.cargo ? ' loaded' : '');
+
+        row.innerHTML =
+          '<div class="intel-info">' +
+            '<div class="intel-route">' + t.from_name + ' → ' + t.to_name + '</div>' +
+            '<div class="intel-sub">' + escHtml(t.owner_name) +
+              ' · ' + escHtml(t.commander_name || 'без имени') +
+              ' · кораблей ' + t.ships + '</div>' +
+            (t.cargo
+              ? '<div class="intel-cargo">Везут: ' + t.cargo + '</div>'
+              : '<div class="intel-sub dim">Трюмы пусты</div>') +
+          '</div>' +
+          '<div class="intel-eta">' + formatLeft(t.seconds_left) + '</div>';
+
+        box.appendChild(row);
+      });
+
+      var note = document.createElement('div');
+      note.className = 'intel-note';
+      note.textContent = 'Сводка охватывает пути через эту систему и соседние.';
+      box.appendChild(note);
     });
 }
