@@ -570,3 +570,40 @@
 /* Исследования в процессах: свой цвет, чтобы не путать с производством */
 .process-row.research { border-left-color: #a06fd9; }
 .process-tag.research { color: #a06fd9; }
+
+/* ===== Панель лидера: чем планета богата ===== */
+
+.fc-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.fc-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px solid #2a3644;
+  border-radius: 10px;
+  background: rgba(10, 13, 20, 0.6);
+  font-family: 'Courier New', monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+}
+
+/* Попутное сырьё идёт вдвое медленнее — и выглядит вполсилы */
+.fc-chip.weak { opacity: 0.55; }
+.fc-chip.bare { color: #55606c; border-style: dashed; }
+
+.fc-mood {
+  font-family: 'Courier New', monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: #55606c;
+}
+
+/* Довольство решает доход, поэтому его состояние видно цветом */
+.fc-mood.good { color: #5fd968; }
+.fc-mood.mid { color: #d9a940; }
+.fc-mood.bad { color: #d94a4a; }

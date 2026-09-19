@@ -72,7 +72,8 @@ function paintFeedBadges() {
   for (var i = 0; i < tabs.length; i++) {
     var id = tabs[i].getAttribute('data-tab');
     var badge = tabs[i].querySelector('.feed-badge');
-    var n = feedCounts[id] || 0;
+    // Доходы это состояние, а не поток новостей: считать там нечего
+    var n = id === 'income' ? 0 : (feedCounts[id] || 0);
     badge.textContent = n > 99 ? '99+' : n;
     badge.style.display = n > 0 ? 'inline-block' : 'none';
     tabs[i].classList.toggle('active', id === feedTab);
@@ -190,12 +191,13 @@ function renderIncomePanel(body) {
         '<div class="feed-info">' +
           '<div class="feed-title">' + r.system_name + '</div>' +
           '<div class="feed-line">Довольство ' + r.satisfaction +
-            ' · всего выплачено ' + (r.total_paid || 0) + '</div>' +
+            ' · за сутки получено ' + (r.paid_today || 0) + '</div>' +
           (r.tasks_failed
             ? '<div class="feed-meta warn">Не выполнено условий: ' + r.tasks_failed + '</div>'
             : '<div class="feed-meta">Условия выполняются</div>') +
         '</div>' +
-        '<div class="feed-income">' + (r.last_income || 0) + '</div>';
+        '<div class="feed-income">' + (r.last_income || 0) +
+          '<span>в сутки</span></div>';
 
       body.appendChild(row);
     });

@@ -1488,6 +1488,12 @@ function openBuildPanel(slotIndex) {
   var list = document.getElementById('build-panel-list');
   list.innerHTML = '';
 
+  // Без справочника карточки покажут коды вместо названий
+  if (!Object.keys(resourceNames).length) {
+    loadResourceNames(function() { openBuildPanel(slotIndex); });
+    return;
+  }
+
   // Запас планеты обновляем при каждом открытии: решение, что строить,
   // принимается именно здесь, и цифры должны быть свежими
   loadPlanetStock(function() { renderStockStrip(slotIndex); });
@@ -1951,8 +1957,9 @@ function loadUnitUpgrades() {
 }
 
 function openUnitPanel(building) {
-  // Запас нужен, чтобы подставить названия ресурсов и подсветить нехватку
+  // Запас нужен для подсветки нехватки, справочник — для названий
   loadPlanetStock();
+  loadResourceNames();
   unitPanelBuilding = building;
   var panel = document.getElementById('unit-panel');
   var list = document.getElementById('unit-panel-list');
@@ -4328,6 +4335,24 @@ function handleHeroAbilityTap(cellX, cellY) {
 
 var planetStock = [];
 
+// Справочник ресурсов держим отдельно от запаса планеты. Запас приходит
+// только по своим планетам и позже, чем рисуются карточки, поэтому
+// названия из него не успевали подставиться и в панели светились коды.
+var resourceNames = {};
+var resourceColors = {};
+
+function loadResourceNames(done) {
+  if (Object.keys(resourceNames).length) { if (done) done(); return; }
+
+  supabase.from('resources').select('id, name, color').then(function(res) {
+    (res.error ? [] : (res.data || [])).forEach(function(r) {
+      resourceNames[r.id] = r.name;
+      resourceColors[r.id] = r.color;
+    });
+    if (done) done();
+  });
+}
+
 function loadPlanetStock(done) {
   supabase.rpc('get_planet_stock', { p_system_id: systemId }).then(function(res) {
     planetStock = (res.error || !res.data) ? [] : res.data;
@@ -4343,6 +4368,7 @@ function stockRow(resourceId) {
 }
 
 function resourceName(resourceId) {
+  if (resourceNames[resourceId]) return resourceNames[resourceId];
   var r = stockRow(resourceId);
   return r ? r.name : resourceId;
 }

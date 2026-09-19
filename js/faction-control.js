@@ -75,6 +75,49 @@ function openFactionControlScreen() {
         name.appendChild(toggle);
       }
 
+      // Чем планета богата и как ей живётся — решение о передаче принимается
+      // по этому, а не по одному лишь числу построек
+      var facts = document.createElement('div');
+      facts.className = 'fc-facts';
+
+      if (system.primary_resource) {
+        var chip = document.createElement('span');
+        chip.className = 'fc-chip';
+        chip.style.borderColor = system.primary_color || '#2a3644';
+        chip.style.color = system.primary_color || '#8fa8c4';
+        chip.textContent = system.primary_name;
+        chip.title = 'Основное сырьё';
+        facts.appendChild(chip);
+      }
+
+      if (system.secondary_resource) {
+        var chip2 = document.createElement('span');
+        chip2.className = 'fc-chip weak';
+        chip2.style.borderColor = system.secondary_color || '#2a3644';
+        chip2.style.color = system.secondary_color || '#8fa8c4';
+        chip2.textContent = system.secondary_name;
+        chip2.title = 'Попутное сырьё, добывается вдвое медленнее';
+        facts.appendChild(chip2);
+      }
+
+      if (!system.primary_resource && !system.secondary_resource) {
+        var bare = document.createElement('span');
+        bare.className = 'fc-chip bare';
+        bare.textContent = 'без залежей';
+        facts.appendChild(bare);
+      }
+
+      if (system.satisfaction !== null && system.satisfaction !== undefined) {
+        var mood = document.createElement('span');
+        mood.className = 'fc-mood' +
+          (system.satisfaction >= 60 ? ' good'
+           : system.satisfaction >= 30 ? ' mid' : ' bad');
+        mood.textContent = 'довольство ' + system.satisfaction +
+                           ' · ' + (system.income || 0) + ' кр/сут';
+        facts.appendChild(mood);
+      }
+
+      name.appendChild(facts);
       row.appendChild(name);
 
       var details = document.createElement('div');

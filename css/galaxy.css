@@ -1295,3 +1295,12 @@ body {
   0%, 100% { filter: none; }
   20%, 60% { filter: drop-shadow(0 0 12px #d9a940); }
 }
+
+/* Подпись под цифрой дохода: чтобы не путать с полученным за сутки */
+.feed-income span {
+  display: block;
+  font-size: 8px;
+  letter-spacing: 1px;
+  color: #55606c;
+  text-align: right;
+}
