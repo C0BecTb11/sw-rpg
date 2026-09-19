@@ -39,7 +39,10 @@ function updateShipCapacity() {
   supabase.rpc('ship_load_used', { p_ship_id: cargoShip.id }).then(function(res) {
     var used = (!res.error && typeof res.data === 'number') ? res.data : 0;
     var cap = cargoShipType.capacity || 0;
-    el.textContent = 'Трюм: ' + used + ' из ' + cap + ' слотов';
+    var freeSlots = Math.max(0, cap - used);
+    el.textContent = 'Трюм: ' + used + ' из ' + cap + ' слотов' +
+      (freeSlots ? ' · свободно ' + freeSlots +
+                   ' (это ' + (freeSlots * 2) + ' ед. ресурса)' : '');
     el.className = used >= cap ? 'cargo-capacity full' : 'cargo-capacity';
   });
 }
@@ -114,6 +117,31 @@ function renderMarketPickup(list) {
         '<div class="cargo-available">Оплачено: ' + o.amount_left +
           ' · бронь истекает через ' + formatCargoLeft(o.seconds_left) + '</div>';
 
+      // Берём частями: если трюм неполон, глупо отказывать во всём заказе.
+      // Остаток брони останется ждать второй ходки.
+      var controls = document.createElement('div');
+      controls.className = 'cargo-controls';
+
+      var qty = document.createElement('div');
+      qty.className = 'cargo-qty';
+
+      var minus = document.createElement('button');
+      minus.className = 'cargo-qty-btn'; minus.textContent = '−';
+      var val = document.createElement('span');
+      val.className = 'cargo-qty-value'; val.textContent = o.amount_left;
+      var plus = document.createElement('button');
+      plus.className = 'cargo-qty-btn'; plus.textContent = '+';
+
+      minus.addEventListener('click', function() {
+        val.textContent = Math.max(1, parseInt(val.textContent, 10) - 10);
+      });
+      plus.addEventListener('click', function() {
+        val.textContent = Math.min(o.amount_left, parseInt(val.textContent, 10) + 10);
+      });
+
+      qty.appendChild(minus); qty.appendChild(val); qty.appendChild(plus);
+      controls.appendChild(qty);
+
       var act = document.createElement('button');
       act.className = 'cargo-action';
       act.textContent = 'Вывезти';
@@ -122,7 +150,7 @@ function renderMarketPickup(list) {
         supabase.rpc('load_market_order', {
           p_ship_id: cargoShip.id,
           p_order_id: o.order_id,
-          p_amount: o.amount_left
+          p_amount: parseInt(val.textContent, 10)
         }).then(function(r2) {
           act.disabled = false;
           if (r2.error) { alert(r2.error.message); return; }
@@ -130,7 +158,8 @@ function renderMarketPickup(list) {
         });
       });
 
-      info.appendChild(act);
+      controls.appendChild(act);
+      info.appendChild(controls);
       row.appendChild(info);
       list.appendChild(row);
     });
