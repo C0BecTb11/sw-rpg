@@ -1125,12 +1125,14 @@ function onSlotTapped(slotIndex) {
 
     var code = (existing.building_types || {}).code;
     var isLab = code === 'rep_research' || code === 'cis_lab';
+    var isHub = code === 'rep_logistics' || code === 'cis_logistics';
 
     // В обычном режиме тап по своему готовому зданию открывает его занятие:
     // у казармы это наём, у научного центра — исследования. Карточка
     // со сносом остаётся в режиме стройки.
     if (!buildMode && mine && ready) {
       if (isLab) openResearchPanel(existing);
+      else if (isHub) openLogisticsPanel(existing);
       else openUnitPanel(existing);
     } else {
       openBuildingInfo(existing);
@@ -1817,6 +1819,19 @@ function initGroundBattle() {
 
       var dropClose = document.getElementById('drop-panel-close');
       if (dropClose) dropClose.addEventListener('click', closeDropPanel);
+
+      var logiClose = document.getElementById('logi-close');
+      if (logiClose) logiClose.addEventListener('click', closeLogisticsPanel);
+
+      var logiTabs = document.querySelectorAll('.logi-tab');
+      for (var li = 0; li < logiTabs.length; li++) {
+        (function(btn) {
+          btn.addEventListener('click', function() {
+            setLogiTab(btn.getAttribute('data-tab'));
+          });
+        })(logiTabs[li]);
+      }
+
       initTreeGestures();
       loadBuildings();
       loadUnitOrders();
@@ -4364,4 +4379,389 @@ function renderStockStrip(slotIndex) {
 
   var title = box.querySelector('.build-panel-title');
   box.insertBefore(strip, title ? title.nextSibling : box.firstChild);
+}
+
+// ===== Логистический узел: конвои и общий рынок =====
+// Три вкладки в одном окне: отправка своим, чужие лоты, свои лоты и брони.
+// Всё, что касается денег и остатков, считает сервер — клиент только рисует.
+
+var logiBuilding = null;
+var logiTab = 'send';
+
+function openLogisticsPanel(building) {
+  logiBuilding = building;
+  logiTab = 'send';
+  document.getElementById('logi-panel').style.display = 'flex';
+  document.getElementById('logi-title').textContent =
+    (building.building_types || {}).name || 'Логистический узел';
+  setLogiTab('send');
+}
+
+function closeLogisticsPanel() {
+  document.getElementById('logi-panel').style.display = 'none';
+  logiBuilding = null;
+}
+
+function setLogiTab(tab) {
+  logiTab = tab;
+  var tabs = document.querySelectorAll('.logi-tab');
+  for (var i = 0; i < tabs.length; i++) {
+    tabs[i].classList.toggle('active', tabs[i].getAttribute('data-tab') === tab);
+  }
+
+  var body = document.getElementById('logi-body');
+  body.innerHTML = '<div class="logi-empty">Загрузка...</div>';
+
+  if (tab === 'send') renderLogiSend(body);
+  else if (tab === 'market') renderLogiMarket(body);
+  else renderLogiMine(body);
+}
+
+function logiSection(title) {
+  var d = document.createElement('div');
+  d.className = 'logi-section';
+  d.textContent = title;
+  return d;
+}
+
+// Счётчик с крупным шагом: ресурсы считают десятками
+function logiAmount(max) {
+  var box = document.createElement('div');
+  box.className = 'logi-qty';
+
+  var minus = document.createElement('button');
+  minus.className = 'logi-qty-btn'; minus.textContent = '−';
+  var val = document.createElement('span');
+  val.className = 'logi-qty-value'; val.textContent = Math.min(10, max);
+  var plus = document.createElement('button');
+  plus.className = 'logi-qty-btn'; plus.textContent = '+';
+  var all = document.createElement('button');
+  all.className = 'logi-qty-btn'; all.textContent = 'всё';
+
+  minus.addEventListener('click', function() {
+    val.textContent = Math.max(1, parseInt(val.textContent, 10) - 10);
+  });
+  plus.addEventListener('click', function() {
+    val.textContent = Math.min(max, parseInt(val.textContent, 10) + 10);
+  });
+  all.addEventListener('click', function() { val.textContent = max; });
+
+  box.appendChild(minus); box.appendChild(val); box.appendChild(plus); box.appendChild(all);
+  box.valueEl = val;
+  return box;
+}
+
+// ---------- вкладка «Отправка» ----------
+function renderLogiSend(body) {
+  var sysId = logiBuilding.system_id;
+
+  Promise.all([
+    supabase.rpc('get_planet_stock', { p_system_id: sysId }),
+    supabase.rpc('get_convoy_destinations', { p_from: sysId }),
+    supabase.rpc('get_my_convoys')
+  ]).then(function(r) {
+    var stock = (r[0].error ? [] : (r[0].data || [])).filter(function(x) { return x.amount > 0; });
+    var dests = r[1].error ? [] : (r[1].data || []);
+    var convoys = r[2].error ? [] : (r[2].data || []);
+
+    body.innerHTML = '';
+
+    if (!stock.length) {
+      body.appendChild(logiSection('Отправка'));
+      var e = document.createElement('div');
+      e.className = 'logi-empty';
+      e.textContent = 'На складе планеты пусто';
+      body.appendChild(e);
+    } else if (!dests.length) {
+      body.appendChild(logiSection('Отправка'));
+      var e2 = document.createElement('div');
+      e2.className = 'logi-empty';
+      e2.textContent = 'Нет планет своей стороны, куда вести конвой';
+      body.appendChild(e2);
+    } else {
+      body.appendChild(logiSection('Отправить конвой'));
+
+      var form = document.createElement('div');
+      form.className = 'logi-form';
+
+      var resSel = document.createElement('select');
+      resSel.className = 'logi-select';
+      stock.forEach(function(x) {
+        var o = document.createElement('option');
+        o.value = x.resource;
+        o.textContent = x.name + ' · ' + x.amount;
+        resSel.appendChild(o);
+      });
+
+      var dstSel = document.createElement('select');
+      dstSel.className = 'logi-select';
+      dests.forEach(function(d) {
+        var o = document.createElement('option');
+        o.value = d.system_id;
+        o.textContent = d.name + ' · ' + d.hops + ' прыж. · ' + formatLeft(d.seconds) +
+                        (d.controlled ? '' : ' · союзник');
+        dstSel.appendChild(o);
+      });
+
+      var qty = logiAmount(stock[0].amount);
+      resSel.addEventListener('change', function() {
+        var pick = null;
+        stock.forEach(function(x) { if (x.resource === resSel.value) pick = x; });
+        qty.valueEl.textContent = Math.min(10, pick ? pick.amount : 1);
+      });
+
+      var go = document.createElement('button');
+      go.className = 'logi-go';
+      go.textContent = 'Отправить';
+      go.addEventListener('click', function() {
+        go.disabled = true;
+        supabase.rpc('dispatch_convoy', {
+          p_from_system: sysId,
+          p_to_system: dstSel.value,
+          p_resource: resSel.value,
+          p_amount: parseInt(qty.valueEl.textContent, 10)
+        }).then(function(res) {
+          go.disabled = false;
+          if (res.error) { alert(res.error.message); return; }
+          setLogiTab('send');
+        });
+      });
+
+      form.appendChild(resSel);
+      form.appendChild(dstSel);
+      form.appendChild(qty);
+      form.appendChild(go);
+      body.appendChild(form);
+    }
+
+    body.appendChild(logiSection('Поставки в пути'));
+
+    if (!convoys.length) {
+      var e3 = document.createElement('div');
+      e3.className = 'logi-empty';
+      e3.textContent = 'Конвоев нет';
+      body.appendChild(e3);
+      return;
+    }
+
+    convoys.forEach(function(c) {
+      var row = document.createElement('div');
+      row.className = 'logi-row';
+
+      var state = c.status === 'in_flight' ? 'в пути · ' + formatLeft(c.seconds_left)
+                : c.status === 'delivered' ? 'доставлено'
+                : c.status === 'returned' ? 'вернулся: блокада' : c.status;
+
+      row.innerHTML =
+        '<div class="logi-info">' +
+          '<div class="logi-name">' + c.resource_name + ' · ' + c.amount + '</div>' +
+          '<div class="logi-sub">' + c.from_name + ' → ' + c.to_name + '</div>' +
+        '</div>' +
+        '<div class="logi-state' + (c.status === 'returned' ? ' bad' : '') + '">' + state + '</div>';
+
+      body.appendChild(row);
+    });
+  });
+}
+
+// ---------- вкладка «Рынок» ----------
+function renderLogiMarket(body) {
+  Promise.all([
+    supabase.rpc('get_market_lots', { p_resource: null }),
+    supabase.rpc('get_my_market_orders')
+  ]).then(function(r) {
+    var lots = (r[0].error ? [] : (r[0].data || [])).filter(function(l) { return !l.mine; });
+    var orders = r[1].error ? [] : (r[1].data || []);
+
+    body.innerHTML = '';
+
+    if (orders.length) {
+      body.appendChild(logiSection('Оплачено, ждёт вывоза'));
+      orders.forEach(function(o) {
+        var row = document.createElement('div');
+        row.className = 'logi-row';
+        row.innerHTML =
+          '<div class="logi-info">' +
+            '<div class="logi-name">' + o.resource_name + ' · ' + o.amount_left + '</div>' +
+            '<div class="logi-sub">Забрать на планете ' + o.system_name +
+              ' · осталось ' + formatLeft(o.seconds_left) + '</div>' +
+          '</div>';
+        body.appendChild(row);
+      });
+
+      var hint = document.createElement('div');
+      hint.className = 'logi-note';
+      hint.textContent = 'Вывозить своим кораблём: подведи его к этой планете ' +
+                         'и грузись через трюм. Деньги уйдут продавцу при погрузке.';
+      body.appendChild(hint);
+    }
+
+    body.appendChild(logiSection('Лоты галактики'));
+
+    if (!lots.length) {
+      var e = document.createElement('div');
+      e.className = 'logi-empty';
+      e.textContent = 'Сейчас никто ничего не продаёт';
+      body.appendChild(e);
+      return;
+    }
+
+    lots.forEach(function(l) {
+      var row = document.createElement('div');
+      row.className = 'logi-row lot' + (l.foreign_side ? ' foreign' : '');
+
+      var info = document.createElement('div');
+      info.className = 'logi-info';
+      info.innerHTML =
+        '<div class="logi-name">' + l.resource_name + ' · ' + l.price_per_unit + ' кр за ед.</div>' +
+        '<div class="logi-sub">' + escHtml(l.seller_name) + ' · ' + l.system_name +
+          ' · в наличии ' + l.amount_left +
+          (l.foreign_side ? ' · противник' : '') + '</div>';
+      row.appendChild(info);
+
+      var qty = logiAmount(l.amount_left);
+      row.appendChild(qty);
+
+      var buy = document.createElement('button');
+      buy.className = 'logi-go small';
+      buy.textContent = 'Купить';
+      buy.addEventListener('click', function() {
+        var n = parseInt(qty.valueEl.textContent, 10);
+        if (!confirm('Купить ' + n + ' за ' + (n * l.price_per_unit) +
+                     ' кр? Забирать придётся своим кораблём с планеты ' +
+                     l.system_name + '.')) return;
+        buy.disabled = true;
+        supabase.rpc('buy_market_lot', { p_lot_id: l.lot_id, p_amount: n })
+          .then(function(res) {
+            buy.disabled = false;
+            if (res.error) { alert(res.error.message); return; }
+            setLogiTab('market');
+          });
+      });
+      row.appendChild(buy);
+
+      body.appendChild(row);
+    });
+  });
+}
+
+// ---------- вкладка «Мои лоты» ----------
+function renderLogiMine(body) {
+  var sysId = logiBuilding.system_id;
+
+  Promise.all([
+    supabase.rpc('get_planet_stock', { p_system_id: sysId }),
+    supabase.rpc('get_my_market_lots')
+  ]).then(function(r) {
+    var stock = (r[0].error ? [] : (r[0].data || [])).filter(function(x) { return x.amount > 0; });
+    var lots = r[1].error ? [] : (r[1].data || []);
+
+    body.innerHTML = '';
+    body.appendChild(logiSection('Выставить лот'));
+
+    if (!stock.length) {
+      var e = document.createElement('div');
+      e.className = 'logi-empty';
+      e.textContent = 'На складе планеты пусто';
+      body.appendChild(e);
+    } else {
+      var form = document.createElement('div');
+      form.className = 'logi-form';
+
+      var resSel = document.createElement('select');
+      resSel.className = 'logi-select';
+      stock.forEach(function(x) {
+        var o = document.createElement('option');
+        o.value = x.resource;
+        o.textContent = x.name + ' · ' + x.amount;
+        resSel.appendChild(o);
+      });
+
+      var openSel = document.createElement('select');
+      openSel.className = 'logi-select';
+      var o1 = document.createElement('option');
+      o1.value = 'faction'; o1.textContent = 'Только своим';
+      var o2 = document.createElement('option');
+      o2.value = 'all'; o2.textContent = 'Всем, включая противника';
+      openSel.appendChild(o1); openSel.appendChild(o2);
+
+      var price = document.createElement('input');
+      price.className = 'logi-input';
+      price.type = 'number';
+      price.min = '1';
+      price.value = '20';
+      price.placeholder = 'Цена за единицу';
+
+      var qty = logiAmount(stock[0].amount);
+      resSel.addEventListener('change', function() {
+        var pick = null;
+        stock.forEach(function(x) { if (x.resource === resSel.value) pick = x; });
+        qty.valueEl.textContent = Math.min(10, pick ? pick.amount : 1);
+      });
+
+      var go = document.createElement('button');
+      go.className = 'logi-go';
+      go.textContent = 'Выставить';
+      go.addEventListener('click', function() {
+        go.disabled = true;
+        supabase.rpc('create_market_lot', {
+          p_system_id: sysId,
+          p_resource: resSel.value,
+          p_amount: parseInt(qty.valueEl.textContent, 10),
+          p_price: parseInt(price.value, 10) || 1,
+          p_open_to: openSel.value
+        }).then(function(res) {
+          go.disabled = false;
+          if (res.error) { alert(res.error.message); return; }
+          setLogiTab('mine');
+        });
+      });
+
+      form.appendChild(resSel);
+      form.appendChild(price);
+      form.appendChild(openSel);
+      form.appendChild(qty);
+      form.appendChild(go);
+      body.appendChild(form);
+    }
+
+    body.appendChild(logiSection('Мои лоты'));
+
+    if (!lots.length) {
+      var e2 = document.createElement('div');
+      e2.className = 'logi-empty';
+      e2.textContent = 'Ты ничего не продаёшь';
+      body.appendChild(e2);
+      return;
+    }
+
+    lots.forEach(function(l) {
+      var row = document.createElement('div');
+      row.className = 'logi-row';
+
+      var info = document.createElement('div');
+      info.className = 'logi-info';
+      info.innerHTML =
+        '<div class="logi-name">' + l.resource_name + ' · ' + l.price_per_unit + ' кр за ед.</div>' +
+        '<div class="logi-sub">' + l.system_name + ' · осталось ' + l.amount_left +
+          (l.reserved ? ' · забронировано ' + l.reserved : '') +
+          ' · ' + (l.open_to === 'all' ? 'открыт всем' : 'только своим') + '</div>';
+      row.appendChild(info);
+
+      var off = document.createElement('button');
+      off.className = 'logi-go small danger';
+      off.textContent = 'Снять';
+      off.addEventListener('click', function() {
+        off.disabled = true;
+        supabase.rpc('cancel_market_lot', { p_lot_id: l.lot_id }).then(function(res) {
+          off.disabled = false;
+          if (res.error) { alert(res.error.message); return; }
+          setLogiTab('mine');
+        });
+      });
+      row.appendChild(off);
+
+      body.appendChild(row);
+    });
+  });
 }

@@ -57,6 +57,7 @@ function renderLoadable() {
     if (!res.data || res.data.length === 0) {
       list.innerHTML = '<div class="cargo-empty">В зоне высадки этой планеты нет твоих войск</div>';
       renderLoadableResources(list);
+      renderMarketPickup(list);
       return;
     }
     list.innerHTML = '';
@@ -64,6 +65,7 @@ function renderLoadable() {
       list.appendChild(makeShipCargoRow(row, row.available, 'Погрузить', row.slot_size));
     });
     renderLoadableResources(list);
+    renderMarketPickup(list);
   });
 }
 
@@ -84,6 +86,61 @@ function renderLoadableResources(list) {
         list.appendChild(makeResourceCargoRow(r.resource, r.name, r.amount, 'Погрузить'));
       });
     });
+}
+
+// Купленное на рынке лежит на чужой планете и вывозится отдельной кнопкой:
+// право грузиться там даёт бронь, а не контроль над планетой.
+function renderMarketPickup(list) {
+  if (!cargoShip || !cargoShip.system_id) return;
+
+  supabase.rpc('get_my_market_orders').then(function(res) {
+    if (res.error || !res.data) return;
+
+    var here = res.data.filter(function(o) {
+      return o.system_id === cargoShip.system_id && o.amount_left > 0;
+    });
+    if (!here.length) return;
+
+    list.appendChild(makeCargoSection('Куплено — забрать'));
+
+    here.forEach(function(o) {
+      var row = document.createElement('div');
+      row.className = 'cargo-row cargo-resource cargo-bought';
+
+      var info = document.createElement('div');
+      info.className = 'cargo-info';
+      info.innerHTML =
+        '<div class="cargo-name">' + o.resource_name + '</div>' +
+        '<div class="cargo-available">Оплачено: ' + o.amount_left +
+          ' · бронь истекает через ' + formatCargoLeft(o.seconds_left) + '</div>';
+
+      var act = document.createElement('button');
+      act.className = 'cargo-action';
+      act.textContent = 'Вывезти';
+      act.addEventListener('click', function() {
+        act.disabled = true;
+        supabase.rpc('load_market_order', {
+          p_ship_id: cargoShip.id,
+          p_order_id: o.order_id,
+          p_amount: o.amount_left
+        }).then(function(r2) {
+          act.disabled = false;
+          if (r2.error) { alert(r2.error.message); return; }
+          setCargoTab(cargoTab);
+        });
+      });
+
+      info.appendChild(act);
+      row.appendChild(info);
+      list.appendChild(row);
+    });
+  });
+}
+
+function formatCargoLeft(sec) {
+  if (sec >= 3600) return Math.floor(sec / 3600) + ' ч';
+  if (sec >= 60) return Math.floor(sec / 60) + ' мин';
+  return sec + ' с';
 }
 
 function renderCargo() {

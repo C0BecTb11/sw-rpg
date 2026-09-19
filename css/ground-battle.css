@@ -758,3 +758,168 @@ html, body {
 /* Постройка, которую здесь поставить нельзя */
 .build-panel-item.blocked { opacity: 0.45; }
 .build-panel-why { margin-top: 4px; font-size: 10px; color: #d94a4a; }
+
+/* ===== Панель логистического узла ===== */
+
+#logi-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(5, 8, 13, 0.75);
+}
+
+#logi-box {
+  width: 100%;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  background: #0d1119;
+  border-top: 1px solid #1c2530;
+  border-radius: 14px 14px 0 0;
+}
+
+#logi-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 14px;
+  border-bottom: 1px solid #1c2530;
+}
+
+#logi-title { font-size: 12px; letter-spacing: 1px; color: #cfd8dc; }
+
+#logi-close {
+  background: none;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  color: #8fa8c4;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  width: 30px;
+  height: 30px;
+}
+
+#logi-tabs {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  padding: 10px 14px 0;
+}
+
+.logi-tab {
+  flex: 1;
+  padding: 9px 4px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 7px;
+  color: #55606c;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+}
+
+.logi-tab.active { border-color: #4a90d9; color: #cfd8dc; }
+
+#logi-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px 18px;
+}
+
+.logi-section {
+  margin: 14px 0 8px;
+  padding-bottom: 6px;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #d9a940;
+  border-bottom: 1px solid #1c2530;
+}
+
+.logi-section:first-child { margin-top: 0; }
+
+.logi-empty {
+  font-size: 11px;
+  color: #55606c;
+  text-align: center;
+  padding: 10px 0;
+}
+
+.logi-note {
+  margin-top: 8px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: #55606c;
+}
+
+.logi-form { display: flex; flex-direction: column; gap: 8px; }
+
+.logi-select, .logi-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 10px;
+  background: #0a0d14;
+  border: 1px solid #2a3644;
+  border-radius: 7px;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+}
+
+.logi-qty { display: flex; align-items: center; gap: 6px; }
+
+.logi-qty-btn {
+  flex: none;
+  min-width: 34px;
+  padding: 7px 8px;
+  background: #1c2530;
+  border: none;
+  border-radius: 6px;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+}
+
+.logi-qty-value {
+  flex: 1;
+  text-align: center;
+  font-size: 13px;
+  color: #cfd8dc;
+}
+
+.logi-go {
+  padding: 11px;
+  background: #4a90d9;
+  border: none;
+  border-radius: 7px;
+  color: #0a0d14;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.logi-go.small { flex: none; padding: 9px 12px; font-size: 10px; }
+.logi-go.danger { background: #2a3644; color: #d94a4a; }
+.logi-go:disabled { opacity: 0.5; }
+
+.logi-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 0;
+  border-bottom: 1px solid #1c2530;
+}
+
+.logi-row:last-child { border-bottom: none; }
+.logi-row.lot { flex-wrap: wrap; }
+
+/* Лот противника отмечен, чтобы не купить у врага по невнимательности */
+.logi-row.foreign { border-left: 3px solid #d94a4a; padding-left: 8px; }
+
+.logi-info { flex: 1; min-width: 60%; }
+.logi-name { font-size: 12px; color: #cfd8dc; }
+.logi-sub { margin-top: 3px; font-size: 10px; color: #55606c; }
+
+.logi-state { flex: none; font-size: 10px; color: #4a90d9; text-align: right; }
+.logi-state.bad { color: #d94a4a; }

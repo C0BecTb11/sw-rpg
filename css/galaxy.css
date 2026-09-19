@@ -1070,3 +1070,6 @@ body {
 .cargo-row.cargo-resource { border-left: 3px solid #4a90d9; }
 
 .cargo-resource .cargo-qty-value { min-width: 38px; }
+
+/* Купленное на рынке: право вывоза даёт бронь, а не контроль над планетой */
+.cargo-row.cargo-bought { border-left: 3px solid #5fd968; }
