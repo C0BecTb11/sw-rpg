@@ -109,11 +109,27 @@ function openPlanetInfo(systemId) {
       // по любой системе: без него карта не читается стратегически.
       // Сам запас при этом виден только владельцу планеты.
       if (sysResources.length) {
+        var resRow = document.createElement('div');
+        resRow.className = 'pi-stat pi-res-row';
+        resRow.innerHTML = '<span>Сырьё</span>';
+
+        var chips = document.createElement('div');
+        chips.className = 'pi-chips';
+
         sysResources.forEach(function(res) {
-          stats.appendChild(makePiStat(
-            res.role === 'primary' ? 'Основное сырьё' : 'Попутное сырьё',
-            res.name));
+          // Плашка в цвете ресурса: попутное приглушено, чтобы основное
+          // читалось первым и без вчитывания в подписи
+          var chip = document.createElement('b');
+          chip.className = 'pi-chip' + (res.role === 'secondary' ? ' weak' : '');
+          chip.style.borderColor = res.color || '#2a3644';
+          chip.style.color = res.color || '#cfd8dc';
+          chip.textContent = res.name;
+          chip.title = res.role === 'primary' ? 'Основное сырьё' : 'Попутное сырьё';
+          chips.appendChild(chip);
         });
+
+        resRow.appendChild(chips);
+        stats.appendChild(resRow);
       } else {
         stats.appendChild(makePiStat('Сырьё', 'нет залежей'));
       }

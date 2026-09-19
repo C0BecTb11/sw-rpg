@@ -4394,6 +4394,9 @@ function renderStockStrip(slotIndex) {
     if (r.is_primary) cell.classList.add('primary');
     else if (r.is_secondary) cell.classList.add('secondary');
 
+    // Цвет ресурса кромкой слева — тот же, что на плашках в карточке планеты
+    if (r.color) cell.style.borderLeft = '3px solid ' + r.color;
+
     if (r.cap && r.amount >= r.cap) cell.classList.add('full');
 
     cell.innerHTML =

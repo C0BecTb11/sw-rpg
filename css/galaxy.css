@@ -1073,3 +1073,29 @@ body {
 
 /* Купленное на рынке: право вывоза даёт бронь, а не контроль над планетой */
 .cargo-row.cargo-bought { border-left: 3px solid #5fd968; }
+
+/* ===== Плашки сырья в карточке планеты ===== */
+
+.pi-res-row { align-items: flex-start; }
+
+.pi-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: flex-end;
+}
+
+.pi-chip {
+  display: inline-block;
+  padding: 3px 9px;
+  border: 1px solid #2a3644;
+  border-radius: 11px;
+  background: rgba(10, 13, 20, 0.6);
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  font-weight: normal;
+  letter-spacing: 1px;
+}
+
+/* Попутное сырьё вдвое медленнее — и выглядит вполсилы */
+.pi-chip.weak { opacity: 0.55; }
