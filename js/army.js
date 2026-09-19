@@ -24,7 +24,7 @@ function loadCommanders(userId) {
 
   Promise.all([
     supabase.from('commanders').select('*').eq('user_id', userId).order('slot_index'),
-    supabase.from('systems').select('id, name'),
+    supabase.from('systems').select('id, name').eq('is_deep_space', false),
     // Истребители в ангаре не показываем отдельными кораблями: они
     // внутри носителя, а не стоят в системе сами по себе
     supabase.from('ships')
@@ -292,7 +292,7 @@ function loadGarrisons(userId) {
     // и в трюме координат нет, иначе они считались бы дважды
     supabase.from('unit_positions').select('system_id, unit_type')
       .eq('owner_user_id', userId).not('x', 'is', null),
-    supabase.from('systems').select('id, name'),
+    supabase.from('systems').select('id, name').eq('is_deep_space', false),
     supabase.from('unit_types').select('id, name, image')
   ]).then(function(results) {
     var unitsRes = results[0];

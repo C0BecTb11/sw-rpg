@@ -70,7 +70,7 @@ function openFactionScreen() {
       nameEl.textContent = FACTION_NAMES_PANEL[faction] || faction;
 
       Promise.all([
-        supabase.from('systems').select('name').eq('faction', faction),
+        supabase.from('systems').select('name').eq('faction', faction).eq('is_deep_space', false),
         supabase.from('faction_leadership').select('leader_user_id').eq('faction', faction).maybeSingle()
       ]).then(function(results) {
         var systemsRes = results[0];

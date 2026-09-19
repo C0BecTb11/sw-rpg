@@ -165,7 +165,7 @@ function initPlanets() {
       currentUserFaction = profileRes.data ? profileRes.data.faction : null;
 
       Promise.all([
-        supabase.from('systems').select('*'),
+        supabase.from('systems').select('*').eq('is_deep_space', false),
         supabase.from('hyperlanes').select('*'),
         currentUserFaction
           ? supabase.from('commanders').select('*').eq('unlocked', true).eq('faction', currentUserFaction)
