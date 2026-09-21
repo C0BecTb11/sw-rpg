@@ -1127,6 +1127,7 @@ function onSlotTapped(slotIndex) {
     var isLab = code === 'rep_research' || code === 'cis_lab';
     var isHub = code === 'rep_logistics' || code === 'cis_logistics';
     var isTrade = code === 'rep_trade' || code === 'cis_trade';
+    var isEconomy = isEconomyBuilding(code);
 
     // В обычном режиме тап по своему готовому зданию открывает его занятие:
     // у казармы это наём, у научного центра — исследования. Карточка
@@ -1135,6 +1136,7 @@ function onSlotTapped(slotIndex) {
       if (isLab) openResearchPanel(existing);
       else if (isHub) openLogisticsPanel(existing);
       else if (isTrade) openTradePanel(existing);
+      else if (isEconomy) openEconomyPanel(existing);
       else openUnitPanel(existing);
     } else {
       openBuildingInfo(existing);
@@ -1941,6 +1943,12 @@ function renderProductionSlot(building, maxPerOrder) {
 }
 
 function formatLeft(sec) {
+  sec = Math.max(0, Math.round(sec || 0));
+  if (sec >= 3600) {
+    var h = Math.floor(sec / 3600);
+    var mm = Math.floor((sec % 3600) / 60);
+    return h + ' ч' + (mm ? ' ' + mm + ' мин' : '');
+  }
   if (sec >= 60) {
     var m = Math.floor(sec / 60);
     return m + ' мин ' + (sec % 60) + ' с';
@@ -2002,7 +2010,9 @@ function openUnitPanel(building) {
     renderProductionSlot(building, maxPerOrder);
 
     if (res.error || !res.data || res.data.length === 0) {
-      list.innerHTML = '<div class="unit-panel-empty">Это здание пока ничего не производит</div>';
+      // Здание без найма: линия производства ему не нужна вовсе
+      closeUnitPanel();
+      openEconomyPanel(building);
       return;
     }
     unitPanelTypes = res.data;
@@ -4623,7 +4633,9 @@ function buildConvoyForm(sysId, stock, dests, cmds) {
   dests.forEach(function(d) {
     var o = document.createElement('option');
     o.value = d.system_id;
-    o.textContent = d.name + ' · ' + formatLeft(d.seconds) +
+    o.textContent = d.name + ' · ' +
+                    (d.hops > 1 ? d.hops + ' прыжка · ' : '') +
+                    formatLeft(d.seconds) +
                     (d.controlled ? '' : ' · союзник');
     dstSel.appendChild(o);
   });
@@ -5166,4 +5178,137 @@ function showInterceptChoice(building, transit, box, btn) {
 
       box.insertBefore(wrap, btn.nextSibling);
     });
+}
+
+// ===== Экономические постройки =====
+// Добыча, передел и склады не нанимают юнитов и не изучают, поэтому
+// линия производства им ни к чему. Вместо неё — что постройка делает
+// и что лежит на складе планеты. Окно открывается только владельцу:
+// чужой видит нейтральную карточку, а сервер и сам не отдаёт состояние
+// производства и запас никому, кроме хозяина планеты.
+
+function isEconomyBuilding(code) {
+  if (!code || !buildingTypes) return false;
+  var t = null;
+  for (var i = 0; i < buildingTypes.length; i++) {
+    if (buildingTypes[i].code === code) { t = buildingTypes[i]; break; }
+  }
+  return !!t && (!!t.produces_resource || (t.storage_bonus || 0) > 0);
+}
+
+var ECONOMY_STATUS = {
+  working:    { text: 'Работает',                          cls: 'ok' },
+  building:   { text: 'Ещё строится',                      cls: 'dim' },
+  no_deposit: { text: 'На планете нет залежи',             cls: 'bad' },
+  no_input:   { text: 'Простаивает: не хватает сырья',     cls: 'warn' },
+  no_room:    { text: 'Простаивает: склад переполнен',     cls: 'warn' },
+  passive:    { text: 'Работает постоянно',                cls: 'ok' }
+};
+
+function openEconomyPanel(building) {
+  logiBuilding = building;
+  document.getElementById('logi-panel').style.display = 'flex';
+  document.getElementById('logi-tabs').style.display = 'none';
+  document.getElementById('logi-title').textContent =
+    (building.building_types || {}).name || 'Постройка';
+
+  var body = document.getElementById('logi-body');
+  body.innerHTML = '<div class="logi-empty">Загрузка...</div>';
+
+  var done = 0, status = null;
+  function step() {
+    done++;
+    if (done < 3) return;
+    renderEconomyPanel(body, status);
+  }
+
+  supabase.rpc('get_building_status', { p_building_id: building.id }).then(function(res) {
+    status = (!res.error && res.data && res.data.length) ? res.data[0] : null;
+    step();
+  });
+  loadPlanetStock(step);
+  loadResourceNames(step);
+}
+
+function renderEconomyPanel(body, st) {
+  body.innerHTML = '';
+
+  // --- что постройка делает ---
+  if (st) {
+    body.appendChild(logiSection(st.produces_resource ? 'Производство' : 'Назначение'));
+
+    var card = document.createElement('div');
+    card.className = 'eco-card';
+    if (st.produces_color) card.style.borderLeftColor = st.produces_color;
+
+    var what = '';
+    var eats = consumesText(st.consumes);
+
+    if (st.produces_resource && eats) {
+      what = 'Перерабатывает ' + eats + ' → ' + st.produces_name + ' ' + st.per_day + ' в сутки';
+    } else if (st.produces_resource) {
+      what = 'Добывает ' + st.produces_name + ' · ' + st.per_day + ' в сутки';
+    } else if (st.storage_bonus > 0) {
+      what = 'Поднимает предел запаса планеты на ' + st.storage_bonus +
+             ' по каждому ресурсу';
+    } else {
+      for (var bi = 0; bi < buildingTypes.length; bi++) {
+        if (buildingTypes[bi].code === st.code) {
+          what = buildingTypes[bi].description || '';
+          break;
+        }
+      }
+    }
+
+    var stat = ECONOMY_STATUS[st.status] || ECONOMY_STATUS.working;
+    var next = '';
+    if (st.next_at && (st.status === 'working')) {
+      var left = Math.max(0, Math.round((new Date(st.next_at).getTime() - Date.now()) / 1000));
+      next = left > 0 ? ' · следующая выдача через ' + formatLeft(left) : ' · выдача вот-вот';
+    }
+
+    card.innerHTML =
+      '<div class="eco-what">' + what + '</div>' +
+      '<div class="eco-status ' + stat.cls + '">' + stat.text + next + '</div>';
+    body.appendChild(card);
+  }
+
+  // --- склад планеты ---
+  var cap = planetStock.length ? planetStock[0].cap : 0;
+  body.appendChild(logiSection('Склад планеты · предел ' + cap));
+
+  var rows = planetStock.filter(function(r) {
+    return r.amount > 0 || r.per_day > 0 || r.is_primary || r.is_secondary;
+  });
+
+  if (!rows.length) {
+    var e = document.createElement('div');
+    e.className = 'logi-empty';
+    e.textContent = 'Склад пуст';
+    body.appendChild(e);
+    return;
+  }
+
+  rows.forEach(function(r) {
+    var row = document.createElement('div');
+    row.className = 'eco-stock';
+    var color = r.color || '#2a3644';
+    row.style.borderLeftColor = color;
+
+    var pct = cap ? Math.min(100, Math.round(r.amount / cap * 100)) : 0;
+    var note = r.per_day ? '+' + r.per_day + ' в сутки'
+             : r.is_primary ? 'основное, нужна добыча'
+             : r.is_secondary ? 'попутное' : '';
+
+    row.innerHTML =
+      '<div class="eco-stock-top">' +
+        '<span class="eco-stock-name">' + r.name + '</span>' +
+        '<span class="eco-stock-val' + (r.amount >= cap ? ' full' : '') + '">' +
+          r.amount + '</span>' +
+      '</div>' +
+      '<div class="eco-bar"><i style="width:' + pct + '%;background:' + color + '"></i></div>' +
+      (note ? '<div class="eco-stock-note">' + note + '</div>' : '');
+
+    body.appendChild(row);
+  });
 }

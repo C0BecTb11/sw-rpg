@@ -128,6 +128,11 @@ function makeFeedRow(e) {
   var line = e.subject ? e.subject : '';
   if (e.amount && e.amount > 1) line += (line ? ' · ' : '') + e.amount;
 
+  // Кто привёз: получатель должен видеть отправителя, а не только груз
+  if (e.meta && e.meta.from_player) {
+    line = e.meta.from_player + ' доставил: ' + line;
+  }
+
   var where = e.system_name
     ? (e.is_deep_space ? e.system_name : 'планета ' + e.system_name)
     : '';
