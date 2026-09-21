@@ -1488,15 +1488,27 @@ function openBuildPanel(slotIndex) {
   var list = document.getElementById('build-panel-list');
   list.innerHTML = '';
 
-  // Без справочника карточки покажут коды вместо названий
-  if (!Object.keys(resourceNames).length) {
-    loadResourceNames(function() { openBuildPanel(slotIndex); });
-    return;
+  // Карточки решают по справочнику и по запасу планеты, можно ли здесь
+  // строить. Оба приходят с сервера асинхронно, и раньше карточки
+  // рисовались до их прихода: полоса запаса показывала правду, а под ней
+  // добыча помечалась «нет такого сырья». Поэтому ждём оба ответа и только
+  // потом рисуем. Запас обновляем при каждом открытии — решение, что
+  // строить, принимается здесь, и цифры должны быть свежими.
+  var namesReady = Object.keys(resourceNames).length > 0;
+  var pending = namesReady ? 1 : 2;
+
+  function ready() {
+    pending--;
+    if (pending > 0) return;
+    renderStockStrip(slotIndex);
+    renderBuildCards(slotIndex, panel, list);
   }
 
-  // Запас планеты обновляем при каждом открытии: решение, что строить,
-  // принимается именно здесь, и цифры должны быть свежими
-  loadPlanetStock(function() { renderStockStrip(slotIndex); });
+  if (!namesReady) loadResourceNames(ready);
+  loadPlanetStock(ready);
+}
+
+function renderBuildCards(slotIndex, panel, list) {
 
   // Показываем только постройки своей фракции и только наземные —
   // космическая станция ставится на орбитальной карте.
