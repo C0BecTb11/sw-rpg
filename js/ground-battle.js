@@ -4528,89 +4528,41 @@ function logiAmount(max) {
 }
 
 // ---------- вкладка «Отправка» ----------
+// Конвой это командир с приписанными кораблями: груз ложится в их трюмы,
+// флот прыгает по гиперпути и разгружается по прибытии. Поэтому сначала
+// выбирается командир — от него зависит, сколько вообще можно увезти.
 function renderLogiSend(body) {
   var sysId = logiBuilding.system_id;
 
   Promise.all([
     supabase.rpc('get_planet_stock', { p_system_id: sysId }),
     supabase.rpc('get_convoy_destinations', { p_from: sysId }),
+    supabase.rpc('get_convoy_commanders', { p_system_id: sysId }),
     supabase.rpc('get_my_convoys')
   ]).then(function(r) {
     var stock = (r[0].error ? [] : (r[0].data || [])).filter(function(x) { return x.amount > 0; });
     var dests = r[1].error ? [] : (r[1].data || []);
-    var convoys = r[2].error ? [] : (r[2].data || []);
+    var cmds = (r[2].error ? [] : (r[2].data || [])).filter(function(c) { return !c.busy; });
+    var convoys = r[3].error ? [] : (r[3].data || []);
 
     body.innerHTML = '';
+    body.appendChild(logiSection('Отправить конвой'));
 
-    if (!stock.length) {
-      body.appendChild(logiSection('Отправка'));
+    var why = null;
+    if (!cmds.length) why = 'На планете нет свободных командиров';
+    else if (!stock.length) why = 'На складе планеты пусто';
+    else if (!dests.length) why = 'Рядом нет планет своей стороны — конвой ходит к соседям по гиперпути';
+
+    if (why) {
       var e = document.createElement('div');
       e.className = 'logi-empty';
-      e.textContent = 'На складе планеты пусто';
+      e.textContent = why;
       body.appendChild(e);
-    } else if (!dests.length) {
-      body.appendChild(logiSection('Отправка'));
-      var e2 = document.createElement('div');
-      e2.className = 'logi-empty';
-      e2.textContent = 'Нет планет своей стороны, куда вести конвой';
-      body.appendChild(e2);
     } else {
-      body.appendChild(logiSection('Отправить конвой'));
-
-      var form = document.createElement('div');
-      form.className = 'logi-form';
-
-      var resSel = document.createElement('select');
-      resSel.className = 'logi-select';
-      stock.forEach(function(x) {
-        var o = document.createElement('option');
-        o.value = x.resource;
-        o.textContent = x.name + ' · ' + x.amount;
-        resSel.appendChild(o);
-      });
-
-      var dstSel = document.createElement('select');
-      dstSel.className = 'logi-select';
-      dests.forEach(function(d) {
-        var o = document.createElement('option');
-        o.value = d.system_id;
-        o.textContent = d.name + ' · ' + d.hops + ' прыж. · ' + formatLeft(d.seconds) +
-                        (d.controlled ? '' : ' · союзник');
-        dstSel.appendChild(o);
-      });
-
-      var qty = logiAmount(stock[0].amount);
-      resSel.addEventListener('change', function() {
-        var pick = null;
-        stock.forEach(function(x) { if (x.resource === resSel.value) pick = x; });
-        qty.valueEl.textContent = Math.min(10, pick ? pick.amount : 1);
-      });
-
-      var go = document.createElement('button');
-      go.className = 'logi-go';
-      go.textContent = 'Отправить';
-      go.addEventListener('click', function() {
-        go.disabled = true;
-        supabase.rpc('dispatch_convoy', {
-          p_from_system: sysId,
-          p_to_system: dstSel.value,
-          p_resource: resSel.value,
-          p_amount: parseInt(qty.valueEl.textContent, 10)
-        }).then(function(res) {
-          go.disabled = false;
-          if (res.error) { alert(res.error.message); return; }
-          setLogiTab('send');
-        });
-      });
-
-      form.appendChild(resSel);
-      form.appendChild(dstSel);
-      form.appendChild(qty);
-      form.appendChild(go);
-      body.appendChild(form);
+      body.appendChild(buildConvoyForm(sysId, stock, dests, cmds));
     }
 
-    body.appendChild(logiSection('Поставки в пути'));
+    body.appendChild(logiSection('Конвои в пути'));
 
     if (!convoys.length) {
       var e3 = document.createElement('div');
@@ -4625,19 +4577,165 @@ function renderLogiSend(body) {
       row.className = 'logi-row';
 
       var state = c.status === 'in_flight' ? 'в пути · ' + formatLeft(c.seconds_left)
-                : c.status === 'delivered' ? 'доставлено'
-                : c.status === 'returned' ? 'вернулся: блокада' : c.status;
+                : c.status === 'delivered' ? 'разгружен' : c.status;
 
       row.innerHTML =
         '<div class="logi-info">' +
-          '<div class="logi-name">' + c.resource_name + ' · ' + c.amount + '</div>' +
+          '<div class="logi-name">' + (c.resource_name || 'груз') + '</div>' +
           '<div class="logi-sub">' + c.from_name + ' → ' + c.to_name + '</div>' +
         '</div>' +
-        '<div class="logi-state' + (c.status === 'returned' ? ' bad' : '') + '">' + state + '</div>';
-
+        '<div class="logi-state">' + state + '</div>';
       body.appendChild(row);
     });
   });
+}
+
+function buildConvoyForm(sysId, stock, dests, cmds) {
+  var form = document.createElement('div');
+  form.className = 'logi-form';
+
+  // --- командир ---
+  var cmdSel = document.createElement('select');
+  cmdSel.className = 'logi-select';
+  cmds.forEach(function(c) {
+    var o = document.createElement('option');
+    o.value = c.commander_id;
+    o.textContent = (c.name || 'Без имени') + ' · кораблей ' + c.ships +
+                    ' · влезет ' + c.free_units + ' ед.';
+    cmdSel.appendChild(o);
+  });
+
+  // --- куда ---
+  var dstSel = document.createElement('select');
+  dstSel.className = 'logi-select';
+  dests.forEach(function(d) {
+    var o = document.createElement('option');
+    o.value = d.system_id;
+    o.textContent = d.name + ' · ' + formatLeft(d.seconds) +
+                    (d.controlled ? '' : ' · союзник');
+    dstSel.appendChild(o);
+  });
+
+  var readyNote = document.createElement('div');
+  readyNote.className = 'logi-note';
+
+  var capLine = document.createElement('div');
+  capLine.className = 'logi-cap';
+
+  form.appendChild(cmdSel);
+  form.appendChild(readyNote);
+  form.appendChild(dstSel);
+
+  // --- груз: по строке на каждый ресурс склада ---
+  var picks = {};
+  var rows = document.createElement('div');
+  rows.className = 'logi-cargo';
+
+  function currentCmd() {
+    var found = null;
+    cmds.forEach(function(c) { if (c.commander_id === cmdSel.value) found = c; });
+    return found;
+  }
+
+  function total() {
+    var t = 0;
+    for (var k in picks) if (Object.prototype.hasOwnProperty.call(picks, k)) t += picks[k];
+    return t;
+  }
+
+  function refresh() {
+    var c = currentCmd();
+    var free = c ? c.free_units : 0;
+    var t = total();
+
+    capLine.textContent = 'Груз ' + t + ' из ' + free + ' ед.';
+    capLine.classList.toggle('over', t > free);
+
+    // Не весь флот в полосе — прыжок не состоится, говорим заранее
+    if (c && c.ready < c.ships) {
+      readyNote.textContent = 'В зоне прыжка ' + c.ready + ' из ' + c.ships +
+                              ' кораблей — сначала выведи весь флот в полосу';
+      readyNote.classList.add('warn');
+    } else {
+      readyNote.textContent = '';
+      readyNote.classList.remove('warn');
+    }
+
+    go.disabled = t < 1 || t > free || !c || c.ready < c.ships;
+  }
+
+  stock.forEach(function(x) {
+    picks[x.resource] = 0;
+
+    var line = document.createElement('div');
+    line.className = 'logi-cargo-row';
+    if (x.color) line.style.borderLeft = '3px solid ' + x.color;
+
+    var label = document.createElement('div');
+    label.className = 'logi-cargo-name';
+    label.innerHTML = x.name + '<span>на складе ' + x.amount + '</span>';
+
+    var qty = document.createElement('div');
+    qty.className = 'logi-qty';
+
+    var minus = document.createElement('button');
+    minus.className = 'logi-qty-btn'; minus.textContent = '−';
+    var val = document.createElement('span');
+    val.className = 'logi-qty-value'; val.textContent = '0';
+    var plus = document.createElement('button');
+    plus.className = 'logi-qty-btn'; plus.textContent = '+';
+    var fill = document.createElement('button');
+    fill.className = 'logi-qty-btn'; fill.textContent = 'макс';
+
+    function set(n) {
+      picks[x.resource] = Math.max(0, Math.min(x.amount, n));
+      val.textContent = picks[x.resource];
+      refresh();
+    }
+
+    minus.addEventListener('click', function() { set(picks[x.resource] - 10); });
+    plus.addEventListener('click', function() { set(picks[x.resource] + 10); });
+    // «макс» — сколько этого ресурса ещё поместится во флот
+    fill.addEventListener('click', function() {
+      var c = currentCmd();
+      var room = (c ? c.free_units : 0) - (total() - picks[x.resource]);
+      set(Math.min(x.amount, Math.max(0, room)));
+    });
+
+    qty.appendChild(minus); qty.appendChild(val); qty.appendChild(plus); qty.appendChild(fill);
+    line.appendChild(label);
+    line.appendChild(qty);
+    rows.appendChild(line);
+  });
+
+  form.appendChild(rows);
+  form.appendChild(capLine);
+
+  var go = document.createElement('button');
+  go.className = 'logi-go';
+  go.textContent = 'Отправить конвой';
+  go.addEventListener('click', function() {
+    var cargo = {};
+    for (var k in picks) {
+      if (Object.prototype.hasOwnProperty.call(picks, k) && picks[k] > 0) cargo[k] = picks[k];
+    }
+
+    go.disabled = true;
+    supabase.rpc('dispatch_convoy', {
+      p_commander_id: cmdSel.value,
+      p_to_system: dstSel.value,
+      p_cargo: cargo
+    }).then(function(res) {
+      if (res.error) { alert(res.error.message); refresh(); return; }
+      setLogiTab('send');
+    });
+  });
+
+  cmdSel.addEventListener('change', refresh);
+  form.appendChild(go);
+  refresh();
+
+  return form;
 }
 
 // ---------- вкладка «Рынок» ----------

@@ -1041,3 +1041,49 @@ html, body {
 
 /* Не весь флот в полосе — прыжок не состоится, сервер откажет */
 .intel-sub.warn { color: #d9a940; }
+
+/* ===== Форма конвоя: груз по ресурсам ===== */
+
+.logi-cargo {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.logi-cargo-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 7px;
+}
+
+.logi-cargo-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: #cfd8dc;
+}
+
+.logi-cargo-name span {
+  display: block;
+  margin-top: 2px;
+  font-size: 9px;
+  color: #55606c;
+}
+
+.logi-cargo-row .logi-qty { flex: none; }
+.logi-cargo-row .logi-qty-value { min-width: 30px; }
+
+/* Итог по вместимости: перевес виден сразу, до нажатия */
+.logi-cap {
+  padding: 8px 0 2px;
+  font-size: 11px;
+  color: #4a90d9;
+  text-align: right;
+}
+
+.logi-cap.over { color: #d94a4a; }
+.logi-note.warn { color: #d9a940; }
