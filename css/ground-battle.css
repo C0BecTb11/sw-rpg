@@ -1150,3 +1150,59 @@ html, body {
   font-size: 9px;
   color: #55606c;
 }
+
+/* ===== Вывоз с рынка флотом ===== */
+
+.logi-order { border-bottom: 1px solid #1c2530; }
+.logi-order:last-of-type { border-bottom: none; }
+.logi-order .logi-row { border-bottom: none; }
+
+.logi-pickup {
+  margin: 0 0 12px;
+  padding: 10px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 8px;
+}
+
+/* Переключатель «вернуться домой» — понятный без подписи-инструкции */
+.logi-toggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 9px 10px;
+  background: #0a0d14;
+  border: 1px solid #2a3644;
+  border-radius: 7px;
+  color: #8fa8c4;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  text-align: left;
+}
+
+.logi-toggle i {
+  flex: none;
+  position: relative;
+  width: 30px;
+  height: 16px;
+  border-radius: 8px;
+  background: #1c2530;
+  transition: background 0.15s;
+}
+
+.logi-toggle i::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #55606c;
+  transition: left 0.15s, background 0.15s;
+}
+
+.logi-toggle.on { color: #cfd8dc; border-color: #4a90d9; }
+.logi-toggle.on i { background: #1f3a5c; }
+.logi-toggle.on i::after { left: 16px; background: #4a90d9; }

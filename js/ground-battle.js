@@ -4594,19 +4594,32 @@ function renderLogiSend(body) {
       return;
     }
 
+    var STAGE = {
+      to_pickup: 'летит к продавцу',
+      to_dest:   'везёт груз',
+      returning: 'возвращается'
+    };
+
     convoys.forEach(function(c) {
       var row = document.createElement('div');
       row.className = 'logi-row';
 
-      var state = c.status === 'in_flight' ? 'в пути · ' + formatLeft(c.seconds_left)
-                : c.status === 'delivered' ? 'разгружен' : c.status;
+      var state = c.status === 'in_flight'
+                    ? (STAGE[c.stage] || 'в пути') + ' · ' + formatLeft(c.seconds_left)
+                : c.status === 'delivered' ? 'выполнен'
+                : c.status === 'stalled' ? 'встал' : c.status;
+
+      var path = c.kind === 'market' && c.pickup_name
+        ? c.pickup_name + ' → ' + c.to_name
+        : c.from_name + ' → ' + c.to_name;
 
       row.innerHTML =
         '<div class="logi-info">' +
-          '<div class="logi-name">' + (c.resource_name || 'груз') + '</div>' +
-          '<div class="logi-sub">' + c.from_name + ' → ' + c.to_name + '</div>' +
+          '<div class="logi-name">' + (c.cargo_text || 'груз') + '</div>' +
+          '<div class="logi-sub">' + path + (c.return_home ? ' · и обратно' : '') + '</div>' +
         '</div>' +
-        '<div class="logi-state">' + state + '</div>';
+        '<div class="logi-state' + (c.status === 'stalled' ? ' bad' : '') + '">' +
+          state + '</div>';
       body.appendChild(row);
     });
   });
@@ -4735,6 +4748,9 @@ function buildConvoyForm(sysId, stock, dests, cmds) {
   form.appendChild(rows);
   form.appendChild(capLine);
 
+  var back = makeReturnToggle();
+  form.appendChild(back.el);
+
   var go = document.createElement('button');
   go.className = 'logi-go';
   go.textContent = 'Отправить конвой';
@@ -4748,7 +4764,8 @@ function buildConvoyForm(sysId, stock, dests, cmds) {
     supabase.rpc('dispatch_convoy', {
       p_commander_id: cmdSel.value,
       p_to_system: dstSel.value,
-      p_cargo: cargo
+      p_cargo: cargo,
+      p_return_home: back.value()
     }).then(function(res) {
       if (res.error) { alert(res.error.message); refresh(); return; }
       setLogiTab('send');
@@ -4776,21 +4793,47 @@ function renderLogiMarket(body) {
     if (orders.length) {
       body.appendChild(logiSection('Оплачено, ждёт вывоза'));
       orders.forEach(function(o) {
+        var wrap = document.createElement('div');
+        wrap.className = 'logi-order';
+
         var row = document.createElement('div');
         row.className = 'logi-row';
         row.innerHTML =
           '<div class="logi-info">' +
             '<div class="logi-name">' + o.resource_name + ' · ' + o.amount_left + '</div>' +
-            '<div class="logi-sub">Забрать на планете ' + o.system_name +
-              ' · осталось ' + formatLeft(o.seconds_left) + '</div>' +
+            '<div class="logi-sub">У продавца на планете ' + o.system_name +
+              ' · бронь ещё ' + formatLeft(o.seconds_left) + '</div>' +
           '</div>';
-        body.appendChild(row);
+
+        if (o.fleet_sent) {
+          var sent = document.createElement('div');
+          sent.className = 'logi-state';
+          sent.textContent = 'флот в пути';
+          row.appendChild(sent);
+          wrap.appendChild(row);
+        } else {
+          var fetch = document.createElement('button');
+          fetch.className = 'logi-go small';
+          fetch.textContent = 'Вывезти флотом';
+          row.appendChild(fetch);
+          wrap.appendChild(row);
+
+          var formBox = document.createElement('div');
+          wrap.appendChild(formBox);
+
+          fetch.addEventListener('click', function() {
+            if (formBox.firstChild) { formBox.innerHTML = ''; return; }
+            buildPickupForm(o, formBox);
+          });
+        }
+
+        body.appendChild(wrap);
       });
 
       var hint = document.createElement('div');
       hint.className = 'logi-note';
-      hint.textContent = 'Вывозить своим кораблём: подведи его к этой планете ' +
-                         'и грузись через трюм. Деньги уйдут продавцу при погрузке.';
+      hint.textContent = 'Флот сам долетит до продавца по своим мирам, заберёт покупку ' +
+                         'и отвезёт на выбранную планету. Деньги продавец получит при погрузке.';
       body.appendChild(hint);
     }
 
@@ -5310,5 +5353,125 @@ function renderEconomyPanel(body, st) {
       (note ? '<div class="eco-stock-note">' + note + '</div>' : '');
 
     body.appendChild(row);
+  });
+}
+
+// Переключатель «вернуться домой»: бывает, что флот нужен именно там,
+// куда он доставил, поэтому решает игрок каждый раз заново.
+function makeReturnToggle() {
+  var on = false;
+  var el = document.createElement('button');
+  el.type = 'button';
+  el.className = 'logi-toggle';
+
+  function paint() {
+    el.classList.toggle('on', on);
+    el.innerHTML = '<i></i><span>' +
+      (on ? 'После доставки вернуться на эту планету'
+          : 'После доставки остаться там') + '</span>';
+  }
+
+  el.addEventListener('click', function() { on = !on; paint(); });
+  paint();
+
+  return { el: el, value: function() { return on; } };
+}
+
+// Вывоз покупки флотом: командир на этой планете, куда выгрузить,
+// возвращаться ли. Путь к продавцу и к получателю сервер проложит сам.
+function buildPickupForm(order, box) {
+  box.innerHTML = '<div class="logi-empty">Загрузка...</div>';
+  var sysId = logiBuilding.system_id;
+
+  Promise.all([
+    supabase.rpc('get_convoy_commanders', { p_system_id: sysId }),
+    supabase.rpc('get_convoy_destinations', { p_from: sysId })
+  ]).then(function(r) {
+    var cmds = (r[0].error ? [] : (r[0].data || [])).filter(function(c) { return !c.busy; });
+    var dests = r[1].error ? [] : (r[1].data || []);
+
+    box.innerHTML = '';
+    var form = document.createElement('div');
+    form.className = 'logi-form logi-pickup';
+
+    if (!cmds.length) {
+      form.innerHTML = '<div class="logi-empty">На этой планете нет свободных командиров</div>';
+      box.appendChild(form);
+      return;
+    }
+
+    var cmdSel = document.createElement('select');
+    cmdSel.className = 'logi-select';
+    cmds.forEach(function(c) {
+      var o = document.createElement('option');
+      o.value = c.commander_id;
+      o.textContent = (c.name || 'Без имени') + ' · влезет ' + c.free_units + ' ед.';
+      cmdSel.appendChild(o);
+    });
+
+    // Куда выгрузить: сюда же или на любую свою планету
+    var dstSel = document.createElement('select');
+    dstSel.className = 'logi-select';
+    var here = document.createElement('option');
+    here.value = sysId;
+    here.textContent = 'Сюда, на эту планету';
+    dstSel.appendChild(here);
+    dests.forEach(function(d) {
+      var o = document.createElement('option');
+      o.value = d.system_id;
+      o.textContent = d.name + (d.controlled ? '' : ' · союзник');
+      dstSel.appendChild(o);
+    });
+
+    var fit = document.createElement('div');
+    fit.className = 'logi-cap';
+
+    var back = makeReturnToggle();
+
+    var go = document.createElement('button');
+    go.className = 'logi-go';
+    go.textContent = 'Отправить за покупкой';
+
+    function refresh() {
+      var c = null;
+      cmds.forEach(function(x) { if (x.commander_id === cmdSel.value) c = x; });
+      var free = c ? c.free_units : 0;
+      fit.textContent = 'Покупка ' + order.amount_left + ' из ' + free + ' ед. свободного места';
+      fit.classList.toggle('over', order.amount_left > free);
+
+      var notReady = c && c.ready < c.ships;
+      go.disabled = !c || order.amount_left > free || notReady;
+      go.textContent = notReady ? 'Сначала выведи весь флот в полосу прыжка'
+                                : 'Отправить за покупкой';
+    }
+
+    // «Сюда» — и возвращаться уже некуда: скрываем переключатель
+    dstSel.addEventListener('change', function() {
+      back.el.style.display = dstSel.value === sysId ? 'none' : '';
+    });
+    back.el.style.display = 'none';
+
+    cmdSel.addEventListener('change', refresh);
+
+    go.addEventListener('click', function() {
+      go.disabled = true;
+      supabase.rpc('dispatch_market_pickup', {
+        p_commander_id: cmdSel.value,
+        p_order_id: order.order_id,
+        p_to_system: dstSel.value,
+        p_return_home: dstSel.value === sysId ? false : back.value()
+      }).then(function(res) {
+        if (res.error) { alert(res.error.message); refresh(); return; }
+        setLogiTab('market');
+      });
+    });
+
+    form.appendChild(cmdSel);
+    form.appendChild(dstSel);
+    form.appendChild(back.el);
+    form.appendChild(fit);
+    form.appendChild(go);
+    box.appendChild(form);
+    refresh();
   });
 }
