@@ -126,11 +126,23 @@ function makeFeedRow(e) {
   row.className = 'feed-row tone-' + e.tone + (e.seen ? '' : ' fresh');
 
   var line = e.subject ? e.subject : '';
-  if (e.amount && e.amount > 1) line += (line ? ' · ' : '') + e.amount;
+
+  // У «на подходе» число — это секунды до прибытия, а не количество
+  var isEta = e.type === 'enemy_approaching' || e.type === 'trade_approaching';
+  if (isEta && e.amount > 0) {
+    line += (line ? ' · ' : '') + 'прибудет через ' + feedEta(e.amount);
+  } else if (e.amount && e.amount > 1) {
+    line += (line ? ' · ' : '') + e.amount;
+  }
 
   // Кто привёз: получатель должен видеть отправителя, а не только груз
   if (e.meta && e.meta.from_player) {
     line = e.meta.from_player + ' доставил: ' + line;
+  }
+
+  // Откуда идёт флот — сервер уже перевёл код планеты в название
+  if (e.meta && e.meta.from_name) {
+    line += (line ? ' · ' : '') + 'из ' + e.meta.from_name;
   }
 
   var where = e.system_name
@@ -207,6 +219,11 @@ function renderIncomePanel(body) {
       body.appendChild(row);
     });
   });
+}
+
+function feedEta(sec) {
+  if (sec >= 60) return Math.floor(sec / 60) + ' мин ' + (sec % 60) + ' с';
+  return sec + ' с';
 }
 
 function feedWhen(iso) {

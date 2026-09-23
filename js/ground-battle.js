@@ -88,17 +88,34 @@ function loadScoutReport() {
 
     if (!list.length) { bar.style.display = 'none'; return; }
 
+    // Раньше сводка висела полосой во всю ширину посреди карты и закрывала
+    // обзор. Теперь это компактная плашка в углу: число и тревожный цвет,
+    // если кто-то на подходе. Подробности — по нажатию.
+    var here = list.filter(function(c) { return !c.arriving; }).length;
+    var soon = list.length - here;
+
     var lines = list.map(function(c) {
-      var who = c.commander_name + (c.player_name ? ' · ' + c.player_name : '');
+      var who = escHtml(c.commander_name) + (c.player_name ? ' · ' + escHtml(c.player_name) : '');
       return c.arriving
         ? '<i class="scout-soon">' + who + ' — прибудет через ' +
           formatLeft(c.seconds_left) + '</i>'
         : '<i>' + who + ' — здесь</i>';
     });
 
-    bar.innerHTML = '<div class="scout-title">Разведка: вражеский командир</div>' +
-                    lines.join('');
+    bar.classList.toggle('alert', soon > 0);
+    bar.innerHTML =
+      '<div class="scout-chip">' +
+        '<b>Разведка</b>' +
+        '<span>' + (here ? here + ' здесь' : '') +
+          (here && soon ? ' · ' : '') + (soon ? soon + ' на подходе' : '') + '</span>' +
+      '</div>' +
+      '<div class="scout-list">' + lines.join('') + '</div>';
     bar.style.display = 'block';
+
+    if (!bar.dataset.bound) {
+      bar.dataset.bound = '1';
+      bar.addEventListener('click', function() { bar.classList.toggle('open'); });
+    }
   });
 }
 
