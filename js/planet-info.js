@@ -183,6 +183,15 @@ function makePiStat(label, value) {
 // Кнопка отправки командира появляется, только если есть свободный командир
 // в системе, напрямую связанной нитью с этой. Один прыжок за раз — поэтому
 // пролететь «насквозь» через непокорённую вражескую систему нельзя.
+//
+// Кто именно летит, игрок выбирает сам в отдельном окне: командиров у него
+// может быть несколько на одной планете, и у каждого свой приписанный флот.
+// Раньше отправлялся первый попавшийся — и вместе с ним улетало не то.
+var moveTargetId = null;
+var moveTargetName = '';
+var moveCandidates = [];
+var moveChosen = null;
+
 function updateMoveButton(viewerId, targetSystemId) {
   var moveBtn = document.getElementById('pi-move-btn');
   if (!moveBtn || !viewerId) return;
@@ -191,46 +200,181 @@ function updateMoveButton(viewerId, targetSystemId) {
   moveBtn.disabled = false;
   moveBtn.textContent = 'Отправить командира';
 
-  Promise.all([
-    supabase.from('commanders').select('*').eq('user_id', viewerId).eq('unlocked', true),
-    supabase.from('hyperlanes').select('*')
-  ]).then(function(results) {
-    if (results[0].error || !results[0].data) return;
-    var lanes = results[1].error ? [] : results[1].data;
-
-    function connected(a, b) {
-      return lanes.some(function(l) {
-        return (l.system_a === a && l.system_b === b) || (l.system_b === a && l.system_a === b);
-      });
-    }
-
-    var candidate = results[0].data.filter(function(c) {
-      if (c.moving_to) return false;
-      if (!c.current_system) return false;
-      if (c.current_system === targetSystemId) return false;
-      return connected(c.current_system, targetSystemId);
-    })[0];
-
-    if (!candidate) return;
+  supabase.rpc('get_move_candidates', { p_target: targetSystemId }).then(function(res) {
+    // Карточка могла смениться, пока шёл запрос
+    if (currentPlanetInfoSystemId !== targetSystemId) return;
+    if (res.error || !res.data || !res.data.length) return;
 
     moveBtn.style.display = 'block';
     moveBtn.onclick = function() {
-      moveBtn.disabled = true;
-      moveBtn.textContent = 'Отправляем...';
-      supabase.rpc('start_commander_move', {
-        p_commander_id: candidate.id,
-        p_target_system: targetSystemId
-      }).then(function(res) {
-        if (res.error) {
-          moveBtn.disabled = false;
-          moveBtn.textContent = 'Отправить командира';
-          alert('Не удалось отправить: ' + res.error.message);
-          return;
-        }
-        closePlanetInfo();
-      });
+      var nameEl = document.getElementById('pi-name');
+      openMovePanel(targetSystemId, nameEl ? nameEl.textContent : '');
     };
   });
+}
+
+function openMovePanel(targetId, targetName) {
+  moveTargetId = targetId;
+  moveTargetName = targetName;
+  moveChosen = null;
+
+  document.getElementById('move-panel').style.display = 'flex';
+  document.getElementById('move-subtitle').textContent = 'Цель: ' + targetName;
+  document.getElementById('move-list').innerHTML = '<div class="feed-empty">Загрузка...</div>';
+  paintMoveSend();
+
+  supabase.rpc('get_move_candidates', { p_target: targetId }).then(function(res) {
+    var list = document.getElementById('move-list');
+    if (res.error) {
+      list.innerHTML = '<div class="feed-empty">Не удалось получить командиров</div>';
+      return;
+    }
+
+    moveCandidates = res.data || [];
+    list.innerHTML = '';
+
+    if (!moveCandidates.length) {
+      list.innerHTML = '<div class="feed-empty">Рядом нет свободных командиров</div>';
+      return;
+    }
+
+    // Один командир — выбор очевиден, но состав всё равно показываем:
+    // игрок должен видеть, что улетит, до нажатия кнопки
+    if (moveCandidates.length === 1) moveChosen = moveCandidates[0].commander_id;
+
+    moveCandidates.forEach(function(c) { list.appendChild(makeMoveCard(c)); });
+    paintMoveSend();
+  });
+}
+
+function closeMovePanel() {
+  document.getElementById('move-panel').style.display = 'none';
+}
+
+function makeMoveCard(c) {
+  var card = document.createElement('div');
+  card.className = 'mv-card';
+  card.setAttribute('role', 'button');
+  card.setAttribute('data-id', c.commander_id);
+
+  var notReady = c.ships - c.ready;
+
+  var head =
+    '<div class="mv-head">' +
+      '<span class="mv-pawn">♟</span>' +
+      '<span class="mv-who"><b>' + escapeMove(c.name) + '</b>' +
+        '<i>стоит: ' + escapeMove(c.from_name) + '</i></span>' +
+      (notReady > 0
+        ? '<span class="mv-state warn">' + notReady + ' вне зоны прыжка</span>'
+        : '<span class="mv-state ok">готов</span>') +
+    '</div>';
+
+  var fleet = '<div class="mv-label">Приписанный флот</div>';
+  if (!c.fleet.length) {
+    fleet += '<div class="mv-none">кораблей нет — командир летит один</div>';
+  } else {
+    fleet += '<div class="mv-chips">' + c.fleet.map(function(f) {
+      return moveChip(f, 'ship');
+    }).join('') + '</div>';
+  }
+
+  var cargo = '';
+  if (c.cargo.length || c.resources > 0) {
+    cargo = '<div class="mv-label">На борту</div><div class="mv-chips">' +
+      c.cargo.map(function(x) { return moveChip(x, x.kind); }).join('') +
+      (c.resources > 0
+        ? '<span class="mv-chip mv-res"><b>' + c.resources + '</b><em>ед. сырья</em></span>'
+        : '') +
+      '</div>';
+  }
+
+  // Непривязанные корабли не летят — лучше сказать об этом заранее,
+  // чем игрок потом будет искать их на новой планете
+  var one = c.left_behind % 10 === 1 && c.left_behind % 100 !== 11;
+  var left = c.left_behind > 0
+    ? '<div class="mv-note">' + c.left_behind + ' ' + shipWord(c.left_behind) +
+      ' без командира ' + (one ? 'остаётся на месте и не полетит' : 'остаются на месте и не полетят') +
+      '</div>'
+    : '';
+
+  var warn = notReady > 0
+    ? '<div class="mv-note warn">Выведи флот в зону гиперпрыжка — иначе прыжок не начнётся</div>'
+    : '';
+
+  card.innerHTML = head + fleet + cargo + left + warn;
+
+  card.addEventListener('click', function() {
+    moveChosen = c.commander_id;
+    paintMoveSend();
+  });
+
+  return card;
+}
+
+function moveChip(item, kind) {
+  var thumbClass = kind === 'ship' || kind === 'fighter' ? 'mv-thumb ship' : 'mv-thumb';
+  var img = item.image
+    ? '<img src="../' + item.image + '" alt="" onerror="this.style.display=\'none\'">'
+    : '';
+  var tag = kind === 'hero' ? '<u class="mv-tag hero">герой</u>'
+          : kind === 'vehicle' ? '<u class="mv-tag">техника</u>'
+          : kind === 'fighter' ? '<u class="mv-tag">ангар</u>'
+          : '';
+
+  return '<span class="mv-chip">' +
+      '<span class="' + thumbClass + '">' + img + '</span>' +
+      '<span class="mv-chip-text"><em>' + escapeMove(item.name) + '</em>' + tag + '</span>' +
+      '<b>×' + item.count + '</b>' +
+    '</span>';
+}
+
+function paintMoveSend() {
+  var cards = document.querySelectorAll('#move-list .mv-card');
+  for (var i = 0; i < cards.length; i++) {
+    cards[i].classList.toggle('chosen', cards[i].getAttribute('data-id') === moveChosen);
+  }
+
+  var btn = document.getElementById('move-send');
+  var c = null;
+  moveCandidates.forEach(function(x) { if (x.commander_id === moveChosen) c = x; });
+
+  btn.disabled = !c || c.ready < c.ships;
+  btn.textContent = !c ? 'Выбери командира'
+    : (c.ready < c.ships ? 'Флот не в зоне прыжка' : 'Отправить на ' + moveTargetName);
+}
+
+function sendChosenCommander() {
+  var btn = document.getElementById('move-send');
+  if (!moveChosen || btn.disabled) return;
+
+  btn.disabled = true;
+  btn.textContent = 'Отправляем...';
+
+  supabase.rpc('start_commander_move', {
+    p_commander_id: moveChosen,
+    p_target_system: moveTargetId
+  }).then(function(res) {
+    if (res.error) {
+      alert('Не удалось отправить: ' + res.error.message);
+      paintMoveSend();
+      return;
+    }
+    closeMovePanel();
+    closePlanetInfo();
+  });
+}
+
+function shipWord(n) {
+  var d = n % 10, h = n % 100;
+  if (d === 1 && h !== 11) return 'корабль';
+  if (d >= 2 && d <= 4 && (h < 12 || h > 14)) return 'корабля';
+  return 'кораблей';
+}
+
+function escapeMove(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 function closePlanetInfo() {
@@ -252,6 +396,15 @@ document.addEventListener('DOMContentLoaded', function() {
   if (ground) ground.addEventListener('click', function() {
     if (!currentPlanetInfoSystemId) return;
     window.location.href = 'ground-battle.html?system=' + currentPlanetInfoSystemId;
+  });
+
+  var mvClose = document.getElementById('move-close');
+  var mvPanel = document.getElementById('move-panel');
+  var mvSend = document.getElementById('move-send');
+  if (mvClose) mvClose.addEventListener('click', closeMovePanel);
+  if (mvSend) mvSend.addEventListener('click', sendChosenCommander);
+  if (mvPanel) mvPanel.addEventListener('click', function(e) {
+    if (e.target === mvPanel) closeMovePanel();
   });
 
   var space = document.getElementById('pi-space-btn');

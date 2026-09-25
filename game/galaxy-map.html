@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="../css/galaxy.css">
 <link rel="stylesheet" href="../css/shared-ui.css">
 <link rel="stylesheet" href="../css/faction.css">
+<link rel="stylesheet" href="../css/transfer.css">
 </head>
 <body>
 
@@ -45,10 +46,12 @@
   <div id="bottom-panel-content">
     <button class="panel-item" id="panel-item-faction">
       <div class="panel-item-icon" id="faction-emblem">⬡</div>
+      <i class="panel-item-badge" id="faction-badge"></i>
       <span class="panel-item-label" id="faction-label">Фракция</span>
     </button>
     <button class="panel-item" id="panel-item-army">
       <div class="panel-item-icon">⚔</div>
+      <i class="panel-item-badge" id="army-badge"></i>
       <span class="panel-item-label">Армия</span>
     </button>
     <button class="panel-item" id="panel-item-processes">
@@ -70,6 +73,21 @@
   <div id="army-screen-header">
     <span class="army-screen-title">Армия</span>
     <button id="army-screen-close">✕</button>
+  </div>
+
+  <div class="army-section">
+    <div class="army-section-title">Союзники</div>
+    <div class="tr-entry">
+      <button id="tr-open-give" class="tr-entry-btn">
+        <span class="tr-entry-ico">⇄</span>
+        <span class="tr-entry-text"><b>Передать войска</b><i>корабли, технику и бойцов</i></span>
+      </button>
+      <button id="tr-open-inbox" class="tr-entry-btn">
+        <span class="tr-entry-ico">✉</span>
+        <span class="tr-entry-text"><b>Входящие</b><i id="tr-inbox-sub">новых предложений нет</i></span>
+        <em id="tr-inbox-badge"></em>
+      </button>
+    </div>
   </div>
 
   <div class="army-section">
@@ -116,6 +134,63 @@
 </div>
 </div>
 
+<div id="tr-panel" style="display:none;">
+  <div id="tr-box">
+    <div id="tr-header">
+      <div>
+        <div id="tr-title">Передача войск</div>
+        <div id="tr-subtitle">союзнику своей фракции</div>
+      </div>
+      <button id="tr-close">✕</button>
+    </div>
+    <div id="tr-tabs"></div>
+    <div id="tr-body"></div>
+    <div id="tr-foot">
+      <div id="tr-sum"></div>
+      <div id="tr-warn" style="display:none;"></div>
+      <input id="tr-note" type="text" maxlength="140" placeholder="сообщение союзнику — необязательно">
+      <button id="tr-send" disabled>Выбери союзника</button>
+      <div id="tr-foot-hint">Войска останутся на своих местах. Передача состоится, только когда союзник подтвердит.</div>
+    </div>
+  </div>
+  <div id="tr-toast"></div>
+</div>
+
+<div id="pr-panel" style="display:none;">
+  <div id="pr-box">
+    <div id="pr-header">
+      <div>
+        <div id="pr-title">Запрос планеты</div>
+        <div id="pr-subtitle"></div>
+      </div>
+      <button id="pr-close">✕</button>
+    </div>
+    <div id="pr-body"></div>
+    <div id="pr-foot">
+      <div id="pr-hint"></div>
+      <input id="pr-note" type="text" maxlength="140" placeholder="зачем тебе планета — необязательно">
+      <button id="pr-send" disabled>Выбери планету</button>
+    </div>
+  </div>
+  <div id="pr-toast"></div>
+</div>
+
+<div id="move-panel" style="display:none;">
+  <div id="move-box">
+    <div id="move-header">
+      <div>
+        <div id="move-title">Кто летит</div>
+        <div id="move-subtitle"></div>
+      </div>
+      <button id="move-close">✕</button>
+    </div>
+    <div id="move-list"></div>
+    <div id="move-foot">
+      <button id="move-send" disabled>Выбери командира</button>
+    </div>
+  </div>
+</div>
+
 <div id="faction-screen" style="display:none;">
   <div id="faction-screen-box">
     <button id="faction-screen-close">✕</button>
@@ -130,6 +205,21 @@
       <div class="faction-section-title">Лидер фракции</div>
       <div id="faction-screen-leader" class="faction-screen-text">—</div>
     </div>
+
+    <div class="faction-section" id="pr-section" style="display:none;">
+      <div class="faction-section-title">Управление планетой</div>
+      <button id="pr-open-btn" class="pr-open">
+        <span class="pr-open-ico">◉</span>
+        <span class="pr-open-text"><b>Запросить планету у лидера</b><i id="pr-open-sub">выбери планету — лидер получит уведомление</i></span>
+        <span class="pr-open-arrow">›</span>
+      </button>
+    </div>
+
+    <button id="pr-review-btn" class="pr-open pr-review" style="display:none;">
+      <span class="pr-open-ico">✉</span>
+      <span class="pr-open-text"><b>Запросы игроков на планеты</b><i>кто просит управление</i></span>
+      <em id="pr-review-count">0</em>
+    </button>
 
     <button id="faction-control-open-btn" style="display:none;">Панель управления фракции</button>
   </div>
@@ -201,11 +291,13 @@
 <script src="../js/profile.js"></script>
 <script src="../js/bottom-panel.js"></script>
 <script src="../js/army.js"></script>
+<script src="../js/troop-transfer.js"></script>
 <script src="../js/processes.js"></script>
 <script src="../js/ship-cargo.js"></script>
 <script src="../js/planet-info.js"></script>
 <script src="../js/faction-panel.js"></script>
 <script src="../js/faction-control.js"></script>
+<script src="../js/planet-request.js"></script>
 <script src="../js/planets.js"></script>
 <script src="../js/events-feed.js"></script>
 </body>

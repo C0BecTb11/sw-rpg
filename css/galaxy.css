@@ -1304,3 +1304,212 @@ body {
   color: #55606c;
   text-align: right;
 }
+
+/* ── Выбор командира для перелёта ─────────────────────────────── */
+#move-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 2300;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(5, 8, 13, 0.75);
+}
+
+#move-box {
+  width: 100%;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  background: #0d1119;
+  border-top: 1px solid #1c2530;
+  border-radius: 14px 14px 0 0;
+  font-family: 'Courier New', monospace;
+}
+
+#move-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 14px;
+  border-bottom: 1px solid #1c2530;
+}
+
+#move-title { font-size: 12px; letter-spacing: 1px; color: #cfd8dc; }
+#move-subtitle { margin-top: 3px; font-size: 10px; color: #55606c; }
+
+#move-close {
+  background: none;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  color: #8fa8c4;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  width: 30px;
+  height: 30px;
+}
+
+#move-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px 6px;
+}
+
+#move-foot {
+  flex: none;
+  padding: 10px 14px 16px;
+  border-top: 1px solid #1c2530;
+}
+
+#move-send {
+  width: 100%;
+  padding: 12px;
+  background: #5fd968;
+  border: none;
+  border-radius: 8px;
+  color: #0a0d14;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+#move-send:disabled { background: #1c2530; color: #55606c; }
+
+.mv-card {
+  display: block;
+  margin-bottom: 10px;
+  padding: 11px 12px 12px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.mv-card.chosen {
+  border-color: #5fd968;
+  background: rgba(95, 217, 104, 0.05);
+}
+
+.mv-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.mv-pawn {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border: 1px solid #2a3644;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #55606c;
+  font-size: 15px;
+}
+
+.mv-card.chosen .mv-pawn { border-color: #5fd968; color: #5fd968; }
+
+.mv-who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.mv-who b { font-size: 12px; color: #cfd8dc; font-weight: normal; }
+.mv-who i { font-size: 10px; color: #55606c; font-style: normal; }
+
+.mv-state {
+  flex: none;
+  padding: 3px 8px;
+  border-radius: 10px;
+  border: 1px solid;
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.mv-state.ok { color: #5fd968; border-color: rgba(95, 217, 104, 0.45); }
+.mv-state.warn { color: #d9a940; border-color: rgba(217, 169, 64, 0.45); }
+
+.mv-label {
+  margin: 8px 0 6px;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #55606c;
+}
+
+.mv-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.mv-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 9px 4px 4px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 7px;
+}
+
+.mv-chip > b { font-size: 11px; color: #d9a940; }
+
+.mv-chip-text { display: flex; flex-direction: column; gap: 2px; }
+.mv-chip-text em { font-style: normal; font-size: 10px; color: #cfd8dc; }
+
+.mv-tag {
+  text-decoration: none;
+  font-size: 8px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #55606c;
+}
+
+.mv-tag.hero { color: #a06fd9; }
+
+/* Портрет юнита 1:2 — показываем голову и торс, как в армии */
+.mv-thumb {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  overflow: hidden;
+  border-radius: 5px;
+  background: #05070b;
+  border: 1px solid #22303f;
+}
+
+.mv-thumb img {
+  position: absolute;
+  width: 190%;
+  left: -45%;
+  top: -7%;
+  display: block;
+}
+
+/* Корабль — вид сверху, целиком */
+.mv-thumb.ship { width: 22px; height: 30px; }
+
+.mv-thumb.ship img {
+  position: static;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.mv-res { padding: 6px 10px; }
+.mv-res b { font-size: 11px; color: #d9a940; }
+.mv-res em { font-style: normal; font-size: 10px; color: #8fa8c4; margin-left: 4px; }
+
+.mv-none { font-size: 10px; color: #55606c; }
+
+.mv-note {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed #1c2530;
+  font-size: 10px;
+  line-height: 1.4;
+  color: #8fa8c4;
+}
+
+.mv-note.warn { color: #d9a940; }

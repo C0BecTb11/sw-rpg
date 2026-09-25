@@ -607,3 +607,342 @@
 .fc-mood.good { color: #5fd968; }
 .fc-mood.mid { color: #d9a940; }
 .fc-mood.bad { color: #d94a4a; }
+
+/* ---------- Запрос планеты у лидера ---------- */
+
+.pr-open {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 11px 12px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 10px;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pr-open:active { border-color: #4a90d9; }
+.pr-open:disabled { opacity: 0.5; }
+
+.pr-open-ico {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #2a3644;
+  border-radius: 50%;
+  color: #4a90d9;
+  font-size: 13px;
+}
+
+.pr-open-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.pr-open-text b { font-size: 11px; font-weight: normal; color: #cfd8dc; }
+.pr-open-text i { font-size: 9px; font-style: normal; color: #55606c; }
+
+.pr-open-arrow { flex: none; color: #55606c; font-size: 16px; }
+
+.pr-review { margin-top: 18px; }
+
+#pr-review-count {
+  flex: none;
+  min-width: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: #1c2530;
+  color: #55606c;
+  font-size: 11px;
+  font-style: normal;
+  line-height: 22px;
+  text-align: center;
+}
+
+#pr-review-count.has { background: #d94a4a; color: #0a0d14; font-weight: bold; }
+
+/* Баннер в панели управления */
+.fc-requests-banner {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 11px 13px;
+  background: rgba(217, 169, 64, 0.07);
+  border: 1px solid rgba(217, 169, 64, 0.45);
+  border-radius: 10px;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fc-requests-banner b { color: #d9a940; font-weight: normal; }
+.fc-requests-banner em { flex: none; font-style: normal; color: #d9a940; font-size: 10px; }
+
+/* Шторка */
+#pr-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 2400;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(5, 8, 13, 0.75);
+  font-family: 'Courier New', monospace;
+}
+
+#pr-box {
+  width: 100%;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  background: #0d1119;
+  border-top: 1px solid #1c2530;
+  border-radius: 14px 14px 0 0;
+}
+
+#pr-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 14px;
+  border-bottom: 1px solid #1c2530;
+}
+
+#pr-title { font-size: 12px; letter-spacing: 1px; color: #cfd8dc; }
+#pr-subtitle { margin-top: 3px; font-size: 10px; color: #55606c; }
+
+#pr-close {
+  background: none;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  color: #8fa8c4;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  width: 30px;
+  height: 30px;
+}
+
+#pr-body {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 12px 14px 16px;
+}
+
+.pr-empty { padding: 22px 0; font-size: 11px; color: #55606c; text-align: center; }
+
+.pr-block-title {
+  margin: 4px 0 9px;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #8fa8c4;
+}
+
+.pr-mine { margin-bottom: 16px; }
+
+.pr-mine-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid #1c2530;
+}
+
+.pr-mine-row:last-child { border-bottom: none; }
+.pr-mine-name { flex: 1; font-size: 11px; color: #cfd8dc; }
+
+.pr-mine-cancel {
+  background: none;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  padding: 4px 8px;
+  color: #8fa8c4;
+  font-family: 'Courier New', monospace;
+  font-size: 9px;
+}
+
+.pr-status {
+  flex: none;
+  padding: 3px 8px;
+  border: 1px solid;
+  border-radius: 10px;
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.pr-status.wait { color: #d9a940; border-color: rgba(217, 169, 64, 0.45); }
+.pr-status.good { color: #5fd968; border-color: rgba(95, 217, 104, 0.45); }
+.pr-status.bad { color: #d94a4a; border-color: rgba(217, 74, 74, 0.45); }
+.pr-status.dim { color: #55606c; border-color: #2a3644; }
+
+.pr-planet {
+  margin-bottom: 7px;
+  padding: 10px 12px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-left: 2px solid #4a90d9;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.pr-planet.chosen {
+  border-color: #5fd968;
+  border-left-color: #5fd968;
+  background: rgba(95, 217, 104, 0.05);
+}
+
+.pr-planet.locked { cursor: default; opacity: 0.55; border-left-color: #2a3644; }
+
+.pr-planet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pr-planet-name { font-size: 12px; color: #cfd8dc; }
+
+.pr-radio {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border: 1px solid #2a3644;
+  border-radius: 50%;
+}
+
+.pr-planet.chosen .pr-radio { border: 5px solid #5fd968; }
+
+.pr-who { display: block; margin-top: 4px; font-size: 10px; color: #55606c; }
+.pr-who.free { color: #5fd968; }
+.pr-who.fresh { color: #d9a940; }
+.pr-who.wait { color: #d9a940; }
+.pr-who.mine { color: #4a90d9; }
+
+#pr-foot {
+  flex: none;
+  padding: 10px 14px calc(14px + env(safe-area-inset-bottom));
+  border-top: 1px solid #1c2530;
+  background: #0b0f16;
+}
+
+#pr-hint { margin-bottom: 8px; font-size: 10px; line-height: 1.45; color: #8fa8c4; }
+
+#pr-note {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+  padding: 9px 10px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 7px;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  outline: none;
+}
+
+#pr-note:focus { border-color: #4a90d9; }
+
+#pr-send {
+  width: 100%;
+  padding: 12px;
+  background: #4a90d9;
+  border: none;
+  border-radius: 8px;
+  color: #0a0d14;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+#pr-send:disabled { background: #1c2530; color: #55606c; }
+
+/* Карточка запроса у лидера */
+.pr-req {
+  margin-bottom: 10px;
+  padding: 11px 12px 12px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-left: 3px solid #d9a940;
+  border-radius: 10px;
+}
+
+.pr-req-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.pr-req-planet { font-size: 13px; letter-spacing: 1px; color: #cfd8dc; }
+.pr-req-when { flex: none; font-size: 9px; color: #55606c; }
+
+.pr-req-who {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 9px;
+  font-size: 11px;
+  color: #8fa8c4;
+}
+
+.pr-req-who b { color: #cfd8dc; font-weight: normal; }
+
+.pr-req-who .tr-partner-pawn {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #2a3644;
+  border-radius: 50%;
+  color: #4a90d9;
+  font-size: 12px;
+}
+
+.pr-req-line { margin-top: 7px; font-size: 10px; color: #55606c; }
+.pr-req-line b { color: #8fa8c4; font-weight: normal; }
+.pr-req-line b.free { color: #5fd968; }
+.pr-req-line b.fresh { color: #d9a940; }
+.pr-req-line.warn { color: #d9a940; }
+
+.pr-req-note { margin-top: 8px; font-size: 11px; font-style: italic; color: #8fa8c4; }
+
+.pr-actions { display: flex; gap: 8px; margin-top: 11px; }
+
+.pr-btn {
+  flex: 1;
+  padding: 10px;
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.pr-btn.good { background: #5fd968; border: none; color: #0a0d14; font-weight: bold; }
+.pr-btn.ghost { background: none; border: 1px solid #2a3644; color: #8fa8c4; }
+.pr-btn:disabled { opacity: 0.45; }
+
+#pr-toast {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  top: 14px;
+  z-index: 2500;
+  padding: 11px 13px;
+  background: #10151e;
+  border: 1px solid #5fd968;
+  border-radius: 9px;
+  color: #cfd8dc;
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+#pr-toast.show { opacity: 1; transform: translateY(0); }
+#pr-toast.bad { border-color: #d94a4a; }

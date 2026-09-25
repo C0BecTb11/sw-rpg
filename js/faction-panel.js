@@ -51,6 +51,11 @@ function openFactionScreen() {
   planetsEl.textContent = '...';
   leaderEl.textContent = '...';
   controlBtn.style.display = 'none';
+  // Запрос планеты и список запросов появятся, когда станет ясно, лидер ли игрок
+  var prSection = document.getElementById('pr-section');
+  var prReview = document.getElementById('pr-review-btn');
+  if (prSection) prSection.style.display = 'none';
+  if (prReview) prReview.style.display = 'none';
   screen.style.display = 'flex';
 
   supabase.auth.getSession().then(function(res) {
@@ -87,6 +92,7 @@ function openFactionScreen() {
         if (!leaderId) {
           leaderEl.textContent = 'не назначен';
           currentPlayerIsLeader = false;
+          if (typeof onFactionScreenReady === 'function') onFactionScreenReady(false, false);
           return;
         }
 
@@ -94,6 +100,7 @@ function openFactionScreen() {
         if (currentPlayerIsLeader) {
           controlBtn.style.display = 'block';
         }
+        if (typeof onFactionScreenReady === 'function') onFactionScreenReady(currentPlayerIsLeader, true);
 
         supabase.from('profiles').select('nickname').eq('id', leaderId).maybeSingle().then(function(leaderProfileRes) {
           leaderEl.textContent = (leaderProfileRes.data && leaderProfileRes.data.nickname) || 'неизвестно';

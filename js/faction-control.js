@@ -32,6 +32,9 @@ function openFactionControlScreen() {
 
     listEl.innerHTML = '';
 
+    // Запросы игроков — там же, где лидер распределяет планеты
+    if (typeof makeRequestsBanner === 'function') listEl.appendChild(makeRequestsBanner());
+
     if (systems.length === 0) {
       listEl.innerHTML = '<div class="army-empty">У фракции пока нет планет</div>';
       return;

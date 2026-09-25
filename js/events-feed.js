@@ -173,6 +173,32 @@ function makeFeedRow(e) {
     row.appendChild(go);
   }
 
+  // Передача войск: карты тут нет, зато есть меню, где её подтверждают
+  if (e.meta && e.meta.transfer_id && typeof openTransferPanel === 'function') {
+    var open = document.createElement('button');
+    open.className = 'feed-go';
+    open.textContent = 'Открыть';
+    var inbound = e.type === 'transfer_offer' || e.type === 'transfer_received'
+               || e.type === 'transfer_cancelled';
+    open.addEventListener('click', function() {
+      closeEventsFeed();
+      openTransferPanel(inbound ? 'inbox' : 'out');
+    });
+    row.appendChild(open);
+  }
+
+  // Запрос планеты: лидер сразу попадает к списку запросов
+  if (e.type === 'planet_request' && typeof openPlanetRequests === 'function') {
+    var review = document.createElement('button');
+    review.className = 'feed-go';
+    review.textContent = 'Рассмотреть';
+    review.addEventListener('click', function() {
+      closeEventsFeed();
+      openPlanetRequests();
+    });
+    row.appendChild(review);
+  }
+
   return row;
 }
 
