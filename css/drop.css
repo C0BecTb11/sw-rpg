@@ -642,6 +642,9 @@
   display: block;
 }
 
+/* Технику показываем по корпусу: у высокой машины сверху только ствол */
+.gu-portrait.veh img { object-position: center 50%; }
+
 .gu-stats { flex: 1; min-width: 0; }
 
 .gu-name {

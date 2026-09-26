@@ -370,6 +370,9 @@ html, body {
   line-height: 1.3;
 }
 
+/* Артиллерия: главное свойство — залп по площади, золотом как урон */
+.unit-card-arty { color: #d9a940; }
+
 .unit-card-footer {
   margin-top: auto;
   display: flex;
@@ -473,8 +476,39 @@ html, body {
   font-family: 'Courier New', monospace;
   font-size: 11px;
   color: #cfd8dc;
-  max-width: 92vw;
+  /* Без явной ширины блок со сдвигом на 50% ужимался до половины экрана
+     и текст ломался в столбик */
+  width: max-content;
+  max-width: calc(100vw - 24px);
+  box-sizing: border-box;
 }
+
+/* Все кнопки подсказки выглядят одинаково: раньше стиль был только
+   у отмены постановки, а у способностей и залпа кнопки были браузерными */
+#placement-hint > span { flex: 1 1 auto; min-width: 0; line-height: 1.35; }
+
+#placement-hint button {
+  flex: none;
+  white-space: nowrap;
+  background: #2a3644;
+  border: none;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  padding: 7px 12px;
+  border-radius: 14px;
+  cursor: pointer;
+}
+
+/* Главное действие — подтверждение удара */
+#placement-hint #area-go {
+  background: #d9a940;
+  color: #0a0d14;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+}
+
+#placement-hint #area-go:disabled { opacity: 0.5; }
 
 #placement-cancel {
   background: #2a3644;
@@ -927,9 +961,13 @@ html, body {
 /* Цена в ресурсах: платит склад планеты, а не кошелёк игрока */
 .build-panel-rescost {
   margin-top: 4px;
+  font-family: 'Courier New', monospace;
   font-size: 10px;
   color: #4a90d9;
 }
+
+/* В карточке найма строка стоит прямо над кнопкой — нужен зазор */
+.unit-card .build-panel-rescost { margin: 2px 0 10px; line-height: 1.35; }
 
 .build-panel-rescost.short { color: #d94a4a; }
 
