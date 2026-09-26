@@ -2416,15 +2416,16 @@ function updateDeployCounter() {
   var el = document.getElementById('unit-panel-capacity');
   if (!el || !currentUserId) return;
 
-  Promise.all([
-    supabase.rpc('deploy_used', { p_system_id: systemId }),
-    supabase.from('game_settings').select('value').eq('key', 'deploy_capacity').maybeSingle()
-  ]).then(function(r) {
-    var used = (!r[0].error && typeof r[0].data === 'number') ? r[0].data : 0;
-    var cap = (!r[1].error && r[1].data) ? parseInt(r[1].data.value, 10) : 72;
-    var free = Math.max(0, cap - used);
-    el.textContent = 'Мест в зонах высадки: ' + free + ' из ' + cap;
-    el.className = free === 0 ? 'unit-panel-capacity full' : 'unit-panel-capacity';
+  // Считаем реальные свободные клетки зон высадки за вычетом ещё не
+  // прибывших заказов — по тому же правилу сервер решает, примет ли заказ.
+  // Бойцы, ушедшие из зоны вперёд или сидящие в трюмах, место не занимают.
+  supabase.rpc('get_deploy_space', { p_system_id: systemId }).then(function(res) {
+    var row = (!res.error && res.data && res.data.length) ? res.data[0] : null;
+    if (!row) { el.textContent = ''; return; }
+
+    el.textContent = 'Свободно в зонах высадки: ' + row.free + ' из ' + row.total +
+      (row.queued > 0 ? ' · ещё ' + row.queued + ' в заказах' : '');
+    el.className = row.free === 0 ? 'unit-panel-capacity full' : 'unit-panel-capacity';
   });
 }
 
