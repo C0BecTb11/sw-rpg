@@ -2596,7 +2596,12 @@ function drawUnits() {
       // У техники кадр квадратный и весь по делу, у пехоты берём
       // квадрат с головой и торсом
       var sw, sx, sy, sh;
-      if (type && type.is_vehicle) {
+      if (type && type.is_vehicle && img.naturalHeight > img.naturalWidth * 1.2) {
+        // Высокая машина (артиллерия) снята в полный рост, как пехота:
+        // файл не режем, а на клетке показываем квадрат по корпусу
+        sw = img.naturalWidth; sh = sw; sx = 0;
+        sy = Math.max(0, Math.min(img.naturalHeight - sh, img.naturalHeight * 0.55 - sh / 2));
+      } else if (type && type.is_vehicle) {
         sw = img.naturalWidth; sh = img.naturalHeight; sx = 0; sy = 0;
       } else {
         sw = img.naturalWidth * 0.70;
@@ -2763,7 +2768,7 @@ function showPickup(unit, ships, carriers, inside, boardable, ap, liftCarriers) 
 
   bar.innerHTML =
     '<div class="gu-top">' +
-      '<div class="gu-portrait' + (isHero ? ' hero' : '') + '">' +
+      '<div class="gu-portrait' + (isHero ? ' hero' : '') + (type.is_vehicle ? ' veh' : '') + '">' +
         (portrait ? '<img src="../' + portrait + '" alt="">' : '') +
       '</div>' +
       '<div class="gu-stats">' +

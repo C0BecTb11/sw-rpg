@@ -132,7 +132,7 @@ function makeFeedRow(e) {
   var isEta = e.type === 'enemy_approaching' || e.type === 'trade_approaching';
   if (isEta && e.amount > 0) {
     line += (line ? ' · ' : '') + 'прибудет через ' + feedEta(e.amount);
-  } else if (e.amount && e.amount > 1) {
+  } else if (e.amount && e.amount > 1 && !(e.meta && e.meta.digest)) {
     line += (line ? ' · ' : '') + e.amount;
   }
 
@@ -154,6 +154,7 @@ function makeFeedRow(e) {
     '<div class="feed-info">' +
       '<div class="feed-title">' + e.title + '</div>' +
       (line ? '<div class="feed-line">' + escapeFeed(line) + '</div>' : '') +
+      feedDigestLines(e) +
       '<div class="feed-meta">' + feedWhen(e.created_at) +
         (where ? ' · ' + where : '') + '</div>' +
     '</div>';
@@ -213,6 +214,17 @@ function makeFeedRow(e) {
   }
 
   return row;
+}
+
+// Сводное событие: по строке на планету. Сервер складывает сюда всё
+// однотипное, пока игрок не прочитал, — вместо десятка одинаковых записей
+function feedDigestLines(e) {
+  var lines = e.meta && e.meta.digest && e.meta.lines;
+  if (!lines || !lines.length) return '';
+  return '<div class="feed-lines">' + lines.map(function(l) {
+    var bad = /провал|не хватает|полон/.test(l.txt || '');
+    return '<i' + (bad ? ' class="warn"' : '') + '>' + escapeFeed(l.txt) + '</i>';
+  }).join('') + '</div>';
 }
 
 // Доходы вынесены в свою вкладку: это не поток событий, а состояние

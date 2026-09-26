@@ -1255,6 +1255,25 @@ body {
 .feed-meta { margin-top: 3px; font-size: 10px; color: #55606c; }
 .feed-meta.warn { color: #d9a940; }
 
+/* Сводка по планетам внутри одного уведомления */
+.feed-lines {
+  margin-top: 6px;
+  padding-left: 8px;
+  border-left: 1px solid #2a3644;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.feed-lines i {
+  font-style: normal;
+  font-size: 10px;
+  line-height: 1.35;
+  color: #8fa8c4;
+}
+
+.feed-lines i.warn { color: #d9a940; }
+
 .feed-go {
   flex: none;
   padding: 8px 12px;

@@ -29,6 +29,7 @@
   var qListOpen = false;
   var qJustFinished = false;
   var qHintsOff = false;
+  var qGreeted = false;
 
   try { qHintsOff = localStorage.getItem('quest_hints_off') === '1'; } catch (e) {}
 
@@ -41,6 +42,15 @@
       if (res.error || !res.data) return;
       var prev = qData;
       qData = res.data;
+
+      // Новичку фракцию назначают, пока открыт экран ожидания: страница
+      // не перезагружается, поэтому переспрашиваем сами, пока не появится
+      if (qData.status === 'no_faction') {
+        qHideAll();
+        qStopPoll();
+        qPollTimer = setTimeout(qLoad, 8000);
+        return;
+      }
 
       if (qData.status !== 'active') {
         qStopPoll();
@@ -63,6 +73,12 @@
       qSchedulePoll();
       qLoop();
       if (changed) qAutoFocus();
+
+      // Первое знакомство: наставник выходит сам
+      if (!qGreeted && QPAGE === 'galaxy' && qData.step_ord === 1 && !qData.step_done) {
+        qGreeted = true;
+        setTimeout(qOpenSheet, 600);
+      }
     });
   }
 
@@ -1064,13 +1080,7 @@
     if (typeof supabase === 'undefined') return;
     supabase.auth.getSession().then(function(res) {
       if (!res.data || !res.data.session) return;
-      qLoad().then(function() {
-        if (!qData || qData.status !== 'active') return;
-        // Первое знакомство: наставник выходит сам
-        if (QPAGE === 'galaxy' && qData.step_ord === 1 && !qData.step_done) {
-          setTimeout(qOpenSheet, 600);
-        }
-      });
+      qLoad();
     });
   }
 
