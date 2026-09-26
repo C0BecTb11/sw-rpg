@@ -224,6 +224,7 @@ function openMovePanel(targetId, targetName) {
   paintMoveSend();
 
   supabase.rpc('get_move_candidates', { p_target: targetId }).then(function(res) {
+    if (moveTargetId !== targetId) return;
     var list = document.getElementById('move-list');
     if (res.error) {
       list.innerHTML = '<div class="feed-empty">Не удалось получить командиров</div>';

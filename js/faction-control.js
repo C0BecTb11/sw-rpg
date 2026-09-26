@@ -32,13 +32,13 @@ function openFactionControlScreen() {
 
     listEl.innerHTML = '';
 
-    // Запросы игроков — там же, где лидер распределяет планеты
-    if (typeof makeRequestsBanner === 'function') listEl.appendChild(makeRequestsBanner());
-
     if (systems.length === 0) {
       listEl.innerHTML = '<div class="army-empty">У фракции пока нет планет</div>';
       return;
     }
+
+    // Запросы игроков — там же, где лидер распределяет планеты
+    if (typeof makeRequestsBanner === 'function') listEl.appendChild(makeRequestsBanner());
 
     // Свежезахваченные идут первыми — их выдаёт сервер в начале списка.
     // Заголовок ставим один раз, перед первой обычной планетой.
@@ -203,14 +203,11 @@ function openFactionControlScreen() {
 
         status.textContent = 'Сохраняем...';
 
-        var hasExisting = system.controller_user_id !== null
-                       && system.controller_user_id !== undefined;
-
-        var query = hasExisting
-          ? supabase.from('system_control')
-              .update({ controller_user_id: newControllerId }).eq('system_id', system.system_id)
-          : supabase.from('system_control')
-              .insert({ system_id: system.system_id, controller_user_id: newControllerId });
+        // Одна операция на оба случая: строки может не быть вовсе, а может
+        // остаться пустая после снятия прежнего управляющего
+        var query = supabase.from('system_control').upsert(
+          { system_id: system.system_id, controller_user_id: newControllerId },
+          { onConflict: 'system_id' });
 
         query.then(function(res) {
           if (res.error) {

@@ -217,6 +217,15 @@
   font-size: 11px;
 }
 
+.tr-partner { max-width: 100%; box-sizing: border-box; }
+
+.tr-partner > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tr-partner.chosen { border-color: #5fd968; background: rgba(95, 217, 104, 0.06); }
 
 .tr-partner-pawn {

@@ -342,11 +342,19 @@ function resolveRequest(q, approve, yes, no) {
         loadPlanetRequests();
         return;
       }
-      prToast(approve
-        ? q.system_name + ' выдана игроку ' + q.requester_name
-        : 'Запрос отклонён');
+
+      var r = res.data || {};
+      prToast(r.message || (approve ? 'Готово' : 'Запрос отклонён'), r.ok === false);
       loadPlanetRequests();
       refreshPlanetRequestBadge();
+
+      // Панель управления под шторкой должна показать нового управляющего,
+      // иначе следующее изменение там пойдёт от устаревшего состояния
+      var fc = document.getElementById('faction-control-screen');
+      if (r.ok && approve && fc && fc.style.display !== 'none'
+          && typeof openFactionControlScreen === 'function') {
+        openFactionControlScreen();
+      }
     });
 }
 
