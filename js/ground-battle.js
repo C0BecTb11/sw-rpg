@@ -220,6 +220,9 @@ function loadSettlementPanel() {
       return;
     }
 
+    // Вводный курс: управляющий осмотрел своё поселение
+    if (st.is_controller && typeof questSeen === 'function') questSeen('settlement', systemId);
+
     var tasks = (!r[1].error && r[1].data) ? r[1].data : [];
     var doneCount = tasks.filter(function(t) { return t.done_now; }).length;
     var allDone = tasks.length > 0 && doneCount === tasks.length;
@@ -352,11 +355,15 @@ function unitApState(unit) {
   var elapsed = Math.floor((gbServerNow() - new Date(unit.ap_updated_at).getTime()) / 1000);
   if (elapsed < 0) elapsed = 0;
 
-  var ap = Math.min(gbApMax, unit.ap + Math.floor(elapsed / gbApCd));
+  // Тип может задавать своё время восстановления (артиллерия — дольше)
+  var t = unitTypeById[unit.unit_type];
+  var cd = (t && t.action_seconds) ? t.action_seconds : gbApCd;
+
+  var ap = Math.min(gbApMax, unit.ap + Math.floor(elapsed / cd));
   return {
     ap: ap,
     ap_max: gbApMax,
-    next_in: ap >= gbApMax ? 0 : gbApCd - (elapsed % gbApCd)
+    next_in: ap >= gbApMax ? 0 : cd - (elapsed % cd)
   };
 }
 
@@ -382,7 +389,8 @@ function startApTicker(unit) {
     // Плитки, ставшие доступными, гасить перестаём
     var tiles = document.querySelectorAll('.gu-tile');
     for (var i = 0; i < tiles.length; i++) {
-      if (st.ap >= 1) tiles[i].classList.remove('locked');
+      var need = parseInt(tiles[i].getAttribute('data-need') || '1', 10);
+      if (st.ap >= need) tiles[i].classList.remove('locked');
     }
   }, 1000);
 }
@@ -1071,6 +1079,11 @@ function handleTap(clientX, clientY) {
     return;
   }
 
+  if (artilleryUnit) {
+    handleArtilleryTap(cellX, cellY);
+    return;
+  }
+
   if (attackingUnit || abilityUnit) {
     handleTargetTap(cellX, cellY);
     return;
@@ -1544,6 +1557,7 @@ function renderBuildCards(slotIndex, panel, list) {
   available.forEach(function(type) {
     var item = document.createElement('button');
     item.className = 'build-panel-item';
+    item.setAttribute('data-code', type.code);
 
     var thumb = document.createElement('div');
     thumb.className = 'build-panel-thumb';
@@ -2216,6 +2230,7 @@ function loadHeroRoster(building, box) {
 function buildUnitCard(unit) {
   var card = document.createElement('div');
   card.className = 'unit-card';
+  card.setAttribute('data-unit', unit.id);
 
   var media = document.createElement('div');
   media.className = 'unit-card-media';
@@ -2249,6 +2264,15 @@ function buildUnitCard(unit) {
   stats.appendChild(makeStat('➔', 'Манёвр', unit.move_range + ' кл.'));
   stats.appendChild(makeStat('◉', 'Обзор', unit.vision_range + ' кл.'));
   body.appendChild(stats);
+
+  if (unit.splash_size > 0) {
+    var arty = document.createElement('div');
+    arty.className = 'unit-card-relay unit-card-arty';
+    arty.textContent = '✹ Залп ' + unit.splash_size + '×' + unit.splash_size +
+      ' через всю карту · ' + (unit.shot_ap || 2) + ' действия · откат ' +
+      (unit.action_seconds || 30) + ' с';
+    body.appendChild(arty);
+  }
 
   if (unit.is_relay) {
     var relay = document.createElement('div');
@@ -2751,7 +2775,7 @@ function showPickup(unit, ships, carriers, inside, boardable, ap, liftCarriers) 
         '</div>' +
         '<div class="gu-props">' +
           '<span title="урон">◎ ' + (type.damage || 0) + '</span>' +
-          '<span title="дальность">➶ ' + (type.weapon_range || 0) + '</span>' +
+          '<span title="дальность">➶ ' + (type.weapon_range >= GRID_SIZE ? 'вся карта' : (type.weapon_range || 0)) + '</span>' +
           '<span title="ход">⇢ ' + (type.move_range || 0) + '</span>' +
           '<span title="обзор">◈ ' + (type.vision_range || 0) + '</span>' +
         '</div>' +
@@ -2888,6 +2912,7 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
     var b = document.createElement('button');
     b.className = 'gu-tile' + (guPickedAbility === key ? ' active' : '') +
                   (ready ? '' : ' locked');
+    b.setAttribute('data-key', key);
     // У веток есть своя картинка, у базовых действий — знак
     b.innerHTML = (image
         ? '<img class="gu-tile-img" src="../' + image + '" alt="">'
@@ -2920,12 +2945,29 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
     });
   }
 
-  addTile('attack', '◎', 'Атака', canAct, function() {
-    info.innerHTML = '<div class="gu-abil-name">Атака</div>' +
-      '<div class="gu-abil-text">Урон зависит от класса цели: ' +
-      'пехота плохо берёт броню, техника плохо достаёт авиацию.</div>';
-    guAbilityAction(info, 'Выбрать цель', canAct, function() { startGroundAttack(unit); });
-  });
+  if (type.splash_size > 0) {
+    // Артиллерия: только залп по площади, и на него уходят все действия
+    var need = type.shot_ap || 2;
+    var canFire = ap && ap.ap >= need;
+    var salvo = addTile('salvo', '✹', 'Залп', canFire, function() {
+      info.innerHTML = '<div class="gu-abil-name">Залп</div>' +
+        '<div class="gu-abil-text">Бьёт по площади ' + type.splash_size + '×' + type.splash_size +
+        ' в любую точку карты, которую видят твои войска. Снаряд не разбирает своих и чужих, ' +
+        'авиацию не достаёт.</div>' +
+        '<div class="gu-abil-meta">стоит ' + need + ' действия · действие восстанавливается ' +
+        (type.action_seconds || gbApCd) + ' с</div>' +
+        (canFire ? '' : '<div class="gu-abil-meta warn">нужно ' + need + ' действия</div>');
+      guAbilityAction(info, 'Выбрать точку', canFire, function() { startArtilleryStrike(unit); });
+    });
+    salvo.setAttribute('data-need', need);
+  } else {
+    addTile('attack', '◎', 'Атака', canAct, function() {
+      info.innerHTML = '<div class="gu-abil-name">Атака</div>' +
+        '<div class="gu-abil-text">Урон зависит от класса цели: ' +
+        'пехота плохо берёт броню, техника плохо достаёт авиацию.</div>';
+      guAbilityAction(info, 'Выбрать цель', canAct, function() { startGroundAttack(unit); });
+    });
+  }
 
   // Способности из дополнений: приходят с сервера вместе с откатом
   supabase.rpc('get_unit_upgrade_abilities', { p_unit_id: unit.id }).then(function(res) {
@@ -3164,6 +3206,76 @@ function isAreaAbility(kind) {
       || kind === 'ability_suppression';
 }
 
+// ===== Артиллерийский залп =====
+// Наводится как граната, в два касания: первое ставит прицел, второе —
+// «Огонь». Центр прицела — точка касания, область видна до выстрела.
+var artilleryUnit = null;
+
+function startArtilleryStrike(unit) {
+  cancelTargeting();
+  artilleryUnit = unit;
+  hidePickup();
+  showTargetHint('Залп', 'ткни в точку, которую видят твои войска', cancelTargeting);
+  redrawScene();
+}
+
+function handleArtilleryTap(cellX, cellY) {
+  var type = unitTypeById[artilleryUnit.unit_type] || {};
+  var size = type.splash_size || 3;
+  var half = Math.floor(size / 2);
+  areaPreview = { x: cellX - half, y: cellY - half, size: size, cx: cellX, cy: cellY };
+
+  var hit = countInBox(areaPreview, artilleryUnit);
+  var hint = document.getElementById('placement-hint');
+  hint.innerHTML = '<span>Залп · ' + size + '×' + size + ' · врагов ' + hit.enemy +
+                   (hit.own ? ' · <b class="warn-own">своих ' + hit.own + '</b>' : '') +
+                   (hit.air ? ' · авиация ' + hit.air + ' не заденет' : '') +
+                   '</span>' +
+                   '<button id="area-go">Огонь</button>' +
+                   '<button id="area-cancel">Отмена</button>';
+  hint.style.display = 'flex';
+
+  document.getElementById('area-cancel').addEventListener('click', cancelTargeting);
+  document.getElementById('area-go').addEventListener('click', function() {
+    var go = document.getElementById('area-go');
+    go.disabled = true;
+    supabase.rpc('artillery_strike', {
+      p_unit_id: artilleryUnit.id, p_x: areaPreview.cx, p_y: areaPreview.cy
+    }).then(function(r) {
+      if (r.error) { go.disabled = false; alert(r.error.message); return; }
+      var res = (r.data && r.data.length) ? r.data[0] : null;
+      if (res) alert(res.note);
+      cancelTargeting();
+      selectedUnit = null;
+      loadUnits();
+    });
+  });
+
+  setBottomInset(insetFor(hint));
+  redrawScene();
+}
+
+// Кого накроет залп: юнит попадает, если хоть одной клеткой в области.
+// Авиацию считаем отдельно — снаряд её не берёт.
+function countInBox(area, self) {
+  var res = { enemy: 0, own: 0, air: 0 };
+  if (!area) return res;
+
+  unitsOnMap.forEach(function(u) {
+    if (u.x === null || u.x === undefined) return;
+    if (self && u.id === self.id) return;
+    var t = unitTypeById[u.unit_type] || {};
+    var w = t.width_cells || 1, h = t.height_cells || 1;
+    if (u.x < area.x + area.size && u.x + w > area.x &&
+        u.y < area.y + area.size && u.y + h > area.y) {
+      if (t.hull_class === 'air') res.air++;
+      else if (u.faction === myFaction) res.own++;
+      else res.enemy++;
+    }
+  });
+  return res;
+}
+
 function upgradeAbilityHint(a) {
   switch (a.kind) {
     case 'ability_grenade':     return 'область ' + a.power + '×' + a.power;
@@ -3368,6 +3480,7 @@ function showTargetHint(title, note, onCancel) {
 }
 
 function cancelTargeting() {
+  artilleryUnit = null;
   heroAbility = null;
   upgradeAbility = null;
   areaPreview = null;
@@ -3386,7 +3499,9 @@ function drawTargetCells() {
   // Намеченная область: видно, куда ляжет удар и кого зацепит
   if (areaPreview) {
     // Красная заливка, если под ударом окажутся свои
-    var inArea = countInArea(areaPreview, upgradeAbility && upgradeAbility.unit);
+    var inArea = artilleryUnit
+      ? countInBox(areaPreview, artilleryUnit)
+      : countInArea(areaPreview, upgradeAbility && upgradeAbility.unit);
     ctx.fillStyle = inArea.own
       ? 'rgba(217,74,74,0.30)'
       : 'rgba(217,169,64,0.28)';

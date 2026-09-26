@@ -4,6 +4,7 @@
 function openArmyScreen() {
   document.getElementById('army-screen').style.display = 'block';
   loadArmyData();
+  if (typeof questSeen === 'function') questSeen('army');
 }
 
 function closeArmyScreen() {
@@ -199,6 +200,7 @@ function makeFleetSection(ships, cargoByShip, systemNames) {
 
     var block = document.createElement('div');
     block.className = 'ship-block';
+    block.setAttribute('data-ship-id', ship.id);
 
     var header = document.createElement('button');
     header.className = 'ship-header';

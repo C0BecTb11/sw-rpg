@@ -681,6 +681,7 @@ function renderShips() {
     // внутри него спрайт в исходных размерах, повёрнутый вокруг центра.
     var el = document.createElement('div');
     el.className = 'ship-sprite';
+    el.setAttribute('data-ship-id', ship.id);
     el.style.position = 'absolute';
     el.style.left = (ship.x * CELL_PX) + 'px';
     el.style.top = (ship.y * CELL_PX) + 'px';

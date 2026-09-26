@@ -169,6 +169,9 @@ function openPlanetInfo(systemId) {
       }
 
       updateMoveButton(viewerId, systemId);
+
+      // Вводный курс: осмотр столицы и своей планеты
+      if (typeof questSeen === 'function') questSeen('planet', systemId);
     });
   });
 }

@@ -259,6 +259,7 @@ function scRenderTabs() {
   tabs.forEach(function(t) {
     var b = document.createElement('button');
     b.className = 'sc-tab' + (scTab === t.id ? ' active' : '');
+    b.setAttribute('data-tab', t.id);
     b.textContent = t.label;
     b.addEventListener('click', function() {
       scTab = t.id;
@@ -391,6 +392,7 @@ function scRenderTiles() {
   var add = function(key, icon, label, enabled, onPick) {
     var b = document.createElement('button');
     b.className = 'sc-tile' + (scMode === key ? ' active' : '') + (enabled ? '' : ' locked');
+    b.setAttribute('data-key', key);
     b.innerHTML = '<span class="sc-tile-icon">' + icon + '</span>' +
                   '<span class="sc-tile-label">' + label + '</span>';
     b.addEventListener('click', function() {

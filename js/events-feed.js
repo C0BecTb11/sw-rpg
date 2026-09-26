@@ -83,6 +83,7 @@ function paintFeedBadges() {
 function openEventsFeed() {
   document.getElementById('feed-panel').style.display = 'flex';
   setFeedTab(feedTab);
+  if (typeof questSeen === 'function') questSeen('feed');
 }
 
 function closeEventsFeed() {
@@ -185,6 +186,18 @@ function makeFeedRow(e) {
       openTransferPanel(inbound ? 'inbox' : 'out');
     });
     row.appendChild(open);
+  }
+
+  // Вводный курс: из события прямо к наставнику
+  if (e.type === 'tutorial_done' && typeof openQuest === 'function') {
+    var qb = document.createElement('button');
+    qb.className = 'feed-go';
+    qb.textContent = 'Открыть';
+    qb.addEventListener('click', function() {
+      closeEventsFeed();
+      openQuest();
+    });
+    row.appendChild(qb);
   }
 
   // Запрос планеты: лидер сразу попадает к списку запросов
