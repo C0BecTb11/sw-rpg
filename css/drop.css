@@ -1364,3 +1364,100 @@
 }
 
 .tree-go:disabled { opacity: 0.5; }
+
+/* ===== Полевые постройки инженера ===== */
+
+/* Панель постройки — тот же HUD, что у бойца; кромка цветом стороны */
+#pickup-bar[data-side="ally"]  { border-left-color: #4a90d9; }
+#pickup-bar[data-side="enemy"] { border-left-color: #d94a4a; }
+
+/* Картинка постройки вырезана по контуру: показываем целиком, на подложке */
+.gu-portrait.struct {
+  width: 70px;
+  height: 70px;
+  background: radial-gradient(circle at 50% 60%, #1c2a1c 0%, #0a0d14 72%);
+}
+.gu-portrait.struct img { object-fit: contain; object-position: center; padding: 3px; }
+.gu-portrait.struct.side-mine  { border-color: rgba(95,217,104,0.55); }
+.gu-portrait.struct.side-ally  { border-color: rgba(74,144,217,0.55); }
+.gu-portrait.struct.side-enemy { border-color: rgba(217,74,74,0.6); }
+
+.struct-side { font-weight: normal; }
+.struct-side.side-mine  { color: #5fd968; }
+.struct-side.side-ally  { color: #4a90d9; }
+.struct-side.side-enemy { color: #d94a4a; }
+
+#pickup-bar[data-struct] .gu-props { flex-wrap: wrap; gap: 6px 12px; }
+
+.struct-status { gap: 9px; }
+.struct-st-label { flex: none; font-size: 10px; letter-spacing: 1px; color: #8fa8c4; }
+.struct-st-label.ok { color: #5fd968; }
+.struct-st-track {
+  flex: 1;
+  height: 6px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.struct-st-track i { display: block; height: 100%; background: #4a90d9; }
+.struct-st-time { flex: none; font-size: 10px; color: #cfd8dc; }
+
+.struct-panel { border-radius: 9px; }
+
+.gu-abil-go.struct-demolish {
+  background: transparent;
+  border: 1px solid #d94a4a;
+  color: #d94a4a;
+  font-weight: normal;
+  letter-spacing: 0.5px;
+}
+
+/* Каталог построек в окне стройки */
+#build-panel.struct-mode #build-panel-box { max-width: 360px; max-height: 78vh; }
+
+.struct-note {
+  margin: -6px 0 12px;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  line-height: 1.45;
+  color: #55606c;
+  text-align: center;
+}
+.struct-note.warn { color: #d94a4a; }
+
+.struct-thumb {
+  position: relative;
+  background: radial-gradient(circle at 50% 60%, #1c2a1c 0%, #0a0d14 72%);
+}
+.build-panel-thumb.struct-thumb img { object-fit: contain; padding: 2px; }
+
+.struct-size {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  padding: 1px 3px;
+  background: rgba(5,6,10,0.85);
+  border-radius: 3px;
+  font-size: 8px;
+  color: #cfd8dc;
+  letter-spacing: 0.5px;
+}
+
+.struct-tag {
+  font-style: normal;
+  font-size: 8px;
+  letter-spacing: 0.5px;
+  color: #5fd968;
+  border: 1px solid rgba(95,217,104,0.5);
+  border-radius: 3px;
+  padding: 0 3px;
+  vertical-align: 1px;
+}
+
+.struct-effect { font-size: 10px; color: #8fa8c4; line-height: 1.4; margin-bottom: 4px; }
+.struct-limit { margin-top: 3px; font-size: 9px; color: #55606c; letter-spacing: 0.5px; }
+
+/* Неизученное видно, но приглушено и без цены в глаза */
+.build-panel-item.struct-locked .build-panel-thumb img { filter: grayscale(1) brightness(0.6); }
+.build-panel-item.struct-locked .build-panel-why { color: #d9a940; }

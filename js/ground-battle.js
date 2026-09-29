@@ -239,6 +239,9 @@ function loadSettlementPanel() {
         '<div class="stl-money-row"><span>Доход за сутки</span><b>' + st.income + '</b></div>' +
         '<div class="stl-money-row"><span>Станет при росте</span><em>' + st.next_income + '</em></div>' +
         '<div class="stl-money-row"><span>Всего выплачено</span><em>' + st.total_paid + '</em></div>' +
+        (st.structure_bonus > 0
+          ? '<div class="stl-money-row"><span>Кантина · довольство</span><b>+' + st.structure_bonus + '</b></div>'
+          : '') +
       '</div>' +
     '</div>';
 
@@ -744,6 +747,7 @@ function drawScene(grid) {
 
   drawSettlement();
   drawBuildSlots();
+  drawStructures();
   drawDeployZone();
   drawPlacementCells();
   drawDropCells();
@@ -752,6 +756,7 @@ function drawScene(grid) {
   drawTargetCells();
   drawAttackZone();
   drawUnits();
+  drawStructureOverlay();
 }
 
 // Зоны высадки — тактическая информация, поэтому видны только своей фракции.
@@ -1054,6 +1059,11 @@ function handleTap(clientX, clientY) {
   var cellX = Math.floor(gridPxX / CELL_PX);
   var cellY = Math.floor(gridPxY / CELL_PX);
 
+  if (placingStructure) {
+    handleStructurePlacementTap(cellX, cellY);
+    return;
+  }
+
   if (landingFighter) {
     handleFighterLandingTap(cellX, cellY);
     return;
@@ -1111,6 +1121,7 @@ function handleTap(clientX, clientY) {
   if (settlement
       && cellX >= settlement.x && cellX < settlement.x + settlement.size
       && cellY >= settlement.y && cellY < settlement.y + settlement.size) {
+    if (selectedStructure) { selectedStructure = null; hidePickup(); redrawScene(); }
     openSettlementPanel();
     return;
   }
@@ -1122,6 +1133,7 @@ function handleTap(clientX, clientY) {
         && cellY >= u.y && cellY < u.y + size.h;
   })[0];
   if (tappedUnit) {
+    selectedStructure = null;
     selectedUnit = (selectedUnit && selectedUnit.id === tappedUnit.id) ? null : tappedUnit;
     redrawScene();
     if (selectedUnit) {
@@ -1132,6 +1144,20 @@ function handleTap(clientX, clientY) {
     return;
   }
   if (selectedUnit) { selectedUnit = null; hidePickup(); redrawScene(); }
+
+  // Полевая постройка: окоп, турель, кантина. Бойцы в окопе и бункере
+  // стоят поверх неё и выбираются раньше — постройку открывает тап
+  // по её свободной клетке
+  var tappedStruct = structAt(cellX, cellY);
+  if (tappedStruct) {
+    if (selectedStructure && selectedStructure.id === tappedStruct.id) {
+      selectedStructure = null; hidePickup(); redrawScene();
+    } else {
+      openStructurePanel(tappedStruct);
+    }
+    return;
+  }
+  if (selectedStructure) { selectedStructure = null; hidePickup(); redrawScene(); }
 
   for (var i = 0; i < buildSlots.length; i++) {
     var slot = buildSlots[i];
@@ -1441,7 +1467,10 @@ function showResearchInfo(r, tile) {
     '<div class="rs-info-meta">' + researchEffectText(r) + '</div>';
 
   if (r.done) {
-    info.innerHTML += '<div class="rs-info-meta ok">Изучено — можно ставить на новые корабли</div>';
+    info.innerHTML += '<div class="rs-info-meta ok">' +
+      (r.effect_kind === 'unlock_structure' ? 'Изучено — инженер может строить'
+       : r.scope === 'unit' ? 'Изучено — можно брать при найме'
+       : 'Изучено — можно ставить на новые корабли') + '</div>';
     return;
   }
 
@@ -1495,6 +1524,8 @@ function researchEffectText(r) {
     case 'ability_headshot': return 'уничтожает выбранную цель';
     case 'ability_twin':
       return 'бьёт первую цель, вторую рядом с шансом ' + v + '%';
+    case 'unlock_structure':
+      return structUnlockText(r);
   }
 
   switch (r.effect_kind) {
@@ -1519,6 +1550,9 @@ function openBuildPanel(slotIndex) {
   var panel = document.getElementById('build-panel');
   var list = document.getElementById('build-panel-list');
   list.innerHTML = '';
+  panel.classList.remove('struct-mode');
+  var head = panel.querySelector('.build-panel-title');
+  if (head) head.textContent = 'Выбери постройку';
 
   // Карточки решают по справочнику и по запасу планеты, можно ли здесь
   // строить. Оба приходят с сервера асинхронно, и раньше карточки
@@ -1642,7 +1676,9 @@ function renderBuildCards(slotIndex, panel, list) {
 }
 
 function closeBuildPanel() {
-  document.getElementById('build-panel').style.display = 'none';
+  var panel = document.getElementById('build-panel');
+  panel.style.display = 'none';
+  panel.classList.remove('struct-mode');
 }
 
 // Строительство идёт через защищённую серверную функцию: она сама проверяет
@@ -1768,6 +1804,9 @@ function subscribeToGroundChanges() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'unit_positions', filter: 'system_id=eq.' + systemId }, function() {
       loadUnits();
     })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'field_structures', filter: 'system_id=eq.' + systemId }, function() {
+      loadStructures();
+    })
     .subscribe();
 }
 
@@ -1860,6 +1899,7 @@ function initGroundBattle() {
       loadDeployZones().then(function() {
         loadUnits();
       });
+      loadStructureTypes().then(loadStructures);
       loadGroundSettings();
       loadGroundSides();
       loadScoutReport();
@@ -2519,7 +2559,7 @@ function loadUnits() {
 }
 
 // Юнит занимает одну клетку. Свои — зелёные, союзные — синие,
-// вражеские сюда просто не приходят: их отсекает туман войны в БД.
+// вражеские — красные: туман войны в БД пропускает только тех, кого видно.
 // Габариты юнита в клетках: пехота 1x1, AT-TE и канонерка 2x2
 function unitBox(u) {
   var t = unitTypeById[u.unit_type];
@@ -2577,7 +2617,10 @@ function drawUnits() {
     var px = u.x * CELL_PX;
     var py = u.y * CELL_PX;
     var mine = u.owner_user_id === currentUserId;
-    var color = mine ? '#5fd968' : '#4a90d9';
+    // Свои зелёные, союзники синие, враги красные: сквозь туман враг
+    // приходит только в обзоре, и спутать его с союзником нельзя
+    var color = mine ? '#5fd968'
+      : (!myFaction || u.faction === myFaction) ? '#4a90d9' : '#d94a4a';
     var type = unitTypeById[u.unit_type];
     // У одарённого своё лицо, закреплённое при найме. У остальных — картинка типа.
     var img = type ? getUnitImage(u.portrait || type.image) : null;
@@ -2626,6 +2669,11 @@ function drawUnits() {
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
     ctx.strokeRect(px + inset, py + inset, boxW, boxH);
+
+    // Боец в окопе или бункере: сама постройка скрыта под ним, поэтому
+    // укрытие отмечаем щитком в углу, а маскировку — пунктиром внутри
+    var shelter = fieldStructures.length ? unitShelter(u) : null;
+    if (shelter) drawShelterMark(shelter, px + inset, py + inset, boxW, boxH);
 
     // Подчинённый чужой воле: рамка обведена вторым контуром,
     // чтобы своих временных бойцов было видно с одного взгляда
@@ -2735,6 +2783,8 @@ function showPickup(unit, ships, carriers, inside, boardable, ap, liftCarriers) 
   liftCarriers = liftCarriers || [];
   var bar = document.getElementById('pickup-bar');
   if (!bar) return;
+  bar.removeAttribute('data-struct');
+  bar.removeAttribute('data-side');
 
   ships = ships || [];
   carriers = carriers || [];
@@ -2758,6 +2808,10 @@ function showPickup(unit, ships, carriers, inside, boardable, ap, liftCarriers) 
     : (type.carry_slots > 0 ? 'Пехота / Поддержка' : 'Пехота');
 
   if (isHero) role = type.name || 'Одарённый';
+
+  // Укрытие и маскировка видны прямо в строке роли
+  var shelter = shelterText(unitShelter(unit));
+  if (shelter) role += ' · ' + shelter;
 
   // Временно наш: показываем, сколько осталось до возврата хозяину
   if (unit.control_until) {
@@ -2947,6 +3001,21 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
         'К своим прибывает в зону высадки, к чужим — в полосу вторжения. ' +
         'Отправлять можно только со стороны десанта.</div>';
       guScoutDestinations(info, unit);
+    });
+  }
+
+  // Инженер: полевые постройки. Каталог открывается отдельным окном —
+  // в тесной панели десять карточек с ценами не разглядеть
+  if (type.can_build) {
+    addTile('build', '⚒', 'Строить', canAct, function() {
+      var ownPlanet = sysFaction && myFaction && sysFaction === myFaction;
+      info.innerHTML = '<div class="gu-abil-name">Полевые постройки</div>' +
+        '<div class="gu-abil-text">Окопы, бункеры, турели, глушилки, добыча и кантина. ' +
+        'Ставит в ' + structBuildRange + ' клетках от себя, стоит одно действие. ' +
+        'Всё, кроме окопа, сначала изучают в ' +
+        (myFaction === 'cis' ? 'лаборатории' : 'научном центре') + '.</div>' +
+        (ownPlanet ? '' : '<div class="gu-abil-meta warn">строить можно только на планетах своей фракции</div>');
+      guAbilityAction(info, 'Выбрать постройку', canAct && ownPlanet, function() { openStructureBuildPanel(unit); });
     });
   }
 
@@ -3195,11 +3264,15 @@ function startGroundAttack(unit) {
   abilityUnit = null;
   hidePickup();
 
-  supabase.rpc('get_ground_targets', { p_unit_id: unit.id }).then(function(res) {
+  Promise.all([
+    supabase.rpc('get_ground_targets', { p_unit_id: unit.id }),
+    supabase.rpc('get_structure_targets', { p_unit_id: unit.id })
+  ]).then(function(r) {
+    var res = r[0];
     groundTargets = (!res.error && res.data) ? res.data : [];
-    showTargetHint('Ткни в цель', groundTargets.length
-      ? groundTargets.length + ' в радиусе'
-      : 'в радиусе никого', cancelTargeting);
+    groundStructTargets = (!r[1].error && r[1].data) ? r[1].data : [];
+    var n = groundTargets.length + groundStructTargets.length;
+    showTargetHint('Ткни в цель', n ? n + ' в радиусе' : 'в радиусе никого', cancelTargeting);
     redrawScene();
   });
 }
@@ -3391,7 +3464,8 @@ function handleUpgradeAbilityTap(cellX, cellY) {
     var pick = null;
     for (var i = 0; i < groundTargets.length; i++) {
       var t = groundTargets[i];
-      var b = unitTypeById[t.unit_type] || {};
+      var tu = unitsOnMap.filter(function(u) { return u.id === t.target_id; })[0];
+      var b = unitTypeById[t.unit_type || (tu && tu.unit_type)] || {};
       var w = b.width_cells || 1, h = b.height_cells || 1;
       if (cellX >= t.x && cellX < t.x + w && cellY >= t.y && cellY < t.y + h) { pick = t; break; }
     }
@@ -3494,6 +3568,7 @@ function cancelTargeting() {
   abilityUnit = null;
   abilityDef = null;
   groundTargets = [];
+  groundStructTargets = [];
   document.getElementById('placement-hint').style.display = 'none';
   setBottomInset(0);
   redrawScene();
@@ -3533,6 +3608,8 @@ function drawTargetCells() {
     return;
   }
 
+  if (attackingUnit) drawStructTargets();
+
   if (!groundTargets.length) return;
 
   groundTargets.forEach(function(t) {
@@ -3546,9 +3623,18 @@ function handleTargetTap(cellX, cellY) {
   var pick = null;
   for (var i = 0; i < groundTargets.length; i++) {
     var t = groundTargets[i];
-    var b = unitTypeById[t.unit_type] || {};
+    // В списке целей нет типа юнита: габарит берём с карты, иначе
+    // технику 2×2 можно было выбрать только по верхней левой клетке
+    var tu = unitsOnMap.filter(function(u) { return u.id === t.target_id; })[0];
+    var b = unitTypeById[t.unit_type || (tu && tu.unit_type)] || {};
     var w = b.width_cells || 1, h = b.height_cells || 1;
     if (cellX >= t.x && cellX < t.x + w && cellY >= t.y && cellY < t.y + h) { pick = t; break; }
+  }
+
+  // Постройку бьёт только обычный выстрел, способности — по бойцам
+  if (!pick && attackingUnit) {
+    var sPick = structTargetAt(cellX, cellY);
+    if (sPick) { attackStructureTarget(sPick); return; }
   }
 
   if (!pick) { alert('Эта цель недоступна'); return; }
@@ -3560,9 +3646,17 @@ function handleTargetTap(cellX, cellY) {
       if (r.error) { alert(r.error.message); return; }
       var res = (r.data && r.data.length) ? r.data[0] : null;
       if (res) {
-        alert(!res.hit ? 'Промах'
+        var msg = !res.hit ? 'Промах'
           : res.destroyed ? pick.name + ' уничтожен'
-          : 'Попадание · −' + res.damage + ' · осталось ' + res.target_hp);
+          : 'Попадание · −' + res.damage + ' · осталось ' + res.target_hp;
+        // Цель сидела в окопе и ответила: игрок должен узнать сразу
+        if (res.counter_damage !== null && res.counter_damage !== undefined) {
+          msg += res.counter_damage > 0
+            ? '\nОтветный огонь из окопа: −' + res.counter_damage +
+              (res.attacker_hp > 0 ? ' · у тебя осталось ' + res.attacker_hp : ' · твой боец погиб')
+            : '\nИз окопа ответили огнём — мимо';
+        }
+        alert(msg);
       }
       cancelTargeting();
       selectedUnit = null;
@@ -3698,6 +3792,8 @@ function handleGroundMoveTap(cellX, cellY) {
 function hidePickup() {
   var bar = document.getElementById('pickup-bar');
   if (!bar || bar.style.visibility === 'hidden') return;
+  bar.removeAttribute('data-struct');
+  bar.removeAttribute('data-side');
   bar.style.visibility = 'hidden';
   setBottomInset(0);
 }
@@ -4461,7 +4557,10 @@ function handleHeroAbilityTap(cellX, cellY) {
   var pick = null;
   for (var i = 0; i < groundTargets.length; i++) {
     var t = groundTargets[i];
-    var b = unitTypeById[t.unit_type] || {};
+    // В списке целей нет типа юнита: габарит берём с карты, иначе
+    // технику 2×2 можно было выбрать только по верхней левой клетке
+    var tu = unitsOnMap.filter(function(u) { return u.id === t.target_id; })[0];
+    var b = unitTypeById[t.unit_type || (tu && tu.unit_type)] || {};
     var w = b.width_cells || 1, h = b.height_cells || 1;
     if (cellX >= t.x && cellX < t.x + w && cellY >= t.y && cellY < t.y + h) {
       pick = t; break;
@@ -5612,4 +5711,796 @@ function buildPickupForm(order, box) {
     box.appendChild(form);
     refresh();
   });
+}
+
+// ===== Инженер и полевые постройки =====
+// Окопы, бункеры, турели и прочее ставит инженер рядом с собой. Всё
+// решает сервер: где можно строить, хватает ли денег и склада, кто кого
+// видит. Клиент заранее подсвечивает подходящие клетки и рисует то, что
+// пропустил туман войны: свои постройки фракция видит всегда, чужие —
+// только в обзоре войск, а маскировочную сеть — лишь подойдя вплотную.
+
+var fieldStructures = [];
+var structTypeById = {};
+var structResearchDone = {};
+var structDaySeconds = 86400;
+var structBuildRange = 2;
+var structTimer = null;
+var selectedStructure = null;
+var placingStructure = null;      // { unit, type, preview }
+var groundStructTargets = [];
+
+var STRUCT_KIND_ROLE = {
+  trench: 'Укрытие', bunker: 'Укрытие', camo: 'Маскировка', turret: 'Оборона',
+  jammer: 'Радиоэлектроника', extractor: 'Добыча', cantina: 'Заработок'
+};
+
+function loadStructureTypes() {
+  return Promise.all([
+    supabase.from('structure_types').select('*').order('sort_order'),
+    supabase.from('game_settings').select('key, value')
+      .in('key', ['settlement_day_seconds', 'engineer_build_range'])
+  ]).then(function(r) {
+    structTypeById = {};
+    (r[0].error ? [] : (r[0].data || [])).forEach(function(t) { structTypeById[t.id] = t; });
+    (r[1].error ? [] : (r[1].data || [])).forEach(function(s) {
+      if (s.key === 'settlement_day_seconds') structDaySeconds = parseInt(s.value, 10) || 86400;
+      if (s.key === 'engineer_build_range') structBuildRange = parseInt(s.value, 10) || 2;
+    });
+  });
+}
+
+function loadStructures() {
+  if (!systemId) return Promise.resolve();
+  return supabase.from('field_structures').select('*').eq('system_id', systemId).then(function(res) {
+    fieldStructures = (res.error || !res.data) ? [] : res.data;
+
+    // Выбранная постройка могла исчезнуть или смениться прочность
+    if (selectedStructure) {
+      var fresh = fieldStructures.filter(function(s) { return s.id === selectedStructure.id; })[0];
+      if (!fresh) { selectedStructure = null; hidePickup(); }
+      else { selectedStructure = fresh; if (structPanelOpen()) openStructurePanel(fresh, true); }
+    }
+
+    updateStructTimer();
+    redrawScene();
+  });
+}
+
+function structReady(s) {
+  return !s.completes_at || new Date(s.completes_at).getTime() <= gbServerNow();
+}
+
+// Пока что-то строится, раз в секунду перерисовываем отсчёт
+function updateStructTimer() {
+  var pending = fieldStructures.some(function(s) { return !structReady(s); });
+  if (pending && !structTimer) {
+    structTimer = setInterval(function() {
+      var still = fieldStructures.some(function(s) { return !structReady(s); });
+      redrawScene();
+      if (selectedStructure && structPanelOpen()) paintStructStatus(selectedStructure);
+      if (!still) {
+        clearInterval(structTimer);
+        structTimer = null;
+        loadStructures();
+      }
+    }, 1000);
+  }
+}
+
+function structSide(s) {
+  if (s.owner_user_id === currentUserId) return 'mine';
+  if (myFaction && s.faction === myFaction) return 'ally';
+  return 'enemy';
+}
+
+var STRUCT_SIDE_COLOR = { mine: '#5fd968', ally: '#4a90d9', enemy: '#d94a4a' };
+
+function structAt(cellX, cellY) {
+  for (var i = fieldStructures.length - 1; i >= 0; i--) {
+    var s = fieldStructures[i];
+    if (cellX >= s.x && cellX < s.x + s.w && cellY >= s.y && cellY < s.y + s.h) return s;
+  }
+  return null;
+}
+
+// Под какими своими укреплениями стоит юнит: для строки в его панели
+function unitShelter(unit) {
+  if (!unit || unit.x === null || unit.x === undefined) return null;
+  var ut = unitTypeById[unit.unit_type] || {};
+  var box = unitBox(unit);
+  var res = { cover: 0, mult: 1, camo: false, name: null };
+
+  fieldStructures.forEach(function(s) {
+    if (s.faction !== unit.faction || !structReady(s)) return;
+    var st = structTypeById[s.type_id] || {};
+    if (st.kind === 'camo') {
+      var r = st.radius || 0;
+      if (unit.x < s.x + s.w + r && unit.x + box.w > s.x - r &&
+          unit.y < s.y + s.h + r && unit.y + box.h > s.y - r) res.camo = true;
+      return;
+    }
+    if (!(unit.x < s.x + s.w && unit.x + box.w > s.x && unit.y < s.y + s.h && unit.y + box.h > s.y)) return;
+    if (st.infantry_only && ut.is_vehicle) return;
+    if ((st.cover_pct || 0) > res.cover) { res.cover = st.cover_pct; res.name = st.kind; }
+    if (Number(st.damage_mult) > res.mult) res.mult = Number(st.damage_mult);
+  });
+
+  if (!res.cover && !res.camo) return null;
+  return res;
+}
+
+function shelterText(sh) {
+  if (!sh) return '';
+  var parts = [];
+  if (sh.cover) {
+    parts.push((sh.name === 'bunker' ? 'в бункере' : 'в окопе') + ' −' + sh.cover + '%' +
+               (sh.mult > 1 ? ', урон ×' + sh.mult : ''));
+  }
+  if (sh.camo) parts.push('под маскировкой');
+  return parts.join(' · ');
+}
+
+// ---------- Отрисовка ----------
+
+function drawStructures() {
+  if (!fieldStructures.length) return;
+  var now = gbServerNow();
+
+  // Зоны своей маскировки — чтобы было видно, кого она укрывает
+  fieldStructures.forEach(function(s) {
+    var st = structTypeById[s.type_id];
+    if (!st || st.kind !== 'camo' || structSide(s) === 'enemy' || !structReady(s)) return;
+    var r = st.radius || 0;
+    var zx = (s.x - r) * CELL_PX, zy = (s.y - r) * CELL_PX;
+    var zw = (s.w + r * 2) * CELL_PX, zh = (s.h + r * 2) * CELL_PX;
+    ctx.fillStyle = 'rgba(95,217,190,0.10)';
+    ctx.fillRect(zx, zy, zw, zh);
+    ctx.strokeStyle = 'rgba(95,217,190,0.55)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeRect(zx + 1, zy + 1, zw - 2, zh - 2);
+    ctx.setLineDash([]);
+  });
+
+  fieldStructures.forEach(function(s) {
+    var st = structTypeById[s.type_id] || {};
+    var px = s.x * CELL_PX, py = s.y * CELL_PX;
+    var w = s.w * CELL_PX, h = s.h * CELL_PX;
+    var ready = !s.completes_at || new Date(s.completes_at).getTime() <= now;
+    var color = STRUCT_SIDE_COLOR[structSide(s)];
+
+    // Тень под постройкой: картинка вырезана, без неё она «висит» над травой
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.30)';
+    ctx.beginPath();
+    ctx.ellipse(px + w / 2, py + h * 0.78, w * 0.46, h * 0.20, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    var img = getBuildingImage(st.image);
+    ctx.save();
+    if (!ready) ctx.globalAlpha = 0.5;
+    if (img && img.complete && !img.failed && img.naturalWidth > 0) {
+      ctx.drawImage(img, px + 1, py + 1, w - 2, h - 2);
+    } else {
+      ctx.fillStyle = 'rgba(217,169,64,0.30)';
+      ctx.fillRect(px + 2, py + 2, w - 4, h - 4);
+    }
+    ctx.restore();
+
+    // Уголки цвета стороны: своё, союзное, вражеское — видно сразу
+    var len = Math.max(6, Math.min(w, h) * 0.26);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(px + 1, py + 1 + len); ctx.lineTo(px + 1, py + 1); ctx.lineTo(px + 1 + len, py + 1);
+    ctx.moveTo(px + w - 1 - len, py + 1); ctx.lineTo(px + w - 1, py + 1); ctx.lineTo(px + w - 1, py + 1 + len);
+    ctx.moveTo(px + w - 1, py + h - 1 - len); ctx.lineTo(px + w - 1, py + h - 1); ctx.lineTo(px + w - 1 - len, py + h - 1);
+    ctx.moveTo(px + 1 + len, py + h - 1); ctx.lineTo(px + 1, py + h - 1); ctx.lineTo(px + 1, py + h - 1 - len);
+    ctx.stroke();
+
+    if (!ready) {
+      drawStructProgress(s, px, py, w, h, now);
+    } else if (st.max_hp && s.hp < st.max_hp) {
+      var pct = Math.max(0, s.hp / st.max_hp);
+      ctx.fillStyle = 'rgba(5,6,10,0.8)';
+      ctx.fillRect(px + 3, py + 3, w - 6, 4);
+      ctx.fillStyle = pct > 0.6 ? '#5fd968' : pct > 0.3 ? '#d9a940' : '#d94a4a';
+      ctx.fillRect(px + 3, py + 3, (w - 6) * pct, 4);
+    }
+
+    if (selectedStructure && selectedStructure.id === s.id) {
+      ctx.strokeStyle = '#d9a940';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 4]);
+      ctx.strokeRect(px - 2, py - 2, w + 4, h + 4);
+      ctx.setLineDash([]);
+    }
+  });
+}
+
+function drawStructProgress(s, px, py, w, h, now) {
+  var st = structTypeById[s.type_id] || {};
+  var endMs = new Date(s.completes_at).getTime();
+  var total = (st.build_seconds || 60) * 1000;
+  var progress = 1 - (endMs - now) / total;
+  if (progress < 0) progress = 0;
+  if (progress > 1) progress = 1;
+
+  var barH = Math.max(3, h * 0.08);
+  var barY = py + h - barH - 3;
+  ctx.fillStyle = 'rgba(5,6,10,0.8)';
+  ctx.fillRect(px + 3, barY, w - 6, barH);
+  ctx.fillStyle = '#4a90d9';
+  ctx.fillRect(px + 3, barY, (w - 6) * progress, barH);
+
+  var left = Math.max(0, Math.ceil((endMs - now) / 1000));
+  var mm = Math.floor(left / 60), ss = left % 60;
+  var label = mm > 0 ? (mm + ':' + (ss < 10 ? '0' : '') + ss) : (ss + 'с');
+
+  ctx.font = 'bold ' + Math.max(9, Math.round(Math.min(w, 64) * 0.26)) + 'px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'rgba(5,6,10,0.9)';
+  ctx.strokeText(label, px + w / 2, barY - 2);
+  ctx.fillStyle = '#cfd8dc';
+  ctx.fillText(label, px + w / 2, barY - 2);
+}
+
+// Поверх юнитов: радиус выбранной постройки и режим постановки
+function drawStructureOverlay() {
+  if (selectedStructure && !placingStructure) {
+    var st = structTypeById[selectedStructure.type_id] || {};
+    var zone = structZone(selectedStructure, st);
+    if (zone) {
+      ctx.fillStyle = zone.fill;
+      ctx.fillRect(zone.x * CELL_PX, zone.y * CELL_PX, zone.w * CELL_PX, zone.h * CELL_PX);
+      ctx.strokeStyle = zone.stroke;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([7, 5]);
+      ctx.strokeRect(zone.x * CELL_PX, zone.y * CELL_PX, zone.w * CELL_PX, zone.h * CELL_PX);
+      ctx.setLineDash([]);
+    }
+  }
+
+  if (placingStructure) drawStructPlacement();
+}
+
+// Зона действия: у турели дальность от корпуса, у глушилки квадрат вокруг центра
+function structZone(s, st) {
+  if (st.kind === 'turret' && st.radius) {
+    return { x: s.x - st.radius, y: s.y - st.radius, w: s.w + st.radius * 2, h: s.h + st.radius * 2,
+             fill: 'rgba(217,74,74,0.11)', stroke: 'rgba(217,74,74,0.75)' };
+  }
+  if (st.kind === 'jammer' && st.radius) {
+    var zx = s.x + Math.floor(s.w / 2) - Math.floor(st.radius / 2);
+    var zy = s.y + Math.floor(s.h / 2) - Math.floor(st.radius / 2);
+    return { x: zx, y: zy, w: st.radius, h: st.radius,
+             fill: 'rgba(163,74,217,0.08)', stroke: 'rgba(163,74,217,0.75)' };
+  }
+  if (st.kind === 'camo' && st.radius) {
+    return { x: s.x - st.radius, y: s.y - st.radius, w: s.w + st.radius * 2, h: s.h + st.radius * 2,
+             fill: 'rgba(95,217,190,0.10)', stroke: 'rgba(95,217,190,0.8)' };
+  }
+  return null;
+}
+
+// ---------- Где можно поставить ----------
+// Те же правила, что у сервера в build_structure. Сервер всё равно
+// перепроверит, но подсветка должна обещать только реальные места.
+
+function boxOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
+  return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+}
+
+function boxGap(ax, ay, aw, ah, bx, by, bw, bh) {
+  return Math.max(Math.max(bx - (ax + aw - 1), ax - (bx + bw - 1), 0),
+                  Math.max(by - (ay + ah - 1), ay - (by + bh - 1), 0));
+}
+
+function structPlaceProblem(unit, st, x, y) {
+  var w = st.width_cells || 1, h = st.height_cells || 1;
+  var ub = unitBox(unit);
+
+  if (x < 0 || y < 0 || x + w > GRID_SIZE || y + h > GRID_SIZE) return 'за краем карты';
+  if (y + h > GRID_SIZE - ATTACK_ZONE_H) return 'в полосе вторжения не строят';
+  if (boxGap(unit.x, unit.y, ub.w, ub.h, x, y, w, h) > structBuildRange) {
+    return 'далеко: инженер строит в ' + structBuildRange + ' клетках от себя';
+  }
+
+  for (var i = 0; i < deployZones.length; i++) {
+    var z = deployZones[i];
+    if (boxOverlap(x, y, w, h, z.x, z.y, z.size || DEPLOY_SIZE, z.size || DEPLOY_SIZE)) {
+      return 'зона высадки должна оставаться свободной';
+    }
+  }
+  if (settlement && boxOverlap(x, y, w, h, settlement.x, settlement.y, settlement.size, settlement.size)) {
+    return 'на поселении не строят';
+  }
+  for (var k = 0; k < buildSlots.length; k++) {
+    if (boxOverlap(x, y, w, h, buildSlots[k].x, buildSlots[k].y, SLOT_SIZE, SLOT_SIZE)) {
+      return 'здесь участок под здание';
+    }
+  }
+  for (var j = 0; j < fieldStructures.length; j++) {
+    var s = fieldStructures[j];
+    if (boxOverlap(x, y, w, h, s.x, s.y, s.w, s.h)) return 'место занято укреплением';
+  }
+  for (var n = 0; n < unitsOnMap.length; n++) {
+    var u = unitsOnMap[n];
+    if (u.x === null || u.x === undefined) continue;
+    var b = unitBox(u);
+    if (!boxOverlap(x, y, w, h, u.x, u.y, b.w, b.h)) continue;
+    var ut = unitTypeById[u.unit_type] || {};
+    if (!st.enterable) return 'место занято';
+    if (u.faction !== myFaction) return 'место занято';
+    if (st.infantry_only && ut.is_vehicle) return 'здесь стоит техника — окоп и бункер только для пехоты';
+  }
+  return null;
+}
+
+// Тап по клетке: у больших построек палец попадает в середину, а не в угол
+function structAnchor(st, cellX, cellY) {
+  return {
+    x: cellX - Math.floor(((st.width_cells || 1) - 1) / 2),
+    y: cellY - Math.floor(((st.height_cells || 1) - 1) / 2)
+  };
+}
+
+function drawStructPlacement() {
+  var p = placingStructure;
+  var u = p.unit, st = p.type;
+  var ub = unitBox(u);
+  var w = st.width_cells || 1, h = st.height_cells || 1;
+  var r = structBuildRange;
+  var ox = Math.floor((w - 1) / 2), oy = Math.floor((h - 1) / 2);
+
+  // Досягаемость инженера
+  var rx = (u.x - r - w + 1), ry = (u.y - r - h + 1);
+  var rw = ub.w + (r + w - 1) * 2, rh = ub.h + (r + h - 1) * 2;
+  ctx.strokeStyle = 'rgba(217,169,64,0.75)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([7, 5]);
+  ctx.strokeRect(rx * CELL_PX, ry * CELL_PX, rw * CELL_PX, rh * CELL_PX);
+  ctx.setLineDash([]);
+
+  // Клетки, тап по которым даст годное место
+  for (var ax = rx; ax < rx + rw; ax++) {
+    for (var ay = ry; ay < ry + rh; ay++) {
+      if (structPlaceProblem(u, st, ax, ay)) continue;
+      ctx.fillStyle = 'rgba(95,217,104,0.22)';
+      ctx.fillRect((ax + ox) * CELL_PX + 3, (ay + oy) * CELL_PX + 3, CELL_PX - 6, CELL_PX - 6);
+    }
+  }
+
+  if (!p.preview) return;
+
+  var pv = p.preview;
+  var px = pv.x * CELL_PX, py = pv.y * CELL_PX;
+  var img = getBuildingImage(st.image);
+  ctx.save();
+  ctx.globalAlpha = 0.72;
+  if (img && img.complete && !img.failed && img.naturalWidth > 0) {
+    ctx.drawImage(img, px + 1, py + 1, w * CELL_PX - 2, h * CELL_PX - 2);
+  }
+  ctx.restore();
+  ctx.fillStyle = pv.problem ? 'rgba(217,74,74,0.25)' : 'rgba(95,217,104,0.18)';
+  ctx.fillRect(px, py, w * CELL_PX, h * CELL_PX);
+  ctx.strokeStyle = pv.problem ? '#d94a4a' : '#5fd968';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(px + 1, py + 1, w * CELL_PX - 2, h * CELL_PX - 2);
+}
+
+// ---------- Каталог построек инженера ----------
+
+function structTypesForMe() {
+  return Object.keys(structTypeById).map(function(k) { return structTypeById[k]; })
+    .filter(function(t) { return t.faction === myFaction; })
+    .sort(function(a, b) { return (a.sort_order || 0) - (b.sort_order || 0); });
+}
+
+function structCountHere(typeId) {
+  return fieldStructures.filter(function(s) { return s.type_id === typeId; }).length;
+}
+
+function structEffectLine(st) {
+  switch (st.kind) {
+    case 'trench':    return 'урон по бойцу −' + st.cover_pct + '% · ответный огонь';
+    case 'bunker':    return 'урон по пехоте −' + st.cover_pct + '% · её урон ×' + Number(st.damage_mult);
+    case 'camo':      return 'прячет своих в ' + (st.width_cells + st.radius * 2) + '×' +
+                             (st.height_cells + st.radius * 2) + ' клетках';
+    case 'turret':    return 'урон ' + st.damage + ' · радиус ' + st.radius + ' · раз в ' +
+                             Math.round(st.cooldown_seconds / 60) + ' мин';
+    case 'jammer':    return 'сжигает разведчиков в ' + st.radius + '×' + st.radius;
+    case 'extractor': return '+' + st.produces_per_day + ' ' +
+                             resourceName(st.produces_resource).toLowerCase() + ' в сутки';
+    case 'cantina':   return '+' + st.credits_per_day + ' кр. в сутки · довольство +' + st.satisfaction_bonus;
+    default:          return '';
+  }
+}
+
+function formatBuildTime(sec) {
+  if (sec >= 60) return Math.floor(sec / 60) + ' мин' + (sec % 60 ? ' ' + (sec % 60) + ' с' : '');
+  return sec + ' с';
+}
+
+function openStructureBuildPanel(unit) {
+  var panel = document.getElementById('build-panel');
+  var list = document.getElementById('build-panel-list');
+  var box = document.getElementById('build-panel-box');
+  var title = box.querySelector('.build-panel-title');
+  var utype = unitTypeById[unit.unit_type] || {};
+
+  title.textContent = 'Полевые постройки · ' + (utype.name || 'инженер');
+  list.innerHTML = '<div class="build-panel-empty">Загрузка…</div>';
+  var oldStrip = document.getElementById('stock-strip');
+  if (oldStrip) oldStrip.remove();
+  panel.classList.add('struct-mode');
+  panel.style.display = 'flex';
+
+  Promise.all([
+    supabase.rpc('get_researches'),
+    new Promise(function(done) { loadResourceNames(done); }),
+    new Promise(function(done) { loadPlanetStock(done); })
+  ]).then(function(r) {
+    // Окно успели закрыть или открыть под здание — чужой список не рисуем
+    if (panel.style.display === 'none' || !panel.classList.contains('struct-mode')) return;
+    structResearchDone = {};
+    (r[0].error ? [] : (r[0].data || [])).forEach(function(x) {
+      structResearchNames[x.id] = x.name;
+      if (x.done) structResearchDone[x.id] = true;
+    });
+    renderStockStrip(0);
+    renderStructureCards(unit, list);
+  });
+}
+
+function renderStructureCards(unit, list) {
+  list.innerHTML = '';
+
+  var types = structTypesForMe();
+  var own = sysFaction && myFaction && sysFaction === myFaction;
+
+  var note = document.createElement('div');
+  note.className = 'struct-note' + (own ? '' : ' warn');
+  note.textContent = own
+    ? 'Строит в ' + structBuildRange + ' клетках от себя за одно действие. ' +
+      'Нельзя: зоны высадки, участки зданий, поселение и полоса вторжения.'
+    : 'Строить можно только на планетах своей фракции.';
+  list.appendChild(note);
+
+  if (!types.length) {
+    list.insertAdjacentHTML('beforeend', '<div class="build-panel-empty">Постройки пока не завезли</div>');
+    return;
+  }
+
+  var labName = myFaction === 'cis' ? 'лаборатории' : 'научном центре';
+
+  types.forEach(function(st) {
+    var item = document.createElement('button');
+    item.className = 'build-panel-item struct-card';
+    item.setAttribute('data-code', st.id);
+
+    var learned = !st.research_id || structResearchDone[st.research_id];
+    var count = structCountHere(st.id);
+    var capped = st.max_per_planet && count >= st.max_per_planet;
+    var enough = canAffordResources(st.cost_resources);
+
+    item.innerHTML =
+      '<div class="build-panel-thumb struct-thumb">' +
+        (st.image ? '<img src="../' + st.image + '" alt="">' : '■') +
+        '<span class="struct-size">' + st.width_cells + '×' + st.height_cells + '</span>' +
+      '</div>' +
+      '<div class="build-panel-info">' +
+        '<div class="build-panel-name">' + escHtml(st.name) +
+          (!st.research_id ? ' <i class="struct-tag">базовая</i>' : '') + '</div>' +
+        '<div class="struct-effect">' + escHtml(structEffectLine(st)) + '</div>' +
+        '<div class="build-panel-cost">' + st.cost + ' кр. · ' + formatBuildTime(st.build_seconds) + '</div>' +
+        (consumesText(st.cost_resources)
+          ? '<div class="build-panel-rescost' + (enough ? '' : ' short') + '">Со склада: ' +
+            escHtml(consumesText(st.cost_resources)) + '</div>' : '') +
+        '<div class="struct-limit">прочность ' + st.max_hp + ' · на планете ' + count + ' из ' + st.max_per_planet + '</div>' +
+      '</div>';
+
+    var why = null;
+    if (!own) why = 'чужая планета';
+    else if (!learned) why = 'Изучить в ' + labName + ': ' +
+      ((st.research_id && researchNameById(st.research_id)) || 'исследование');
+    else if (capped) why = 'Предел на этой планете';
+    else if (!enough) why = 'На складе не хватает сырья';
+
+    if (why) {
+      item.classList.add('blocked');
+      if (!learned) item.classList.add('struct-locked');
+      var w = document.createElement('div');
+      w.className = 'build-panel-why';
+      w.textContent = why;
+      item.querySelector('.build-panel-info').appendChild(w);
+    }
+
+    item.addEventListener('click', function() {
+      if (why) return;
+      closeBuildPanel();
+      startStructurePlacement(unit, st);
+    });
+
+    list.appendChild(item);
+  });
+}
+
+var structResearchNames = {};
+function researchNameById(id) { return structResearchNames[id] || null; }
+
+// ---------- Постановка на карту ----------
+
+function startStructurePlacement(unit, st) {
+  cancelTargeting();
+  if (movingUnit) cancelGroundMove();
+  selectedStructure = null;
+  selectedUnit = null;
+  placingStructure = { unit: unit, type: st, preview: null };
+  hidePickup();
+  showStructPlacementHint();
+  focusCell(unit.x, unit.y);
+  redrawScene();
+}
+
+function showStructPlacementHint() {
+  var p = placingStructure;
+  if (!p) return;
+  var st = p.type;
+  var hint = document.getElementById('placement-hint');
+  var head = escHtml(st.name) + ' ' + st.width_cells + '×' + st.height_cells;
+
+  if (!p.preview) {
+    hint.innerHTML = '<span>' + head + ' · ткни подсвеченную клетку</span>' +
+                     '<button id="struct-cancel">Отмена</button>';
+  } else if (p.preview.problem) {
+    hint.innerHTML = '<span>' + head + ' · <b class="warn-own">' + escHtml(p.preview.problem) + '</b></span>' +
+                     '<button id="struct-cancel">Отмена</button>';
+  } else {
+    hint.innerHTML = '<span>' + head + ' · ' + st.cost + ' кр. · ' + formatBuildTime(st.build_seconds) + '</span>' +
+                     '<button id="area-go">Строить</button>' +
+                     '<button id="struct-cancel">Отмена</button>';
+  }
+  hint.style.display = 'flex';
+
+  document.getElementById('struct-cancel').addEventListener('click', cancelStructurePlacement);
+  var go = document.getElementById('area-go');
+  if (go) go.addEventListener('click', confirmStructurePlacement);
+  setBottomInset(insetFor(hint));
+}
+
+function cancelStructurePlacement() {
+  placingStructure = null;
+  document.getElementById('placement-hint').style.display = 'none';
+  setBottomInset(0);
+  redrawScene();
+}
+
+function handleStructurePlacementTap(cellX, cellY) {
+  var p = placingStructure;
+  var a = structAnchor(p.type, cellX, cellY);
+  p.preview = { x: a.x, y: a.y, problem: structPlaceProblem(p.unit, p.type, a.x, a.y) };
+  showStructPlacementHint();
+  redrawScene();
+}
+
+function confirmStructurePlacement() {
+  var p = placingStructure;
+  if (!p || !p.preview || p.preview.problem) return;
+  var go = document.getElementById('area-go');
+  if (go) go.disabled = true;
+
+  supabase.rpc('build_structure', {
+    p_unit_id: p.unit.id, p_type: p.type.id, p_x: p.preview.x, p_y: p.preview.y
+  }).then(function(r) {
+    if (r.error) {
+      if (go) go.disabled = false;
+      alert('Не удалось построить: ' + r.error.message);
+      return;
+    }
+    cancelStructurePlacement();
+    selectedUnit = null;
+    loadStructures();
+    loadUnits();
+  });
+}
+
+// ---------- Панель постройки ----------
+
+function structPanelOpen() {
+  var bar = document.getElementById('pickup-bar');
+  return !!(bar && bar.style.visibility === 'visible' && bar.getAttribute('data-struct'));
+}
+
+function openStructurePanel(s, keepView) {
+  var bar = document.getElementById('pickup-bar');
+  if (!bar) return;
+
+  selectedStructure = s;
+  selectedUnit = null;
+
+  var st = structTypeById[s.type_id] || {};
+  var side = structSide(s);
+  var hpPct = st.max_hp ? Math.max(0, Math.min(100, s.hp / st.max_hp * 100)) : 100;
+  var sideText = side === 'mine' ? 'Твоя' : side === 'ally' ? 'Союзная' : 'Вражеская';
+
+  var props = [];
+  if (st.cover_pct) props.push('<span title="укрытие">⛨ −' + st.cover_pct + '%</span>');
+  if (Number(st.damage_mult) > 1) props.push('<span title="урон стрелка">◎ ×' + Number(st.damage_mult) + '</span>');
+  if (st.kind === 'turret') {
+    props.push('<span title="урон">◎ ' + st.damage + '</span>');
+    props.push('<span title="радиус">➶ ' + st.radius + '</span>');
+    props.push('<span title="перезарядка">◷ ' + Math.round(st.cooldown_seconds / 60) + ' мин</span>');
+  }
+  if (st.kind === 'jammer') props.push('<span title="поле помех">◈ ' + st.radius + '×' + st.radius + '</span>');
+  if (st.kind === 'camo') props.push('<span title="укрывает">◌ ' + (s.w + st.radius * 2) + '×' + (s.h + st.radius * 2) + '</span>');
+  if (st.produces_per_day) props.push('<span title="в сутки">⛏ +' + st.produces_per_day + ' ' +
+                                      escHtml(resourceName(st.produces_resource).toLowerCase()) + '</span>');
+  if (st.credits_per_day) props.push('<span title="в сутки">◈ +' + st.credits_per_day + '</span>');
+  if (st.satisfaction_bonus) props.push('<span title="довольство поселения">☺ +' + st.satisfaction_bonus + '</span>');
+
+  bar.setAttribute('data-struct', s.id);
+  bar.setAttribute('data-side', side);
+  bar.innerHTML =
+    '<div class="gu-top">' +
+      '<div class="gu-portrait struct side-' + side + '">' +
+        (st.image ? '<img src="../' + st.image + '" alt="">' : '') +
+      '</div>' +
+      '<div class="gu-stats">' +
+        '<div class="gu-name">' + escHtml(st.name || 'Постройка') + '</div>' +
+        '<div class="gu-role"><b class="struct-side side-' + side + '">' + sideText + '</b> · ' +
+          (STRUCT_KIND_ROLE[st.kind] || 'Постройка') + ' · ' + s.w + '×' + s.h + ' · ' + s.x + ':' + s.y + '</div>' +
+        '<div class="gu-hp">' +
+          '<span class="gu-hp-num">' + s.hp + ' / ' + (st.max_hp || s.hp) + '</span>' +
+          '<div class="gu-hp-track"><i style="width:' + hpPct + '%"></i></div>' +
+        '</div>' +
+        '<div class="gu-props">' + props.join('') + '</div>' +
+      '</div>' +
+      '<button class="gu-close" id="gu-close">✕</button>' +
+    '</div>' +
+    '<div class="gu-ap-row struct-status" id="struct-status"></div>' +
+    '<div class="gu-panel struct-panel">' +
+      '<div class="gu-desc">' + escHtml(st.description || '') + '</div>' +
+      '<div id="struct-actions"></div>' +
+    '</div>';
+
+  paintStructStatus(s);
+
+  if (side === 'mine') {
+    // Как на сервере: половина цены, урезанная по целости постройки
+    var whole = st.max_hp ? Math.max(0, Math.min(1, s.hp / st.max_hp)) : 1;
+    var back = Math.floor((st.cost || 0) / 2 * whole);
+    var btn = document.createElement('button');
+    btn.className = 'gu-abil-go struct-demolish';
+    btn.textContent = 'Разобрать · вернётся ' + back + ' кр.';
+    btn.addEventListener('click', function() {
+      if (!confirm('Разобрать «' + st.name + '»? Вернётся ' + back + ' кр.')) return;
+      btn.disabled = true;
+      supabase.rpc('demolish_structure', { p_id: s.id }).then(function(res) {
+        if (res.error) { btn.disabled = false; alert(res.error.message); return; }
+        selectedStructure = null;
+        hidePickup();
+        loadStructures();
+      });
+    });
+    document.getElementById('struct-actions').appendChild(btn);
+  }
+
+  document.getElementById('gu-close').addEventListener('click', function() {
+    selectedStructure = null;
+    hidePickup();
+    redrawScene();
+  });
+
+  bar.style.visibility = 'visible';
+  setBottomInset(insetFor(bar));
+  if (!keepView) focusCell(s.x + Math.floor(s.w / 2), s.y + Math.floor(s.h / 2));
+  redrawScene();
+}
+
+// Строка состояния: стройка, ближайшая выдача или готовность турели
+function paintStructStatus(s) {
+  var box = document.getElementById('struct-status');
+  if (!box) return;
+  var st = structTypeById[s.type_id] || {};
+  var now = gbServerNow();
+
+  if (!structReady(s)) {
+    var end = new Date(s.completes_at).getTime();
+    var total = (st.build_seconds || 60) * 1000;
+    var pct = Math.max(0, Math.min(100, (1 - (end - now) / total) * 100));
+    box.innerHTML = '<span class="struct-st-label">Строится</span>' +
+      '<div class="struct-st-track"><i style="width:' + pct + '%"></i></div>' +
+      '<span class="struct-st-time">' + formatLeft(Math.max(0, Math.ceil((end - now) / 1000))) + '</span>';
+    return;
+  }
+
+  var text = 'В строю';
+  if ((st.produces_per_day || st.credits_per_day) && s.last_tick_at && structSide(s) !== 'enemy') {
+    var next = new Date(s.last_tick_at).getTime() + structDaySeconds * 1000;
+    text = 'Следующая выдача через ' + formatLeft(Math.max(0, Math.ceil((next - now) / 1000)));
+  } else if (st.kind === 'turret' && structSide(s) !== 'enemy') {
+    text = s.spotted_at ? 'Цель в прицеле — огонь раз в ' + Math.round(st.cooldown_seconds / 60) + ' мин'
+                        : 'Врагов в радиусе нет';
+  }
+  box.innerHTML = '<span class="struct-st-label ok">' + text + '</span>';
+}
+
+// ---------- Атака по постройкам ----------
+
+function drawStructTargets() {
+  groundStructTargets.forEach(function(t) {
+    ctx.strokeStyle = 'rgba(217,74,74,0.95)';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([6, 4]);
+    ctx.strokeRect(t.x * CELL_PX + 2, t.y * CELL_PX + 2, t.w * CELL_PX - 4, t.h * CELL_PX - 4);
+    ctx.setLineDash([]);
+  });
+}
+
+function structTargetAt(cellX, cellY) {
+  for (var i = 0; i < groundStructTargets.length; i++) {
+    var t = groundStructTargets[i];
+    if (cellX >= t.x && cellX < t.x + t.w && cellY >= t.y && cellY < t.y + t.h) return t;
+  }
+  return null;
+}
+
+function attackStructureTarget(pick) {
+  supabase.rpc('attack_structure', {
+    p_attacker_id: attackingUnit.id, p_structure_id: pick.structure_id
+  }).then(function(r) {
+    if (r.error) { alert(r.error.message); return; }
+    var res = (r.data && r.data.length) ? r.data[0] : null;
+    if (res) {
+      alert(!res.hit ? 'Промах'
+        : res.destroyed ? pick.name + ' разрушен'
+        : 'Попадание · −' + res.damage + ' · осталось ' + res.target_hp);
+    }
+    cancelTargeting();
+    selectedUnit = null;
+    loadStructures();
+    loadUnits();
+  });
+}
+
+// ---------- Тексты исследований ----------
+
+function structUnlockText(r) {
+  var names = Object.keys(structTypeById).map(function(k) { return structTypeById[k]; })
+    .filter(function(t) { return t.research_id === r.id; })
+    .map(function(t) { return t.name + ' ' + t.width_cells + '×' + t.height_cells; });
+  return names.length ? 'инженер сможет строить: ' + names.join(', ')
+                      : 'открывает постройку для инженера';
+}
+
+// Щиток укрытия и пунктир маскировки поверх бойца
+function drawShelterMark(sh, x, y, w, h) {
+  if (sh.camo) {
+    ctx.strokeStyle = 'rgba(95,217,190,0.9)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3, 3]);
+    ctx.strokeRect(x + 4, y + 4, w - 8, h - 8);
+    ctx.setLineDash([]);
+  }
+  if (!sh.cover) return;
+
+  var s = Math.max(9, Math.round(CELL_PX * 0.36));
+  var bx = x + 2, by = y + h - s - 2;
+  ctx.beginPath();
+  ctx.moveTo(bx, by);
+  ctx.lineTo(bx + s, by);
+  ctx.lineTo(bx + s, by + s * 0.55);
+  ctx.quadraticCurveTo(bx + s, by + s * 0.9, bx + s / 2, by + s);
+  ctx.quadraticCurveTo(bx, by + s * 0.9, bx, by + s * 0.55);
+  ctx.closePath();
+  ctx.fillStyle = sh.name === 'bunker' ? '#cfd8dc' : '#c9a45c';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(5,6,10,0.9)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
 }
