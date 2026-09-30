@@ -5974,17 +5974,13 @@ function structZone(s, st) {
     return { x: s.x - st.radius, y: s.y - st.radius, w: s.w + st.radius * 2, h: s.h + st.radius * 2,
              fill: 'rgba(217,74,74,0.11)', stroke: 'rgba(217,74,74,0.75)' };
   }
-  // Радар: тот же квадрат вокруг центра, что у глушилки, но цвета разведки
+  // Радар и глушилка, как турель, действуют на radius клеток от своих краёв
   if (st.kind === 'radar' && st.radius) {
-    var rx = s.x + Math.floor(s.w / 2) - Math.floor(st.radius / 2);
-    var ry = s.y + Math.floor(s.h / 2) - Math.floor(st.radius / 2);
-    return { x: rx, y: ry, w: st.radius, h: st.radius,
+    return { x: s.x - st.radius, y: s.y - st.radius, w: s.w + st.radius * 2, h: s.h + st.radius * 2,
              fill: 'rgba(74,217,160,0.08)', stroke: 'rgba(74,217,160,0.8)' };
   }
   if (st.kind === 'jammer' && st.radius) {
-    var zx = s.x + Math.floor(s.w / 2) - Math.floor(st.radius / 2);
-    var zy = s.y + Math.floor(s.h / 2) - Math.floor(st.radius / 2);
-    return { x: zx, y: zy, w: st.radius, h: st.radius,
+    return { x: s.x - st.radius, y: s.y - st.radius, w: s.w + st.radius * 2, h: s.h + st.radius * 2,
              fill: 'rgba(163,74,217,0.08)', stroke: 'rgba(163,74,217,0.75)' };
   }
   if (st.kind === 'camo' && st.radius) {
@@ -6120,8 +6116,8 @@ function structEffectLine(st) {
                              (st.height_cells + st.radius * 2) + ' клетках';
     case 'turret':    return 'урон ' + st.damage + ' · радиус ' + st.radius + ' · раз в ' +
                              Math.round(st.cooldown_seconds / 60) + ' мин';
-    case 'jammer':    return 'сжигает разведчиков в ' + st.radius + '×' + st.radius;
-    case 'radar':     return 'видит всех врагов в ' + st.radius + '×' + st.radius + ', даже под маскировкой';
+    case 'jammer':    return 'сжигает разведчиков в ' + st.radius + ' клетках вокруг';
+    case 'radar':     return 'видит всех врагов в ' + st.radius + ' клетках вокруг, даже под маскировкой';
     case 'extractor': return '+' + st.produces_per_day + ' ' +
                              resourceName(st.produces_resource).toLowerCase() + ' в сутки';
     case 'cantina':   return '+' + st.credits_per_day + ' кр. в сутки · довольство +' + st.satisfaction_bonus;
@@ -6344,8 +6340,8 @@ function openStructurePanel(s, keepView) {
     props.push('<span title="радиус">➶ ' + st.radius + '</span>');
     props.push('<span title="перезарядка">◷ ' + Math.round(st.cooldown_seconds / 60) + ' мин</span>');
   }
-  if (st.kind === 'jammer') props.push('<span title="поле помех">◈ ' + st.radius + '×' + st.radius + '</span>');
-  if (st.kind === 'radar') props.push('<span title="зона обнаружения">◉ ' + st.radius + '×' + st.radius + '</span>');
+  if (st.kind === 'jammer') props.push('<span title="поле помех">◈ ' + st.radius + ' кл.</span>');
+  if (st.kind === 'radar') props.push('<span title="зона обнаружения">◉ ' + st.radius + ' кл.</span>');
   if (st.kind === 'camo') props.push('<span title="укрывает">◌ ' + (s.w + st.radius * 2) + '×' + (s.h + st.radius * 2) + '</span>');
   if (st.produces_per_day) props.push('<span title="в сутки">⛏ +' + st.produces_per_day + ' ' +
                                       escHtml(resourceName(st.produces_resource).toLowerCase()) + '</span>');
