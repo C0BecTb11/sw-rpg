@@ -1461,3 +1461,811 @@
 /* Неизученное видно, но приглушено и без цены в глаза */
 .build-panel-item.struct-locked .build-panel-thumb img { filter: grayscale(1) brightness(0.6); }
 .build-panel-item.struct-locked .build-panel-why { color: #d9a940; }
+
+/* ===== Развитие поселения: вкладки, уровень, кварталы ===== */
+/* Всё строится внутри #settlement-body. Язык тот же, что у панели
+   поселения выше: тёмные плашки, золото — поселение, синий — стройка,
+   зелёный/красный — хватает/не хватает. */
+
+/* Шапка с крестиком и вкладки прилипают к верху окна: длинная сводка
+   прокручивается под ними, закрыть панель можно с любого места */
+#settlement-header {
+  position: sticky;
+  top: -16px;
+  z-index: 3;
+  height: 26px;
+  margin: -16px -16px 0;
+  padding: 16px 16px 10px;
+  box-sizing: content-box;
+  background: #0d1119;
+}
+
+.stl-tabs {
+  position: sticky;
+  top: 36px;
+  z-index: 2;
+  display: flex;
+  gap: 6px;
+  margin: 0 -16px 12px;
+  padding: 0 16px 10px;
+  background: #0d1119;
+  border-bottom: 1px solid #1c2530;
+}
+
+.stl-tab {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 2px 8px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 7px;
+  color: #55606c;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.stl-tab.active {
+  background: #16202e;
+  border-color: #d9a940;
+  color: #cfd8dc;
+  box-shadow: inset 0 -2px 0 #d9a940;
+}
+
+.stl-tab i {
+  margin-left: 5px;
+  font-style: normal;
+  font-size: 9px;
+  letter-spacing: 0;
+  color: #55606c;
+}
+.stl-tab i:empty { display: none; }
+.stl-tab i.go   { color: #d9a940; }
+.stl-tab i.ok   { color: #5fd968; }
+.stl-tab i.bad  { color: #d94a4a; }
+.stl-tab i.busy { color: #4a90d9; }
+
+/* Заголовок раздела: подпись слева, значение справа, тонкая черта */
+.stl-sec {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 16px 0 9px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #1c2530;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #55606c;
+}
+.stl-sec em { font-style: normal; color: #d9a940; letter-spacing: 1px; }
+
+/* ----- Уровень ----- */
+.stl-lvl {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: linear-gradient(90deg, rgba(217,169,64,0.10) 0%, #10151e 55%);
+  border: 1px solid #2a3644;
+  border-left: 3px solid #d9a940;
+  border-radius: 9px;
+  font-family: 'Courier New', monospace;
+}
+
+.stl-lvl-emb {
+  flex: none;
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0a0d14;
+  border: 1px solid #d9a940;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 3px #0a0d14, inset 0 0 0 4px rgba(217,169,64,0.35);
+  color: #d9a940;
+  font-size: 16px;
+  font-weight: bold;
+  letter-spacing: 1px;
+}
+
+.stl-lvl-info { flex: 1; min-width: 0; }
+
+.stl-lvl-name {
+  font-size: 14px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #d9a940;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stl-lvl-sub { margin-top: 4px; font-size: 10px; color: #55606c; }
+
+/* Ступени — ромбы: пройденные залиты, строящаяся мигает синим */
+.stl-pips { flex: none; display: flex; gap: 7px; padding-right: 3px; }
+.stl-pips i {
+  width: 8px;
+  height: 8px;
+  border: 1px solid rgba(217,169,64,0.55);
+  transform: rotate(45deg);
+}
+.stl-pips i.on { background: #d9a940; border-color: #d9a940; }
+.stl-pips i.up {
+  background: #4a90d9;
+  border-color: #4a90d9;
+  animation: stl-blink 1.4s ease-in-out infinite;
+}
+
+@keyframes stl-blink { 50% { opacity: 0.35; } }
+
+.stl-lvl.max {
+  border-left-color: #d9a940;
+  box-shadow: 0 0 0 1px rgba(217,169,64,0.25), 0 0 18px rgba(217,169,64,0.08);
+}
+
+/* ----- Довольство и из чего оно сложилось ----- */
+.stl-top-dev { align-items: stretch; }
+.stl-top-dev .stl-mood { display: flex; flex-direction: column; justify-content: center; }
+.stl-mood.ok  .stl-mood-value { color: #5fd968; }
+.stl-mood.low .stl-mood-value { color: #d9a940; }
+
+.stl-factors {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+}
+
+.stl-factor {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px dashed #1c2530;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  color: #8fa8c4;
+}
+.stl-factor:last-child { border-bottom: none; }
+.stl-factor span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stl-factor b { flex: none; font-size: 11px; color: #55606c; }
+.stl-factor b.base { color: #cfd8dc; }
+.stl-factor b.pos  { color: #5fd968; }
+.stl-factor b.neg  { color: #d94a4a; }
+
+/* Порог следующего уровня прямо на шкале довольства */
+.stl-mood-track { position: relative; overflow: visible; margin-bottom: 4px; }
+.stl-mood-track i { border-radius: 2px; }
+.stl-mood-track s {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 2px;
+  margin-left: -1px;
+  background: #cfd8dc;
+  box-shadow: 0 0 0 1px #0a0d14;
+}
+
+.stl-track-cap {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  height: 13px;
+  font-family: 'Courier New', monospace;
+  font-size: 9px;
+  color: #3a4654;
+}
+.stl-track-cap em {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-style: normal;
+  color: #8fa8c4;
+  white-space: nowrap;
+}
+
+/* ----- Доход ----- */
+.stl-income {
+  margin-top: 10px;
+  padding: 9px 12px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+}
+
+.stl-income-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  color: #8fa8c4;
+}
+.stl-income-row b { color: #5fd968; font-size: 13px; }
+.stl-income-row.sub { margin-top: 4px; font-size: 10px; color: #55606c; }
+.stl-income-row.sub span { color: #d9a940; }
+.stl-income-row em { font-style: normal; }
+
+/* ----- Очки развития: деление на очко ----- */
+.stl-devbar {
+  display: flex;
+  gap: 3px;
+  height: 9px;
+  margin-bottom: 9px;
+}
+.stl-devbar i {
+  flex: 1;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 2px;
+}
+.stl-devbar i.on { background: #d9a940; border-color: #d9a940; }
+
+/* ----- Требования к расширению ----- */
+.stl-reqs {
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.stl-req {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 11px;
+  border-top: 1px solid #161d28;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: #8fa8c4;
+}
+.stl-req:first-child { border-top: none; }
+.stl-req i {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-style: normal;
+  font-size: 10px;
+  font-weight: bold;
+}
+.stl-req span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stl-req b { flex: none; font-weight: normal; color: #cfd8dc; }
+
+.stl-req.ok  i { background: rgba(95,217,104,0.14); color: #5fd968; }
+.stl-req.bad i { background: rgba(217,74,74,0.14); color: #d94a4a; }
+.stl-req.bad b { color: #d94a4a; }
+.stl-req.info i { background: rgba(217,169,64,0.14); color: #d9a940; font-weight: normal; }
+.stl-req.info b { color: #d9a940; }
+
+/* Что даст новая ступень — строка коротких показателей */
+.stl-gains-cap {
+  margin: 12px 0 6px;
+  font-family: 'Courier New', monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #55606c;
+}
+
+.stl-gains {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+  font-family: 'Courier New', monospace;
+}
+.stl-gains > div {
+  min-width: 0;
+  padding: 6px 2px 5px;
+  border: 1px solid #1c2530;
+  border-radius: 6px;
+  text-align: center;
+}
+.stl-gains b { display: block; font-size: 13px; font-weight: normal; color: #d9a940; }
+.stl-gains span {
+  display: block;
+  margin-top: 2px;
+  font-size: 8px;
+  letter-spacing: 0.5px;
+  color: #55606c;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stl-note {
+  margin-top: 10px;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  line-height: 1.45;
+  color: #55606c;
+  text-align: center;
+}
+.stl-note.warn { color: #d9a940; }
+.stl-pane[data-pane="districts"] > .stl-note { margin: -2px 0 10px; }
+
+/* Главная кнопка панели — золотая, как оплата задач */
+.stl-go {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 10px;
+  padding: 11px;
+  background: #d9a940;
+  border: none;
+  border-radius: 8px;
+  color: #0a0d14;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.stl-go em {
+  font-style: normal;
+  font-weight: normal;
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: none;
+  opacity: 0.75;
+}
+.stl-go:disabled {
+  background: #16202e;
+  color: #55606c;
+  box-shadow: inset 0 0 0 1px #2a3644;
+}
+.stl-go.busy { opacity: 0.6; }
+
+/* ----- Идёт расширение ----- */
+.stl-upg {
+  padding: 11px 12px 10px;
+  background: #10151e;
+  border: 1px solid rgba(74,144,217,0.45);
+  border-left: 3px solid #4a90d9;
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+}
+
+.stl-upg-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #4a90d9;
+}
+.stl-upg-head b { font-size: 12px; font-weight: normal; letter-spacing: 1px; color: #cfd8dc; }
+
+.stl-upg-bar {
+  height: 8px;
+  margin: 10px 0 8px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.stl-upg-bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: repeating-linear-gradient(135deg, #4a90d9 0 6px, #3b7cc0 6px 12px);
+  transition: width 0.9s linear;
+}
+
+.stl-upg-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 10px;
+  color: #55606c;
+}
+.stl-upg-foot b { font-size: 15px; font-weight: normal; letter-spacing: 1px; color: #cfd8dc; }
+
+/* ----- Высший уровень ----- */
+.stl-max {
+  margin-top: 16px;
+  padding: 14px 14px 13px;
+  background:
+    linear-gradient(180deg, rgba(217,169,64,0.10), rgba(217,169,64,0.02)),
+    #10151e;
+  border: 1px solid rgba(217,169,64,0.55);
+  border-radius: 9px;
+  font-family: 'Courier New', monospace;
+  text-align: center;
+}
+.stl-max-title {
+  font-size: 12px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: #d9a940;
+}
+.stl-max-title::before,
+.stl-max-title::after { content: '◆'; margin: 0 8px; font-size: 8px; vertical-align: 2px; }
+.stl-max-text { margin-top: 7px; font-size: 10px; line-height: 1.5; color: #8fa8c4; }
+
+/* ----- Провизия и ополчение: карточки с тремя показателями ----- */
+.stl-card {
+  margin-top: 12px;
+  padding: 10px 12px 11px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-left: 3px solid #2a3644;
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+}
+.stl-card.ok   { border-left-color: #5fd968; }
+.stl-card.bad  { border-left-color: #d94a4a; background: linear-gradient(90deg, rgba(217,74,74,0.08), #10151e 60%); }
+.stl-card.wait { border-left-color: #4a90d9; }
+.stl-card.warn { border-left-color: #d9a940; }
+
+.stl-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #8fa8c4;
+}
+.stl-card-head em {
+  padding: 2px 7px;
+  border: 1px solid #2a3644;
+  border-radius: 4px;
+  font-style: normal;
+  font-size: 9px;
+  color: #55606c;
+}
+.stl-card.ok   .stl-card-head em { border-color: rgba(95,217,104,0.5); color: #5fd968; }
+.stl-card.bad  .stl-card-head em { border-color: rgba(217,74,74,0.6); color: #d94a4a; background: rgba(217,74,74,0.12); }
+.stl-card.wait .stl-card-head em { border-color: rgba(74,144,217,0.55); color: #4a90d9; }
+.stl-card.warn .stl-card-head em { border-color: rgba(217,169,64,0.55); color: #d9a940; }
+
+.stl-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: 9px;
+}
+.stl-stats > div {
+  min-width: 0;
+  padding: 7px 4px 6px;
+  background: #0a0d14;
+  border: 1px solid #161d28;
+  border-radius: 6px;
+  text-align: center;
+}
+.stl-stats b {
+  display: block;
+  font-size: 16px;
+  font-weight: normal;
+  line-height: 1.1;
+  color: #cfd8dc;
+  white-space: nowrap;
+}
+.stl-stats span {
+  display: block;
+  margin-top: 3px;
+  font-size: 9px;
+  color: #55606c;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stl-stats .bad b  { color: #d94a4a; }
+.stl-stats .warn b { color: #d9a940; }
+.stl-stats .ok b   { color: #5fd968; }
+.stl-stats .wait b { color: #4a90d9; font-size: 14px; line-height: 1.25; }
+
+.stl-card-text { margin-top: 8px; font-size: 10px; line-height: 1.5; color: #55606c; }
+.stl-card-text.bad { color: #d94a4a; }
+.stl-card-text.warn { color: #d9a940; }
+
+/* ----- Ошибка сводки ----- */
+.stl-alert {
+  margin-bottom: 12px;
+  padding: 11px 12px;
+  background: rgba(217,169,64,0.06);
+  border: 1px solid rgba(217,169,64,0.35);
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+}
+.stl-alert b { display: block; font-size: 11px; font-weight: normal; letter-spacing: 1px; color: #d9a940; }
+.stl-alert span { display: block; margin-top: 5px; font-size: 10px; line-height: 1.5; color: #8fa8c4; }
+.stl-alert code {
+  display: block;
+  margin-top: 7px;
+  font-family: 'Courier New', monospace;
+  font-size: 9px;
+  line-height: 1.4;
+  color: #55606c;
+  word-break: break-word;
+}
+
+/* ----- Вкладка «Условия» ----- */
+.stl-base {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #8fa8c4;
+}
+.stl-base b { font-size: 18px; font-weight: normal; letter-spacing: 0; color: #d9a940; }
+.stl-base + .stl-track { margin-top: 7px; }
+
+/* ----- Кварталы: сетка 2×2 ----- */
+.stl-slots {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.stl-slot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 6px 6px 8px;
+  background: #10151e;
+  border: 1px solid #2a3644;
+  border-radius: 9px;
+  font-family: 'Courier New', monospace;
+}
+
+.stl-slot-no {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1;
+  padding: 1px 4px;
+  background: rgba(5,6,10,0.85);
+  border-radius: 3px;
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: #8fa8c4;
+}
+
+/* Плитка с картинкой; пока файла нет — крупный символ квартала */
+.stl-slot-art,
+.stl-dist-art {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 55%, #1d2a3a 0%, #0a0d14 75%);
+  border: 1px solid #1c2530;
+  border-radius: 6px;
+}
+.stl-slot-art { aspect-ratio: 16 / 10; min-height: 90px; }
+.stl-slot-art img,
+.stl-dist-art img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.stl-glyph {
+  font-size: 30px;
+  line-height: 1;
+  color: #d9a940;
+  text-shadow: 0 0 14px rgba(217,169,64,0.35);
+}
+.has-img .stl-glyph { visibility: hidden; }
+
+.stl-slot-name {
+  margin-top: 7px;
+  padding: 0 2px;
+  font-size: 11px;
+  color: #cfd8dc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stl-slot-eff {
+  flex: 1;
+  margin-top: 3px;
+  padding: 0 2px;
+  font-size: 9px;
+  line-height: 1.4;
+  color: #8fa8c4;
+}
+
+.stl-slot-act {
+  margin-top: 8px;
+  padding: 7px 4px;
+  background: transparent;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  color: #8fa8c4;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+.stl-slot-act.demolish { border-color: rgba(217,74,74,0.3); color: #c25656; }
+.stl-slot-act.pick { background: #d9a940; border-color: #d9a940; color: #0a0d14; font-weight: bold; }
+.stl-slot-act:disabled { opacity: 0.5; }
+
+/* Метка состояния в углу плитки: действует / стройка */
+.stl-slot-tag {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1;
+  padding: 1px 5px;
+  background: rgba(5,6,10,0.85);
+  border: 1px solid rgba(95,217,104,0.45);
+  border-radius: 3px;
+  font-size: 8px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #5fd968;
+}
+.stl-slot.building .stl-slot-tag { border-color: rgba(74,144,217,0.55); color: #4a90d9; }
+
+/* Строится: картинка приглушена, поверх — отсчёт и синяя полоса */
+.stl-slot.building { border-color: rgba(74,144,217,0.5); }
+.stl-slot.building .stl-slot-art { border-style: dashed; border-color: rgba(74,144,217,0.6); }
+.stl-slot.building .stl-glyph,
+.stl-slot.building .stl-slot-art img { opacity: 0.22; }
+.stl-slot-prog {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 8px 9px;
+  pointer-events: none;
+}
+.stl-slot-prog em {
+  margin: 0 0 6px;
+  font-style: normal;
+  font-size: 17px;
+  letter-spacing: 1px;
+  color: #cfd8dc;
+  text-shadow: 0 1px 3px #000;
+}
+.stl-slot-prog div {
+  width: 100%;
+  height: 4px;
+  background: rgba(5,6,10,0.85);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.stl-slot-prog i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #4a90d9;
+  transition: width 0.9s linear;
+}
+
+/* Свободный участок — пунктир и плюс; управляющему — кнопка выбора */
+.stl-slot.empty { border-style: dashed; border-color: #3a4654; cursor: pointer; }
+.stl-slot.empty.ro { cursor: default; }
+.stl-slot.empty .stl-slot-art { background: #0a0d14; border-style: dashed; }
+.stl-slot.empty .stl-glyph { font-size: 26px; color: #3a4654; text-shadow: none; }
+.stl-slot.empty .stl-slot-name { color: #8fa8c4; }
+.stl-slot.empty .stl-slot-eff { color: #55606c; }
+
+/* Закрытый — видно, на каком уровне откроется */
+.stl-slot.locked { background: #0c1018; border-color: #1c2530; }
+.stl-slot.locked .stl-slot-art {
+  background: repeating-linear-gradient(135deg, #0a0d14 0 7px, #0d121a 7px 14px);
+}
+.stl-slot.locked .stl-glyph {
+  font-size: 18px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  color: #3a4654;
+  text-shadow: none;
+  padding: 5px 9px;
+  border: 1px solid #2a3644;
+  border-radius: 5px;
+}
+.stl-slot.locked .stl-slot-no { color: #3a4654; }
+.stl-slot.locked .stl-slot-name { color: #55606c; }
+.stl-slot.locked .stl-slot-eff { color: #3a4654; }
+
+.stl-hint {
+  margin-top: 12px;
+  font-family: 'Courier New', monospace;
+  font-size: 9px;
+  line-height: 1.5;
+  color: #55606c;
+  text-align: center;
+}
+
+/* ----- Выбор квартала ----- */
+.stl-pick-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #d9a940;
+}
+
+.stl-back {
+  padding: 7px 10px;
+  background: #10151e;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  color: #8fa8c4;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+
+.stl-dist {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 10px;
+  background: #10151e;
+  border: 1px solid #2a3644;
+  border-left: 3px solid #d9a940;
+  border-radius: 8px;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  text-align: left;
+}
+.stl-dist:active { border-color: #d9a940; background: #16202e; }
+.stl-dist:disabled { opacity: 0.6; }
+.stl-dist-why { margin-top: 4px; font-size: 10px; color: #d94a4a; }
+.stl-dist.short { border-left-color: #d94a4a; }
+
+.stl-dist-art { flex: none; width: 58px; height: 58px; }
+.stl-dist-art .stl-glyph { font-size: 26px; }
+
+.stl-dist-info { flex: 1; min-width: 0; }
+
+.stl-dist-name {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: #cfd8dc;
+}
+.stl-dist-name em { flex: none; font-style: normal; font-size: 10px; color: #55606c; }
+.stl-dist-eff { margin-top: 3px; font-size: 10px; line-height: 1.35; color: #5fd968; }
+.stl-dist-desc { margin-top: 3px; font-size: 10px; line-height: 1.4; color: #55606c; }
+.stl-dist-cost { margin-top: 5px; font-size: 10px; line-height: 1.45; color: #4a90d9; }
+.stl-dist-cost b { font-weight: normal; color: #d9a940; }
+.stl-dist-cost .short { color: #d94a4a; }
+.stl-dist-cost em { font-style: normal; color: #8a4040; }

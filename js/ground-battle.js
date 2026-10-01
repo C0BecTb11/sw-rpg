@@ -166,7 +166,10 @@ var SETTLEMENT_TASKS = {
   guard:     { title: 'Охрана поселения', hint: 'пехоты в зоне' },
   patrol:    { title: 'Патруль', hint: 'техники в зоне' },
   orbit:     { title: 'Прикрытие с орбиты', hint: 'корабль в площадке сброса' },
-  marauder:  { title: 'Мародёр', hint: 'уничтожить налётчика' },
+  // Банда — 2–3 налётчика: число не клеится к «налётчика», текст свой
+  marauder:  { title: 'Мародёры', hint: '', sub: function(n) {
+    return n > 1 ? 'Уничтожить налётчиков: ' + n : 'Уничтожить налётчика';
+  } },
   donation:  { title: 'Пожертвование', hint: 'кредитов' },
   festival:  { title: 'Праздник', hint: 'кредитов' },
   factories: { title: 'Слишком много заводов', hint: 'оставить не больше' },
@@ -175,11 +178,36 @@ var SETTLEMENT_TASKS = {
 
 var settlementTimer = null;
 
+// ===== Развитие поселения =====
+// Уровень, кварталы, провизия и ополчение. Сводку считает сервер
+// (get_settlement_dev), клиент только показывает её и ведёт обратные
+// отсчёты локально — раз в секунду база не нужна.
+var settlementDev = null;        // последняя сводка: и для панели, и для плашки на карте
+var settlementDevAt = 0;         // когда пришла последняя сводка (для карты; панель хранит своё время в stlLast.at)
+var settlementDevTimer = null;   // опрос для карты раз в минуту
+var settlementDevKicked = false; // первый запрос уже ушёл
+var stlTab = 'dev';              // открытая вкладка переживает автообновление и повторное открытие
+var stlPicker = null;            // номер участка, для которого открыт выбор квартала
+var stlLevels = null;            // settlement_levels — справочник, читаем один раз
+var stlDistrictTypes = null;     // district_types — тоже справочник
+var stlLast = null;              // последние данные панели: вкладки перерисовываются без запроса
+var stlTickTimer = null;
+var stlLoadSeq = 0;              // номер запроса панели: опоздавший ответ не затирает свежий
+var stlDevSeq = 0;               // то же для сводки: панель и опрос карты спрашивают её независимо
+var stlDevApplied = 0;
+var stlBusy = false;             // действие в пути — второй тап не проходит
+var stlExpiredEnds = {};         // отсчёты, по окончании которых уже просили свежие данные
+var stlMapDrawnAt = 0;           // когда карта последний раз перерисовывалась ради отсчёта
+var stlImgFailed = {};           // картинки кварталов, которых нет: больше не просим
+var stlImgOk = {};               // уже загружались: при перерисовке символ под ними не мигает
+var STL_ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI'];
+
 function openSettlementPanel() {
   var panel = document.getElementById('settlement-panel');
   if (!panel) return;
 
   panel.style.display = 'flex';
+  stlPicker = null;
   document.getElementById('settlement-body').innerHTML =
     '<div class="stl-empty">Загрузка…</div>';
 
@@ -187,12 +215,19 @@ function openSettlementPanel() {
 
   if (settlementTimer) clearInterval(settlementTimer);
   settlementTimer = setInterval(loadSettlementPanel, 15000);
+
+  // Обратные отсчёты (расширение, стройка кварталов, сбор ополчения)
+  // тикают локально, между запросами
+  if (stlTickTimer) clearInterval(stlTickTimer);
+  stlTickTimer = setInterval(stlTick, 1000);
 }
 
 function closeSettlementPanel() {
   var panel = document.getElementById('settlement-panel');
   if (panel) panel.style.display = 'none';
   if (settlementTimer) { clearInterval(settlementTimer); settlementTimer = null; }
+  if (stlTickTimer) { clearInterval(stlTickTimer); stlTickTimer = null; }
+  stlPicker = null;
 }
 
 function formatSettlementLeft(sec) {
@@ -203,13 +238,210 @@ function formatSettlementLeft(sec) {
   return sec + ' с';
 }
 
+// Длительность без «0 мин»: 4 ч, 1 ч 30 мин, 45 мин
+function stlDur(sec) {
+  sec = Math.max(0, Math.round(Number(sec) || 0));
+  var h = Math.floor(sec / 3600);
+  var m = Math.floor((sec % 3600) / 60);
+  if (h > 0) return h + ' ч' + (m ? ' ' + m + ' мин' : '');
+  if (m > 0) return m + ' мин';
+  return sec + ' с';
+}
+
+// Тикающий отсчёт: 1:12:05 / 12:05 — цифры не прыгают по ширине
+function formatSettlementClock(sec) {
+  sec = Math.max(0, Math.ceil(sec));
+  var h = Math.floor(sec / 3600);
+  var m = Math.floor((sec % 3600) / 60);
+  var s = sec % 60;
+  var mm = (m < 10 ? '0' : '') + m;
+  var ss = (s < 10 ? '0' : '') + s;
+  return h > 0 ? h + ':' + mm + ':' + ss : m + ':' + ss;
+}
+
+// Любой запрос превращаем в {data, error}: упавшая сеть или отсутствующая
+// функция на сервере не должны ронять всю панель
+function stlSafe(p) {
+  return Promise.resolve(p).then(function(r) {
+    return r || { data: null, error: null };
+  }, function(e) {
+    return { data: null, error: { message: (e && e.message) || 'нет связи с сервером' } };
+  });
+}
+
+// jsonb приходит объектом, но на всякий случай разворачиваем и массив
+function stlNormDev(data) {
+  if (Array.isArray(data)) data = data.length ? data[0] : null;
+  return (data && typeof data === 'object' && data.level) ? data : null;
+}
+
+// Функции на сервере нет — дёргать её раз в минуту бессмысленно
+function stlRpcMissing(err) {
+  if (!err) return false;
+  return err.code === 'PGRST202' || err.code === '42883' ||
+    /could not find the function|does not exist/i.test(err.message || '');
+}
+
+// Сводку для плашки на карте держим свежей раз в минуту. Первый запрос
+// делает сама отрисовка поселения, так что отдельный вызов при загрузке
+// не обязателен, но и не мешает — повторный старт опроса не создаёт.
+function loadSettlementDev() {
+  settlementDevKicked = true;
+  if (!systemId) return Promise.resolve(null);
+  if (!settlementDevTimer) settlementDevTimer = setInterval(loadSettlementDev, 60000);
+
+  var devSeq = ++stlDevSeq;
+  return stlSafe(supabase.rpc('get_settlement_dev', { p_system_id: systemId })).then(function(res) {
+    if (res.error) {
+      if (stlRpcMissing(res.error) && settlementDevTimer) {
+        clearInterval(settlementDevTimer);
+        settlementDevTimer = null;
+      }
+      return null;
+    }
+    applySettlementDev(stlNormDev(res.data), devSeq);
+    return settlementDev;
+  });
+}
+
+// Запоминаем сводку и перерисовываем карту, только если плашке есть что
+// менять: полная перерисовка поля недешёвая
+function applySettlementDev(dev, seq) {
+  if (seq) {
+    if (seq < stlDevApplied) return;
+    stlDevApplied = seq;
+  }
+  var sig = function(d) {
+    return d ? [d.level, d.level_name, d.upgrade_until, d.upgrade_to].join('|') : '';
+  };
+  var changed = sig(dev) !== sig(settlementDev);
+  var now = Date.now();
+  settlementDev = dev;
+  settlementDevAt = now;
+  // Во время расширения отсчёт на карте идёт по минутам — чаще
+  // перерисовывать поле незачем, даже если панель обновляется каждые 15 с
+  if (changed || (dev && dev.upgrade_until && now - stlMapDrawnAt > 55000)) {
+    stlMapDrawnAt = now;
+    scheduleRedraw();
+  }
+}
+
+// Серверное время в часы клиента: сдвиг сверяется при загрузке
+function stlLocalMs(iso) {
+  var off = (typeof gbTimeOffset === 'number') ? gbTimeOffset : 0;
+  return new Date(iso).getTime() - off;
+}
+
+function stlLevelRow(n) {
+  if (!stlLevels) return null;
+  for (var i = 0; i < stlLevels.length; i++) {
+    if (stlLevels[i].level === n) return stlLevels[i];
+  }
+  return null;
+}
+
+// На каком уровне открывается участок: первый, где district_slots до него
+// дотягивается. Без справочника — уровень равен номеру участка, как в базе.
+function stlSlotLevel(slot) {
+  if (stlLevels && stlLevels.length) {
+    var rows = stlLevels.slice().sort(function(a, b) { return a.level - b.level; });
+    for (var i = 0; i < rows.length; i++) {
+      if ((rows[i].district_slots || 0) >= slot) return rows[i];
+    }
+  }
+  return { level: slot, name: '' };
+}
+
+function stlDistrictType(id) {
+  if (!stlDistrictTypes) return null;
+  for (var i = 0; i < stlDistrictTypes.length; i++) {
+    if (stlDistrictTypes[i].id === id) return stlDistrictTypes[i];
+  }
+  return null;
+}
+
+function stlSigned(v) {
+  v = Number(v) || 0;
+  return (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v);
+}
+
+function stlMult(v) {
+  var n = Math.round((Number(v) || 1) * 100) / 100;
+  return '×' + String(n).replace('.', ',');
+}
+
+function stlPips(level, max, upTo) {
+  var html = '<span class="stl-pips">';
+  for (var i = 1; i <= max; i++) {
+    html += '<i class="' + (i <= level ? 'on' : (upTo && i === upTo ? 'up' : '')) + '"></i>';
+  }
+  return html + '</span>';
+}
+
+// Картинка квартала поверх символа: пока файла нет или он грузится,
+// виден символ в плитке, а не значок битой картинки
+function stlArtHtml(id, icon, image, cls, overlay) {
+  var path = image || ('assets/districts/' + id + '.png');
+  var img = stlImgFailed[path] ? '' :
+    '<img src="../' + escHtml(path) + '" alt="" data-stl-img="' + escHtml(path) + '"' +
+    ' onload="stlImgLoad(this)" onerror="stlImgError(this)">';
+  if (img && stlImgOk[path]) cls += ' has-img';
+  return '<div class="' + cls + '"><span class="stl-glyph">' + escHtml(icon || '◇') + '</span>' + img +
+    (overlay || '') + '</div>';
+}
+
+function stlImgLoad(img) {
+  stlImgOk[img.getAttribute('data-stl-img')] = true;
+  if (img.parentNode) img.parentNode.classList.add('has-img');
+}
+
+function stlImgError(img) {
+  stlImgFailed[img.getAttribute('data-stl-img')] = true;
+  if (img.parentNode) img.parentNode.removeChild(img);
+}
+
+// Цена со склада: нехватка красным и сколько есть — как в каталоге построек
+function stlResCost(resources, stock) {
+  var parts = [];
+  var short = false;
+  for (var key in (resources || {})) {
+    if (!Object.prototype.hasOwnProperty.call(resources, key)) continue;
+    var need = Number(resources[key]) || 0;
+    if (!need) continue;
+    var have = stock ? (Number(stock[key]) || 0) : null;
+    var lack = have !== null && have < need;
+    if (lack) short = true;
+    parts.push('<span class="' + (lack ? 'short' : '') + '">' + escHtml(resourceName(key)) + ' ' + need +
+      (lack ? ' <em>(есть ' + have + ')</em>' : '') + '</span>');
+  }
+  return { html: parts.join(' · '), short: short };
+}
+
 function loadSettlementPanel() {
-  Promise.all([
-    supabase.rpc('get_settlement_state', { p_system_id: systemId }),
-    supabase.rpc('get_settlement_tasks', { p_system_id: systemId })
-  ]).then(function(r) {
+  var seq = ++stlLoadSeq;
+  var devSeq = ++stlDevSeq;
+  var jobs = [
+    stlSafe(supabase.rpc('get_settlement_state', { p_system_id: systemId })),
+    stlSafe(supabase.rpc('get_settlement_tasks', { p_system_id: systemId })),
+    stlSafe(supabase.rpc('get_settlement_dev', { p_system_id: systemId })),
+    stlLevels ? null : stlSafe(supabase.from('settlement_levels').select('*').order('level')),
+    stlDistrictTypes ? null : stlSafe(supabase.from('district_types').select('*').order('sort_order')),
+    // Названия сырья для требований и цен: справочник грузится один раз
+    new Promise(function(done) {
+      if (typeof loadResourceNames === 'function') loadResourceNames(done); else done();
+    })
+  ];
+
+  Promise.all(jobs).then(function(r) {
+    // Пока шёл запрос, ушёл более новый (по таймеру, после действия или
+    // по окончании отсчёта) — этот ответ уже устарел
+    if (seq !== stlLoadSeq) return;
+    var panel = document.getElementById('settlement-panel');
     var body = document.getElementById('settlement-body');
-    if (!body) return;
+    if (!body || !panel || panel.style.display === 'none') return;
+
+    if (r[3] && !r[3].error && r[3].data) stlLevels = r[3].data;
+    if (r[4] && !r[4].error && r[4].data) stlDistrictTypes = r[4].data;
 
     var st = (!r[0].error && r[0].data && r[0].data.length) ? r[0].data[0] : null;
 
@@ -224,13 +456,111 @@ function loadSettlementPanel() {
     if (st.is_controller && typeof questSeen === 'function') questSeen('settlement', systemId);
 
     var tasks = (!r[1].error && r[1].data) ? r[1].data : [];
-    var doneCount = tasks.filter(function(t) { return t.done_now; }).length;
-    var allDone = tasks.length > 0 && doneCount === tasks.length;
 
-    var html = '';
+    var dev = null;
+    var devErr = r[2].error || null;
+    if (!devErr) {
+      dev = stlNormDev(r[2].data);
+      applySettlementDev(dev, devSeq);
+    }
 
-    // Довольство и что оно даёт
-    html += '<div class="stl-top">' +
+    // Время получения храним вместе с данными: от него считаются концы
+    // отсчётов, и опрос карты его не сдвигает
+    stlLast = { st: st, tasks: tasks, dev: dev, devErr: devErr, at: Date.now() };
+    renderSettlementPanel();
+  });
+}
+
+// Каркас с вкладками строится один раз, дальше меняется только
+// содержимое вкладок: прокрутка и выбранная вкладка не сбрасываются
+function stlEnsureFrame(body) {
+  if (body.querySelector('.stl-tabs')) return;
+
+  body.innerHTML =
+    '<div class="stl-tabs">' +
+      '<button class="stl-tab" data-act="tab" data-tab="dev">Развитие<i></i></button>' +
+      '<button class="stl-tab" data-act="tab" data-tab="districts">Кварталы<i></i></button>' +
+      '<button class="stl-tab" data-act="tab" data-tab="tasks">Условия<i></i></button>' +
+    '</div>' +
+    '<div class="stl-pane" data-pane="dev"></div>' +
+    '<div class="stl-pane" data-pane="districts"></div>' +
+    '<div class="stl-pane" data-pane="tasks"></div>';
+
+  // Один обработчик на всю панель: содержимое перерисовывается,
+  // а привязки не теряются
+  if (!body.getAttribute('data-stl-bound')) {
+    body.setAttribute('data-stl-bound', '1');
+    body.addEventListener('click', stlOnClick);
+  }
+}
+
+function renderSettlementPanel() {
+  var body = document.getElementById('settlement-body');
+  if (!body || !stlLast) return;
+
+  var box = document.getElementById('settlement-box');
+  var scroll = box ? box.scrollTop : 0;
+
+  stlEnsureFrame(body);
+
+  var d = stlLast.dev;
+  var st = stlLast.st;
+  var tasks = stlLast.tasks;
+  var doneCount = tasks.filter(function(t) { return t.done_now; }).length;
+
+  // Счётчики на вкладках: что требует внимания, видно не открывая
+  var tabs = body.querySelectorAll('.stl-tab');
+  for (var i = 0; i < tabs.length; i++) {
+    var key = tabs[i].getAttribute('data-tab');
+    var mark = tabs[i].querySelector('i');
+    var txt = '';
+    var cls = '';
+    if (key === 'dev' && d) {
+      txt = STL_ROMAN[d.level] || d.level;
+      if (d.can_upgrade) cls = 'go';
+      else if (d.upgrade_until) cls = 'busy';
+    } else if (key === 'districts' && d) {
+      var built = (d.districts || []).length;
+      txt = built + '/' + (d.slots || 0);
+      if (d.is_controller && built < (d.slots || 0)) cls = 'go';
+    } else if (key === 'tasks' && tasks.length) {
+      txt = doneCount + '/' + tasks.length;
+      cls = doneCount === tasks.length ? 'ok' : 'bad';
+    }
+    mark.textContent = txt;
+    mark.className = cls;
+    tabs[i].classList.toggle('active', key === stlTab);
+  }
+
+  var panes = body.querySelectorAll('.stl-pane');
+  for (var j = 0; j < panes.length; j++) {
+    panes[j].style.display = panes[j].getAttribute('data-pane') === stlTab ? 'block' : 'none';
+  }
+
+  body.querySelector('[data-pane="dev"]').innerHTML = stlDevHtml(stlLast);
+  body.querySelector('[data-pane="districts"]').innerHTML = stlDistrictsHtml(stlLast);
+  renderSettlementTasks(body.querySelector('[data-pane="tasks"]'), st, tasks, !!d);
+
+  if (box) box.scrollTop = scroll;
+  stlTick();
+}
+
+// Сервер не ответил на сводку развития: говорим прямо, остальное работает
+function stlDevErrorHtml(err) {
+  var missing = stlRpcMissing(err);
+  return '<div class="stl-alert">' +
+    '<b>' + (missing ? 'Развитие поселений ещё не включено' : 'Сводка развития недоступна') + '</b>' +
+    '<span>' + (missing
+      ? 'Сервер пока не знает об уровнях и кварталах. Условия и выплаты работают как прежде.'
+      : 'Не удалось получить данные. Панель повторит запрос сама.') + '</span>' +
+    (err && err.message ? '<code>' + escHtml(err.message) + '</code>' : '') +
+  '</div>';
+}
+
+// Прежний верх панели: довольство, доход, выплачено. Показываем, когда
+// сводки развития нет, — сведения не должны пропадать
+function stlLegacyTopHtml(st) {
+  return '<div class="stl-top">' +
       '<div class="stl-mood">' +
         '<div class="stl-mood-value">' + st.satisfaction + '</div>' +
         '<div class="stl-mood-label">довольство</div>' +
@@ -243,62 +573,552 @@ function loadSettlementPanel() {
           ? '<div class="stl-money-row"><span>Кантина · довольство</span><b>+' + st.structure_bonus + '</b></div>'
           : '') +
       '</div>' +
+    '</div>' +
+    '<div class="stl-track"><i style="width:' + st.satisfaction + '%"></i></div>';
+}
+
+function stlDevHtml(L) {
+  var d = L.dev;
+  var st = L.st;
+  if (!d) {
+    return (L.devErr ? stlDevErrorHtml(L.devErr)
+      : '<div class="stl-alert"><b>Сводка развития недоступна</b></div>') + stlLegacyTopHtml(st);
+  }
+
+  var max = d.max_level || 4;
+  var isMax = !d.next && !d.upgrade_until;
+  var upTo = d.upgrade_until ? (d.upgrade_to || d.level + 1) : null;
+  var html = '';
+
+  // Уровень: герб с римской цифрой, название, шкала ступеней
+  html += '<div class="stl-lvl' + (isMax ? ' max' : '') + '">' +
+    '<div class="stl-lvl-emb">' + (STL_ROMAN[d.level] || d.level) + '</div>' +
+    '<div class="stl-lvl-info">' +
+      '<div class="stl-lvl-name">' + escHtml(d.level_name) + '</div>' +
+      '<div class="stl-lvl-sub">уровень ' + d.level + ' из ' + max + ' · ' +
+        (d.slots || 0) + ' ' + stlPlural(d.slots || 0, 'участок', 'участка', 'участков') + '</div>' +
+    '</div>' +
+    stlPips(d.level, max, upTo) +
+  '</div>';
+
+  // Довольство: итог крупно, из чего сложилось — рядом
+  var factors = d.factors || [];
+  var fl = factors.map(function(f, i) {
+    var v = Number(f.value) || 0;
+    var cls = i === 0 ? 'base' : (v > 0 ? 'pos' : v < 0 ? 'neg' : '');
+    return '<div class="stl-factor"><span>' + escHtml(f.label) + '</span>' +
+      '<b class="' + cls + '">' + (i === 0 ? v : stlSigned(v)) + '</b></div>';
+  }).join('');
+  var eff = Math.max(0, Math.min(100, Number(d.effective) || 0));
+  // Порог нужен, пока расширение впереди: во время стройки он уже пройден
+  var need = (d.next && !d.upgrade_until) ? d.next.min_satisfaction : null;
+  var moodCls = need !== null && need !== undefined ? (eff >= need ? ' ok' : ' low') : '';
+
+  html += '<div class="stl-top stl-top-dev">' +
+    '<div class="stl-mood' + moodCls + '">' +
+      '<div class="stl-mood-value">' + eff + '</div>' +
+      '<div class="stl-mood-label">довольство</div>' +
+    '</div>' +
+    '<div class="stl-factors">' + (fl || '<div class="stl-factor"><span>Без надбавок</span></div>') + '</div>' +
+  '</div>';
+
+  html += '<div class="stl-track stl-mood-track"><i style="width:' + eff + '%"></i>' +
+    (need ? '<s style="left:' + need + '%"></s>' : '') + '</div>';
+  if (need) {
+    html += '<div class="stl-track-cap"><span>0</span>' +
+      '<em style="left:' + need + '%">порог ' + need + '</em><span>100</span></div>';
+  }
+
+  // Доход: множитель уровня и рынок — чтобы было понятно, откуда цифра
+  var market = (d.districts || []).some(function(x) { return x.id === 'market' && !x.building; });
+  html += '<div class="stl-income">' +
+    '<div class="stl-income-row"><span>Доход за сутки</span>' +
+      '<b>' + d.income + ' кр.</b></div>' +
+    '<div class="stl-income-row sub"><span>Уровень ' + stlMult(d.income_mult) +
+      (market ? ' · рынок ×1,25' : '') + '</span><em>выплачено всего ' + (st.total_paid || 0) + '</em></div>' +
+  '</div>';
+
+  // Следующая ступень, идущее расширение или предел
+  if (d.upgrade_until) html += stlUpgradeHtml(d);
+  else if (isMax) html += stlMaxHtml(d);
+  else if (d.next) html += stlNextHtml(d);
+
+  html += stlFoodHtml(d);
+  html += stlMilitiaHtml(d, L.at);
+
+  return html;
+}
+
+function stlPlural(n, one, few, many) {
+  n = Math.abs(n) % 100;
+  var n1 = n % 10;
+  if (n > 10 && n < 20) return many;
+  if (n1 > 1 && n1 < 5) return few;
+  if (n1 === 1) return one;
+  return many;
+}
+
+function stlNextHtml(d) {
+  var nx = d.next;
+  var html = '<div class="stl-sec"><span>Расширение</span>' +
+    '<em>' + (STL_ROMAN[nx.level] || nx.level) + ' · ' + escHtml(nx.name) + '</em></div>';
+
+  // Очки развития — по делению на очко: видно, сколько осталось
+  var needPts = nx.dev_need || d.dev_need || 0;
+  var pts = Math.min(d.dev_points || 0, needPts);
+  if (needPts > 0) {
+    html += '<div class="stl-devbar">';
+    for (var i = 0; i < needPts; i++) html += '<i class="' + (i < pts ? 'on' : '') + '"></i>';
+    html += '</div>';
+  }
+
+  // Требования по строкам: что уже есть, чего нет
+  var reqs = [];
+  reqs.push({ ok: (d.dev_points || 0) >= needPts, label: 'Очки развития',
+    val: (d.dev_points || 0) + ' / ' + needPts });
+  reqs.push({ ok: (Number(d.effective) || 0) >= nx.min_satisfaction,
+    label: 'Довольство ≥ ' + nx.min_satisfaction, val: 'сейчас ' + (d.effective || 0) });
+  if (nx.credits) reqs.push({ ok: null, label: 'Кредиты', val: nx.credits + ' кр.' });
+
+  var res = nx.resources || {};
+  for (var key in res) {
+    if (!Object.prototype.hasOwnProperty.call(res, key)) continue;
+    var needR = Number(res[key]) || 0;
+    if (!needR) continue;
+    var have = Number((d.stock || {})[key]) || 0;
+    reqs.push({ ok: have >= needR, label: resourceName(key), val: have + ' / ' + needR });
+  }
+
+  html += '<div class="stl-reqs">' + reqs.map(function(q) {
+    var cls = q.ok === null ? 'info' : q.ok ? 'ok' : 'bad';
+    var mark = q.ok === null ? '◈' : q.ok ? '✓' : '✗';
+    return '<div class="stl-req ' + cls + '"><i>' + mark + '</i><span>' + escHtml(q.label) + '</span>' +
+      '<b>' + q.val + '</b></div>';
+  }).join('') + '</div>';
+
+  // Что даст новая ступень
+  var lvl = stlLevelRow(nx.level);
+  var gains = [];
+  if (nx.slots) gains.push([nx.slots, stlPlural(nx.slots, 'участок', 'участка', 'участков')]);
+  if (nx.income_mult) gains.push([stlMult(nx.income_mult), 'доход']);
+  if (lvl && lvl.militia_base) gains.push([lvl.militia_base, 'ополчение']);
+  if (nx.food_per_day) gains.push([nx.food_per_day, 'провизии/сут']);
+  if (gains.length) {
+    html += '<div class="stl-gains-cap">' + escHtml(nx.name) + ' даст</div>' +
+      '<div class="stl-gains" style="grid-template-columns:repeat(' + gains.length + ',minmax(0,1fr))">' +
+      gains.map(function(g) {
+        return '<div><b>' + g[0] + '</b><span>' + g[1] + '</span></div>';
+      }).join('') + '</div>';
+  }
+
+  if (!d.is_controller) {
+    html += '<div class="stl-note">Расширение начинает управляющий поселением</div>';
+  } else {
+    if (!d.can_upgrade && d.upgrade_block) {
+      html += '<div class="stl-note warn">' + escHtml(d.upgrade_block) + '</div>';
+    }
+    html += '<button class="stl-go" data-act="upgrade"' + (d.can_upgrade ? '' : ' disabled') + '>' +
+      'Расширить до «' + escHtml(nx.name) + '»' +
+      (nx.seconds ? '<em>' + stlDur(nx.seconds) + '</em>' : '') + '</button>';
+  }
+
+  return html;
+}
+
+function stlUpgradeHtml(d) {
+  var to = d.upgrade_to || (d.next && d.next.level) || d.level + 1;
+  var row = stlLevelRow(to);
+  var name = (d.next && d.next.level === to && d.next.name) || (row && row.name) || '';
+  var total = (d.next && d.next.level === to && d.next.seconds) ||
+    (row && row.build_seconds) || (d.next && d.next.seconds) || 0;
+  var end = stlLocalMs(d.upgrade_until);
+
+  return '<div class="stl-sec"><span>Расширение</span><em>' +
+      (STL_ROMAN[d.level] || d.level) + ' → ' + (STL_ROMAN[to] || to) + '</em></div>' +
+    '<div class="stl-upg">' +
+      '<div class="stl-upg-head"><span>Идёт стройка</span><b>' + escHtml(name) + '</b></div>' +
+      '<div class="stl-upg-bar"><i data-stl-end="' + end + '" data-stl-total="' + total + '"></i></div>' +
+      '<div class="stl-upg-foot"><span>до завершения</span>' +
+        '<b data-stl-end="' + end + '">—</b></div>' +
+    '</div>';
+}
+
+function stlMaxHtml(d) {
+  return '<div class="stl-max">' +
+    '<div class="stl-max-title">Высший уровень</div>' +
+    '<div class="stl-max-text">' + escHtml(d.level_name) +
+      ' — предел развития. Держите довольство и кварталы: доход идёт по полной.</div>' +
+  '</div>';
+}
+
+// Провизия: сколько ест поселение, чем сыто и надолго ли хватит
+function stlFoodHtml(d) {
+  var f = d.food || {};
+  var state, chip;
+  // «Не нужна» — только когда поселение не ест вовсе. После расширения
+  // fed ещё пуст: первое кормление в конце суток, это не голод
+  if (!f.per_day) {
+    state = 'idle'; chip = 'не нужна';
+  } else if (f.fed === null || f.fed === undefined) {
+    state = 'wait'; chip = 'ждёт';
+  } else if (f.fed) {
+    state = 'ok'; chip = 'сыто';
+  } else {
+    state = 'bad'; chip = 'голод';
+  }
+
+  var html = '<div class="stl-card ' + state + '">' +
+    '<div class="stl-card-head"><span>Провизия</span><em>' + chip + '</em></div>';
+
+  if (state === 'idle') {
+    html += '<div class="stl-card-text">' + escHtml(d.level_name) +
+      ' кормится сам. Провизия понадобится после расширения.' +
+      (f.have ? ' На складе: ' + f.have + '.' : '') + '</div>';
+  } else {
+    var days = f.days_left === null || f.days_left === undefined ? '—' : f.days_left;
+    html += '<div class="stl-stats">' +
+      '<div><b>' + f.per_day + '</b><span>в сутки</span></div>' +
+      '<div><b>' + (f.have || 0) + '</b><span>на складе</span></div>' +
+      '<div class="' + (state === 'bad' || days === 0 ? 'bad' : days <= 1 ? 'warn' : '') + '"><b>' + days + '</b>' +
+        '<span>' + (typeof days === 'number' ? stlPlural(days, 'сутки', 'суток', 'суток') : 'суток') + ' хватит</span></div>' +
+    '</div>';
+    if (state === 'wait') {
+      html += '<div class="stl-card-text">Первое кормление — в конце суток.</div>';
+    } else if (state === 'bad') {
+      html += '<div class="stl-card-text bad">Жители голодают: −15 к довольству, пока на складе ' +
+        'меньше суточной нормы. Подвезите провизию или постройте угодья.</div>';
+    }
+  }
+  return html + '</div>';
+}
+
+// Ополчение: сколько встанет на защиту и когда соберётся
+function stlMilitiaHtml(d, at) {
+  var m = d.militia || {};
+  var none = !(m.count > 0);
+  var ready = !none && (!!m.ready || !(m.ready_in > 0));
+  var end = (at || Date.now()) + (m.ready_in || 0) * 1000;
+  var state = none ? 'warn' : ready ? 'ok' : 'wait';
+
+  var third;
+  if (none) third = '<div class="warn"><b>—</b><span>сбора нет</span></div>';
+  else if (ready) third = '<div class="ok"><b>✓</b><span>сбор готов</span></div>';
+  else third = '<div class="wait"><b data-stl-end="' + end + '">' + formatSettlementClock(m.ready_in) + '</b>' +
+    '<span>до сбора</span></div>';
+
+  return '<div class="stl-card militia ' + state + '">' +
+    '<div class="stl-card-head"><span>Ополчение</span>' +
+      '<em>' + (none ? 'не соберётся' : ready ? 'готово' : 'сбор') + '</em></div>' +
+    '<div class="stl-stats">' +
+      '<div><b>' + (m.count || 0) + '</b><span>поднимется</span></div>' +
+      '<div><b>' + (m.alive || 0) + '</b><span>в строю</span></div>' +
+      third +
+    '</div>' +
+    (none ? '<div class="stl-card-text warn">Не соберётся — довольство ниже 25.</div>' : '') +
+  '</div>';
+}
+
+function stlDistrictsHtml(L) {
+  var d = L.dev;
+  if (!d) {
+    return L.devErr ? stlDevErrorHtml(L.devErr)
+      : '<div class="stl-empty">Сведений о кварталах нет</div>';
+  }
+
+  var bySlot = {};
+  (d.districts || []).forEach(function(x) { bySlot[x.slot] = x; });
+
+  // Выбор квартала открыт, но участок уже занят или прав нет — закрываем
+  if (stlPicker && (bySlot[stlPicker] || !d.is_controller || stlPicker > (d.slots || 0))) stlPicker = null;
+  if (stlPicker) return stlPickerHtml(d, bySlot);
+
+  var slots = d.slots || 0;
+  var built = (d.districts || []).length;
+  var total = Math.max(4, slots);
+  var html = '<div class="stl-sec"><span>Участки</span><em>занято ' + built + ' из ' + slots + '</em></div>';
+
+  if (!d.is_controller) {
+    html += '<div class="stl-note">Кварталы строит и сносит управляющий' +
+      (L.st && L.st.controller ? ' — ' + escHtml(L.st.controller) : '') + '</div>';
+  }
+
+  html += '<div class="stl-slots">';
+  for (var s = 1; s <= total; s++) {
+    var x = bySlot[s];
+    var no = '<span class="stl-slot-no">' + (s < 10 ? '0' : '') + s + '</span>';
+
+    if (x) {
+      var t = stlDistrictType(x.id) || {};
+      var building = x.building && x.seconds_left > 0;
+      var end = (L.at || Date.now()) + (x.seconds_left || 0) * 1000;
+      html += '<div class="stl-slot ' + (building ? 'building' : 'built') + '">' + no +
+        '<span class="stl-slot-tag">' + (building ? 'стройка' : 'действует') + '</span>' +
+        stlArtHtml(x.id, x.icon || t.icon, t.image, 'stl-slot-art', building
+          ? '<div class="stl-slot-prog"><em data-stl-end="' + end + '">' +
+              formatSettlementClock(x.seconds_left) + '</em>' +
+              '<div><i data-stl-end="' + end + '" data-stl-total="' + (t.build_seconds || 0) + '"></i></div></div>'
+          : '') +
+        '<div class="stl-slot-name">' + escHtml(x.name || t.name || x.id) + '</div>' +
+        '<div class="stl-slot-eff">' + escHtml(x.effect || t.effect || '') + '</div>' +
+        (d.is_controller
+          ? '<button class="stl-slot-act demolish" data-act="demolish" data-slot="' + s + '">Снести</button>'
+          : '') +
+      '</div>';
+    } else if (s <= slots) {
+      html += '<div class="stl-slot empty' + (d.is_controller ? '' : ' ro') + '"' +
+          (d.is_controller ? ' data-act="pick" data-slot="' + s + '"' : '') + '>' + no +
+        '<div class="stl-slot-art"><span class="stl-glyph">+</span></div>' +
+        '<div class="stl-slot-name">Свободный участок</div>' +
+        '<div class="stl-slot-eff">' + (d.is_controller ? 'Можно заложить квартал' : 'Квартал не заложен') + '</div>' +
+        (d.is_controller
+          ? '<button class="stl-slot-act pick" data-act="pick" data-slot="' + s + '">Выбрать квартал</button>'
+          : '') +
+      '</div>';
+    } else {
+      var lv = stlSlotLevel(s);
+      html += '<div class="stl-slot locked">' + no +
+        '<div class="stl-slot-art"><span class="stl-glyph">' + (STL_ROMAN[lv.level] || lv.level) + '</span></div>' +
+        '<div class="stl-slot-name">Закрыт</div>' +
+        '<div class="stl-slot-eff">откроется на уровне ' + lv.level +
+          (lv.name ? ' · ' + escHtml(lv.name) : '') + '</div>' +
+      '</div>';
+    }
+  }
+  html += '</div>';
+
+  html += '<div class="stl-hint">Квартал строится за кредиты и сырьё со склада планеты. ' +
+    'Снос возвращает четверть кредитов.</div>';
+  return html;
+}
+
+function stlPickerHtml(d, bySlot) {
+  var taken = {};
+  (d.districts || []).forEach(function(x) { taken[x.id] = true; });
+
+  var html = '<div class="stl-pick-head">' +
+    '<button class="stl-back" data-act="back">← Участки</button>' +
+    '<span>Квартал на участок ' + (stlPicker < 10 ? '0' : '') + stlPicker + '</span>' +
+  '</div>';
+
+  if (!stlDistrictTypes) {
+    return html + '<div class="stl-alert"><b>Справочник кварталов не загрузился</b>' +
+      '<span>Панель повторит запрос при следующем обновлении.</span></div>';
+  }
+
+  var list = stlDistrictTypes.filter(function(t) { return !taken[t.id]; });
+  if (!list.length) return html + '<div class="stl-empty">Все кварталы уже построены</div>';
+
+  html += '<div class="stl-pick-list">';
+  list.forEach(function(t) {
+    var cost = stlResCost(t.cost_resources, d.stock);
+    // Сырья не хватает — сервер всё равно откажет, честнее сказать сразу
+    html += '<button class="stl-dist' + (cost.short ? ' short' : '') + '" data-act="build" data-id="' + escHtml(t.id) + '"' +
+        (cost.short ? ' disabled' : '') + '>' +
+      stlArtHtml(t.id, t.icon, t.image, 'stl-dist-art') +
+      '<div class="stl-dist-info">' +
+        '<div class="stl-dist-name"><span>' + escHtml(t.name) + '</span>' +
+          (t.build_seconds ? '<em>' + stlDur(t.build_seconds) + '</em>' : '') + '</div>' +
+        '<div class="stl-dist-eff">' + escHtml(t.effect || '') + '</div>' +
+        (t.description ? '<div class="stl-dist-desc">' + escHtml(t.description) + '</div>' : '') +
+        '<div class="stl-dist-cost"><b>' + (t.cost_credits || 0) + ' кр.</b>' +
+          (cost.html ? ' · ' + cost.html : '') + '</div>' +
+        (cost.short ? '<div class="stl-dist-why">На складе не хватает сырья</div>' : '') +
+      '</div>' +
+    '</button>';
+  });
+  html += '</div>';
+  return html;
+}
+
+// Вкладка «Условия» — прежний список суточных задач с кнопками оплаты
+function renderSettlementTasks(pane, st, tasks, hasDev) {
+  var doneCount = tasks.filter(function(t) { return t.done_now; }).length;
+  var allDone = tasks.length > 0 && doneCount === tasks.length;
+
+  var html = '';
+
+  // Со сводкой развития итоговое довольство и доход живут на первой
+  // вкладке; здесь — та часть, что растёт от выполненных условий
+  if (hasDev) {
+    html += '<div class="stl-base"><span>Довольство от условий</span><b>' + st.satisfaction + '</b></div>' +
+      '<div class="stl-track"><i style="width:' + st.satisfaction + '%"></i></div>';
+  } else {
+    html += stlLegacyTopHtml(st);
+  }
+
+  html += '<div class="stl-meta">' +
+    'Управляет: ' + escHtml(st.controller || 'не назначен') +
+    ' · до итогов ' + formatSettlementLeft(st.seconds_left) +
     '</div>';
 
-    html += '<div class="stl-track"><i style="width:' + st.satisfaction + '%"></i></div>';
+  // Итог дня заранее: понятно, растёт довольство или упадёт
+  html += '<div class="stl-verdict ' + (allDone ? 'good' : 'bad') + '">' +
+    (tasks.length === 0 ? 'Задач на эти сутки нет'
+      : allDone ? 'Все требования выполнены — довольство вырастет'
+                : 'Выполнено ' + doneCount + ' из ' + tasks.length +
+                  ' — при таком раскладе довольство упадёт') +
+    '</div>';
 
-    html += '<div class="stl-meta">' +
-      'Управляет: ' + (st.controller || 'не назначен') +
-      ' · до итогов ' + formatSettlementLeft(st.seconds_left) +
-      '</div>';
+  pane.innerHTML = html;
 
-    // Итог дня заранее: понятно, растёт довольство или упадёт
-    html += '<div class="stl-verdict ' + (allDone ? 'good' : 'bad') + '">' +
-      (tasks.length === 0 ? 'Задач на эти сутки нет'
-        : allDone ? 'Все требования выполнены — довольство вырастет'
-                  : 'Выполнено ' + doneCount + ' из ' + tasks.length +
-                    ' — при таком раскладе довольство упадёт') +
-      '</div>';
+  tasks.forEach(function(t) {
+    var meta = SETTLEMENT_TASKS[t.kind] || { title: t.kind, hint: '' };
 
-    body.innerHTML = html;
+    var row = document.createElement('div');
+    row.className = 'stl-task' + (t.done_now ? ' done' : '');
 
-    tasks.forEach(function(t) {
-      var meta = SETTLEMENT_TASKS[t.kind] || { title: t.kind, hint: '' };
+    var payable = (t.kind === 'donation' || t.kind === 'festival');
 
-      var row = document.createElement('div');
-      row.className = 'stl-task' + (t.done_now ? ' done' : '');
+    row.innerHTML =
+      '<div class="stl-task-head">' +
+        '<span class="stl-task-title">' + meta.title + '</span>' +
+        '<span class="stl-task-mark">' + (t.done_now ? '✓' : '·') + '</span>' +
+      '</div>' +
+      '<div class="stl-task-sub">' + (meta.sub ? meta.sub(t.target) : t.target + ' ' + meta.hint) + '</div>';
 
-      var payable = (t.kind === 'donation' || t.kind === 'festival');
-
-      row.innerHTML =
-        '<div class="stl-task-head">' +
-          '<span class="stl-task-title">' + meta.title + '</span>' +
-          '<span class="stl-task-mark">' + (t.done_now ? '✓' : '·') + '</span>' +
-        '</div>' +
-        '<div class="stl-task-sub">' + t.target + ' ' + meta.hint + '</div>';
-
-      // Платные задачи закрываются кнопкой, остальные — делом
-      if (payable && !t.done_now && st.is_controller) {
-        var btn = document.createElement('button');
-        btn.className = 'stl-pay';
-        btn.textContent = 'Заплатить ' + t.target;
-        btn.addEventListener('click', function() {
-          btn.disabled = true;
-          supabase.rpc('settlement_pay_task', { p_task_id: t.id }).then(function(res) {
-            if (res.error) { alert(res.error.message); btn.disabled = false; return; }
-            loadSettlementPanel();
-          });
+    // Платные задачи закрываются кнопкой, остальные — делом
+    if (payable && !t.done_now && st.is_controller) {
+      var btn = document.createElement('button');
+      btn.className = 'stl-pay';
+      btn.textContent = 'Заплатить ' + t.target;
+      btn.addEventListener('click', function() {
+        btn.disabled = true;
+        supabase.rpc('settlement_pay_task', { p_task_id: t.id }).then(function(res) {
+          if (res.error) { alert(res.error.message); btn.disabled = false; return; }
+          loadSettlementPanel();
         });
-        row.appendChild(btn);
-      }
+      });
+      row.appendChild(btn);
+    }
 
-      body.appendChild(row);
-    });
+    pane.appendChild(row);
   });
+}
+
+function stlOnClick(e) {
+  var el = e.target;
+  while (el && el !== e.currentTarget && !el.getAttribute('data-act')) el = el.parentNode;
+  if (!el || el === e.currentTarget) return;
+
+  var act = el.getAttribute('data-act');
+  var d = stlLast && stlLast.dev;
+  var box = document.getElementById('settlement-box');
+
+  if (act === 'tab') {
+    var tab = el.getAttribute('data-tab');
+    if (tab === stlTab) return;
+    stlTab = tab;
+    stlPicker = null;
+    renderSettlementPanel();
+    if (box) box.scrollTop = 0;
+    return;
+  }
+
+  if (!d || !d.is_controller) return;
+
+  if (act === 'pick') {
+    stlPicker = parseInt(el.getAttribute('data-slot'), 10) || null;
+    renderSettlementPanel();
+    if (box) box.scrollTop = 0;
+    return;
+  }
+
+  if (act === 'back') {
+    stlPicker = null;
+    renderSettlementPanel();
+    if (box) box.scrollTop = 0;
+    return;
+  }
+
+  if (act === 'upgrade') {
+    if (!d.can_upgrade || !d.next) return;
+    var nx = d.next;
+    var res = stlResCost(nx.resources, null);
+    var plain = res.html.replace(/<[^>]+>/g, '');
+    if (!confirm('Расширить поселение до «' + nx.name + '»?\n\n' +
+        'Спишется: ' + (nx.credits || 0) + ' кр.' + (plain ? ' · ' + plain : '') + '\n' +
+        'Стройка займёт ' + stlDur(nx.seconds || 0) + '.')) return;
+    stlAction(el, 'start_settlement_upgrade', { p_system_id: systemId });
+    return;
+  }
+
+  if (act === 'build') {
+    var t = stlDistrictType(el.getAttribute('data-id'));
+    if (!t || !stlPicker) return;
+    var rc = stlResCost(t.cost_resources, null).html.replace(/<[^>]+>/g, '');
+    if (!confirm('Заложить «' + t.name + '» на участке ' + stlPicker + '?\n\n' +
+        'Спишется: ' + (t.cost_credits || 0) + ' кр.' + (rc ? ' · ' + rc : '') + '\n' +
+        'Стройка займёт ' + stlDur(t.build_seconds || 0) + '.')) return;
+    stlAction(el, 'build_district', { p_system_id: systemId, p_slot: stlPicker, p_district: t.id });
+    return;
+  }
+
+  if (act === 'demolish') {
+    var slot = parseInt(el.getAttribute('data-slot'), 10);
+    var x = (d.districts || []).filter(function(q) { return q.slot === slot; })[0];
+    if (!x) return;
+    if (!confirm('Снести «' + x.name + '» на участке ' + slot + '?\n\n' +
+        'Вернётся четверть потраченных кредитов, сырьё не возвращается.')) return;
+    stlAction(el, 'demolish_district', { p_system_id: systemId, p_slot: slot });
+  }
+}
+
+function stlAction(btn, fn, args) {
+  if (stlBusy) return;
+  stlBusy = true;
+  btn.disabled = true;
+  btn.classList.add('busy');
+
+  stlSafe(supabase.rpc(fn, args)).then(function(res) {
+    stlBusy = false;
+    if (res.error) {
+      btn.disabled = false;
+      btn.classList.remove('busy');
+      alert(res.error.message);
+      return;
+    }
+    stlPicker = null;
+    loadSettlementPanel();
+  });
+}
+
+// Раз в секунду: отсчёты и полосы прогресса без запросов к базе.
+// Отсчёт дошёл до нуля — один раз просим свежие данные, не дожидаясь
+// планового обновления.
+function stlTick() {
+  var body = document.getElementById('settlement-body');
+  if (!body) return;
+  var now = Date.now();
+  var expired = false;
+
+  var els = body.querySelectorAll('[data-stl-end]');
+  for (var i = 0; i < els.length; i++) {
+    var el = els[i];
+    var end = Number(el.getAttribute('data-stl-end')) || 0;
+    var left = Math.max(0, (end - now) / 1000);
+    if (left <= 0 && end && !stlExpiredEnds[end]) { stlExpiredEnds[end] = true; expired = true; }
+
+    if (el.hasAttribute('data-stl-total')) {
+      var total = Number(el.getAttribute('data-stl-total')) || 0;
+      var pct = total > 0 ? Math.max(0, Math.min(100, (1 - left / total) * 100)) : 0;
+      el.style.width = pct.toFixed(2) + '%';
+    } else {
+      el.textContent = formatSettlementClock(left);
+    }
+  }
+
+  if (expired) loadSettlementPanel();
 }
 
 function drawSettlement() {
   if (!settlement) return;
+
+  // Сводку развития для плашки запрашиваем при первой отрисовке
+  // поселения и дальше раз в минуту
+  if (!settlementDevKicked) {
+    settlementDevKicked = true;
+    setTimeout(loadSettlementDev, 0);
+  }
 
   var px = settlement.x * CELL_PX;
   var py = settlement.y * CELL_PX;
@@ -326,6 +1146,171 @@ function drawSettlement() {
   ctx.strokeStyle = 'rgba(217,169,64,0.8)';
   ctx.lineWidth = 2;
   ctx.strokeRect(px, py, sz, sz);
+
+  drawSettlementUpgrade(px, py, sz);
+  drawSettlementBadge(px, py, sz);
+}
+
+function stlRoundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+// Плашка уровня на верхней кромке поселения: римская цифра, название
+// и ступени. Крупный шрифт — чтобы читалось и на отдалении.
+function drawSettlementBadge(px, py, sz) {
+  var d = settlementDev;
+  if (!d || !d.level) return;
+
+  var max = d.max_level || 4;
+  var up = !!d.upgrade_until;
+  var upTo = up ? (d.upgrade_to || d.level + 1) : null;
+  var line = (STL_ROMAN[d.level] || d.level) + ' · ' + String(d.level_name || '').toUpperCase();
+
+  ctx.save();
+  // Длинное название («Столица округа») ужимаем, чтобы плашка
+  // не вылезала за поселение
+  var fs = 17;
+  ctx.font = 'bold ' + fs + 'px "Courier New", monospace';
+  while (fs > 12 && ctx.measureText(line).width > sz - 40) {
+    fs--;
+    ctx.font = 'bold ' + fs + 'px "Courier New", monospace';
+  }
+  var w = Math.max(ctx.measureText(line).width + 30, 120);
+  var h = 44;
+  var x = Math.round(px + sz / 2 - w / 2);
+  var y = Math.round(py - h / 2);
+
+  ctx.shadowColor = 'rgba(0,0,0,0.6)';
+  ctx.shadowBlur = 8;
+  ctx.fillStyle = 'rgba(10,13,20,0.94)';
+  stlRoundRect(x, y, w, h, 6);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = up ? '#4a90d9' : '#d9a940';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  ctx.fillStyle = '#d9a940';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(line, x + w / 2, y + 16);
+
+  // Ступени — ромбы; строящаяся ступень синяя
+  var step = 16;
+  var cx0 = x + w / 2 - (max - 1) * step / 2;
+  var cy = y + 33;
+  for (var i = 1; i <= max; i++) {
+    var cx = cx0 + (i - 1) * step;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - 5);
+    ctx.lineTo(cx + 5, cy);
+    ctx.lineTo(cx, cy + 5);
+    ctx.lineTo(cx - 5, cy);
+    ctx.closePath();
+    if (i <= d.level) {
+      ctx.fillStyle = '#d9a940';
+      ctx.fill();
+    } else if (upTo && i === upTo) {
+      ctx.fillStyle = '#4a90d9';
+      ctx.fill();
+    } else {
+      ctx.strokeStyle = 'rgba(217,169,64,0.55)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+// Расширение на карте: синие «леса» по периметру, полоса и отсчёт —
+// как у строящегося здания. Отсчёт по минутам: карта перерисовывается
+// раз в минуту вместе с опросом сводки.
+function drawSettlementUpgrade(px, py, sz) {
+  var d = settlementDev;
+  if (!d || !d.upgrade_until) return;
+
+  var now = Date.now();
+  var end = stlLocalMs(d.upgrade_until);
+  var to0 = d.upgrade_to || d.level + 1;
+  var row = stlLevelRow(to0);
+  var total = ((d.next && d.next.level === to0 && d.next.seconds) ||
+    (row && row.build_seconds) || (d.next && d.next.seconds) || 0) * 1000;
+  var progress = total > 0 ? 1 - (end - now) / total : 0;
+  progress = Math.max(0, Math.min(1, progress));
+  var left = Math.max(0, Math.ceil((end - now) / 1000));
+
+  ctx.save();
+
+  // Вуаль и двойной пунктир — леса вокруг расширяющегося поселения
+  ctx.fillStyle = 'rgba(10,22,40,0.28)';
+  ctx.fillRect(px, py, sz, sz);
+  ctx.strokeStyle = 'rgba(74,144,217,0.95)';
+  ctx.lineWidth = 3;
+  ctx.setLineDash([12, 7]);
+  ctx.strokeRect(px + 6, py + 6, sz - 12, sz - 12);
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 5]);
+  ctx.strokeRect(px + 13, py + 13, sz - 26, sz - 26);
+  ctx.setLineDash([]);
+
+  // Раскосы по углам
+  ctx.strokeStyle = 'rgba(74,144,217,0.8)';
+  ctx.lineWidth = 2;
+  var c = 14;
+  [[px + 6, py + 6, 1, 1], [px + sz - 6, py + 6, -1, 1],
+   [px + 6, py + sz - 6, 1, -1], [px + sz - 6, py + sz - 6, -1, -1]].forEach(function(k) {
+    ctx.beginPath();
+    ctx.moveTo(k[0], k[1] + k[3] * c);
+    ctx.lineTo(k[0] + k[2] * c, k[1]);
+    ctx.moveTo(k[0], k[1]);
+    ctx.lineTo(k[0] + k[2] * c, k[1] + k[3] * c);
+    ctx.stroke();
+  });
+
+  // Полоса и отсчёт внизу, на тёмной подложке, выше угловых раскосов
+  var to = to0;
+  var label = left > 0
+    ? '→ ' + (STL_ROMAN[to] || to) + ' · ' + stlDur(left <= 60 ? 60 : left)
+    : 'ЗАВЕРШЕНИЕ…';
+  var bw = sz - 48;
+  var bx = px + 24;
+  var lfs = 15;
+  ctx.font = 'bold ' + lfs + 'px "Courier New", monospace';
+  while (lfs > 11 && ctx.measureText(label).width > bw - 4) {
+    lfs--;
+    ctx.font = 'bold ' + lfs + 'px "Courier New", monospace';
+  }
+  var plateH = 40;
+  var plateY = py + sz - plateH - 24;
+
+  ctx.fillStyle = 'rgba(10,13,20,0.9)';
+  stlRoundRect(bx - 6, plateY, bw + 12, plateH, 5);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(74,144,217,0.7)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.fillStyle = '#cfd8dc';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, px + sz / 2, plateY + 14);
+
+  ctx.fillStyle = 'rgba(5,6,10,0.9)';
+  ctx.fillRect(bx, plateY + 27, bw, 6);
+  ctx.fillStyle = '#4a90d9';
+  ctx.fillRect(bx, plateY + 27, bw * progress, 6);
+
+  ctx.restore();
 }
 
 // Сколько экрана занято панелями снизу: карта должна уметь подняться
@@ -6019,8 +7004,10 @@ function structPlaceProblem(unit, st, x, y) {
       return 'зона высадки должна оставаться свободной';
     }
   }
-  if (settlement && boxOverlap(x, y, w, h, settlement.x, settlement.y, settlement.size, settlement.size)) {
-    return 'на поселении не строят';
+  // Кольцо захвата вокруг поселения всегда свободно — как и на сервере
+  var sz = settlementZone || settlement;
+  if (sz && boxOverlap(x, y, w, h, sz.x, sz.y, sz.size, sz.size)) {
+    return 'у поселения не строят: кольцо захвата должно быть свободным';
   }
   for (var k = 0; k < buildSlots.length; k++) {
     if (boxOverlap(x, y, w, h, buildSlots[k].x, buildSlots[k].y, SLOT_SIZE, SLOT_SIZE)) {
@@ -6171,7 +7158,7 @@ function renderStructureCards(unit, list) {
   note.className = 'struct-note' + (own ? '' : ' warn');
   note.textContent = own
     ? 'Строит в ' + structBuildRange + ' клетках от себя за одно действие. ' +
-      'Нельзя: зоны высадки, участки зданий, поселение и полоса вторжения.'
+      'Нельзя: зоны высадки, участки зданий, поселение с кольцом захвата и полоса вторжения.'
     : 'Строить можно только на планетах своей фракции.';
   list.appendChild(note);
 
