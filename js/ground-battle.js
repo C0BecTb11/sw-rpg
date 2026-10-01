@@ -1389,6 +1389,7 @@ function setBottomInset(px) {
   panY -= delta;
   clampPan();
   applyTransform();
+  cbPlaceToast();
 }
 
 function insetFor(el) {
@@ -1857,6 +1858,7 @@ function drawConstructionProgress(building, px, py, size, now) {
 
 function applyTransform() {
   canvas.style.transform = 'translate(' + panX + 'px, ' + panY + 'px) scale(' + scale + ')';
+  cbSyncFxLayer();
 }
 
 function clampPan() {
@@ -3525,21 +3527,44 @@ function getUnitImage(path) {
 }
 var placingOrder = null;   // {unitId, quantity} — ждём выбор клетки
 
+// Ответы приходят не по порядку: реалтайм и ручная перезагрузка часто
+// летят одновременно. Старый ответ поверх нового откатил бы карту назад
+// и показал бы ложное «лечение» в сводке.
+var loadUnitsSeq = 0;
+var loadUnitsApplied = 0;
+
 function loadUnits() {
+  var seq = ++loadUnitsSeq;
+  var requestedAt = Date.now();
   Promise.all([
     supabase.from('unit_positions').select('*').eq('system_id', systemId).eq('layer', 'ground'),
     supabase.from('unit_types').select('*')
   ]).then(function(r) {
-    unitsOnMap = (r[0].error || !r[0].data) ? [] : r[0].data;
+    // Применяем только ответ свежее уже показанного. Ждать именно
+    // последний нельзя: при частых обновлениях карта не обновилась бы вовсе.
+    if (seq <= loadUnitsApplied) return;
+    // Неудачный запрос не стирает карту: иначе следующая загрузка
+    // показала бы прочность всех бойцов как «новую»
+    if (r[0].error || !r[0].data) return;
+    loadUnitsApplied = seq;
+    var prevUnits = unitsOnMap;
+    unitsOnMap = r[0].data;
 
     var inside = {};
     unitsOnMap.forEach(function(u) {
       if (u.carrier_unit_id) inside[u.carrier_unit_id] = (inside[u.carrier_unit_id] || 0) + 1;
     });
     unitsOnMap.forEach(function(u) { u.passengers = inside[u.id] || 0; });
-    unitTypeById = {};
-    (r[1].data || []).forEach(function(t) { unitTypeById[t.id] = t; });
+    if (!r[1].error && r[1].data && r[1].data.length) {
+      unitTypeById = {};
+      r[1].data.forEach(function(t) { unitTypeById[t.id] = t; });
+    }
+    // Сначала карточка разведки берёт свежий экземпляр бойца, потом
+    // рисуем: иначе рамки дальности отстают на одно обновление
+    cbRefreshIntel();
     redrawScene();
+    cbDiffUnits(prevUnits, unitsOnMap, requestedAt);
+    cbReconcileHp(requestedAt);
   });
 }
 
@@ -3686,9 +3711,17 @@ function drawUnits() {
   // квадрат вокруг юнита, а не круг. Обзор зелёным, ход синим.
   if (selectedUnit) {
     var t = unitTypeById[selectedUnit.unit_type];
-    if (t) {
+    if (t && selectedUnit.owner_user_id === currentUserId) {
       drawCellRange(selectedUnit, t.vision_range, 'rgba(95,217,104,0.55)');
       drawCellRange(selectedUnit, t.move_range, 'rgba(74,144,217,0.55)');
+    } else if (t) {
+      // Чужой: куда достаёт его ствол и что он видит. Паспортные значения,
+      // без улучшений — их мы знать не должны.
+      if (t.weapon_range && t.weapon_range < GRID_SIZE) {
+        drawCellRange(selectedUnit, t.weapon_range,
+          cbUnitSide(selectedUnit) === 'enemy' ? 'rgba(217,74,74,0.7)' : 'rgba(74,144,217,0.6)');
+      }
+      drawCellRange(selectedUnit, t.vision_range, 'rgba(217,169,64,0.45)');
     }
   }
 }
@@ -3719,7 +3752,7 @@ var dropCargo = [];        // ответ get_drop_ready_cargo
 // и площадку сброса, и полосу вторжения, и свободное место в трюме.
 // Клиент только показывает результат.
 function offerPickup(unit) {
-  if (unit.owner_user_id !== currentUserId) { hidePickup(); return; }
+  if (unit.owner_user_id !== currentUserId) { showUnitIntel(unit); return; }
 
   var type = unitTypeById[unit.unit_type] || {};
 
@@ -3770,6 +3803,7 @@ function showPickup(unit, ships, carriers, inside, boardable, ap, liftCarriers) 
   if (!bar) return;
   bar.removeAttribute('data-struct');
   bar.removeAttribute('data-side');
+  bar.removeAttribute('data-intel');
 
   ships = ships || [];
   carriers = carriers || [];
@@ -3777,7 +3811,8 @@ function showPickup(unit, ships, carriers, inside, boardable, ap, liftCarriers) 
   boardable = boardable || [];
 
   var type = unitTypeById[unit.unit_type] || {};
-  var hpPct = type.max_hp ? Math.max(0, Math.min(100, unit.hp / type.max_hp * 100)) : 100;
+  var hpMax = (type.max_hp || unit.hp) + (unit.bonus_hp || 0);
+  var hpPct = hpMax ? Math.max(0, Math.min(100, unit.hp / hpMax * 100)) : 100;
 
   // Одарённый: в шапке стоит его кличка, а название типа уходит в строку роли.
   // Вкладка убитых есть только у него, поэтому при переходе на обычного бойца
@@ -3814,7 +3849,7 @@ function showPickup(unit, ships, carriers, inside, boardable, ap, liftCarriers) 
         '<div class="gu-name">' + escHtml(title) + '</div>' +
         '<div class="gu-role">' + role + ' · ' + unit.x + ':' + unit.y + '</div>' +
         '<div class="gu-hp">' +
-          '<span class="gu-hp-num">' + unit.hp + ' / ' + (type.max_hp || unit.hp) + '</span>' +
+          '<span class="gu-hp-num">' + unit.hp + ' / ' + hpMax + '</span>' +
           '<div class="gu-hp-track"><i style="width:' + hpPct + '%"></i></div>' +
         '</div>' +
         '<div class="gu-props">' +
@@ -4302,12 +4337,14 @@ function handleArtilleryTap(cellX, cellY) {
   document.getElementById('area-go').addEventListener('click', function() {
     var go = document.getElementById('area-go');
     go.disabled = true;
+    var gun = artilleryUnit;
+    cbLastOwnAction = Date.now();
     supabase.rpc('artillery_strike', {
-      p_unit_id: artilleryUnit.id, p_x: areaPreview.cx, p_y: areaPreview.cy
+      p_unit_id: gun.id, p_x: areaPreview.cx, p_y: areaPreview.cy
     }).then(function(r) {
       if (r.error) { go.disabled = false; alert(r.error.message); return; }
       var res = (r.data && r.data.length) ? r.data[0] : null;
-      if (res) alert(res.note);
+      if (res) cbReportArea('Залп артиллерии', gun, res);
       cancelTargeting();
       selectedUnit = null;
       loadUnits();
@@ -4372,13 +4409,14 @@ function showAreaConfirm(a) {
   document.getElementById('area-cancel').addEventListener('click', cancelTargeting);
   document.getElementById('area-go').addEventListener('click', function() {
     var u = upgradeAbility.unit;
+    cbLastOwnAction = Date.now();
     supabase.rpc('use_unit_ability', {
       p_unit_id: u.id, p_research_id: a.research_id,
       p_x: areaPreview.x, p_y: areaPreview.y
     }).then(function(r) {
       if (r.error) { alert(r.error.message); return; }
       var res = (r.data && r.data.length) ? r.data[0] : null;
-      if (res) alert(res.note);
+      if (res) cbReportArea(a.name, u, res);
       cancelTargeting();
       selectedUnit = null;
       loadUnits();
@@ -4467,10 +4505,16 @@ function handleUpgradeAbilityTap(cellX, cellY) {
     if (twinFirst) args.p_second_id = pick.target_id;
   }
 
+  var mainPick = twinFirst || pick;
+  var twoTargets = !!twinFirst;
+  var mainBefore = cbHpNow(mainPick);
+  cbLastOwnAction = Date.now();
   supabase.rpc('use_unit_ability', args).then(function(r) {
     if (r.error) { alert(r.error.message); return; }
     var res = (r.data && r.data.length) ? r.data[0] : null;
-    if (res) alert(res.note + (res.damage ? ' · урон ' + res.damage : ''));
+    // Две цели: убитым может оказаться любая, поэтому итог — общей сводкой
+    if (res && twoTargets) cbReportArea(a.name, unit, res);
+    else if (res) cbReportAbility(a.name, unit, mainPick, res, mainBefore);
     cancelTargeting();
     selectedUnit = null;
     loadUnits();
@@ -4499,13 +4543,15 @@ function startTwinSecond(unit, a, first) {
 
     document.getElementById('twin-cancel').addEventListener('click', cancelTargeting);
     document.getElementById('twin-skip').addEventListener('click', function() {
+      var firstBefore = cbHpNow(first);
+      cbLastOwnAction = Date.now();
       supabase.rpc('use_unit_ability', {
         p_unit_id: unit.id, p_research_id: a.research_id,
         p_target_id: first.target_id
       }).then(function(r) {
         if (r.error) { alert(r.error.message); return; }
         var res = (r.data && r.data.length) ? r.data[0] : null;
-        if (res) alert(res.note);
+        if (res) cbReportAbility(a.name, unit, first, res, firstBefore);
         cancelTargeting();
         selectedUnit = null;
         loadUnits();
@@ -4625,24 +4671,14 @@ function handleTargetTap(cellX, cellY) {
   if (!pick) { alert('Эта цель недоступна'); return; }
 
   if (attackingUnit) {
+    var shooter = attackingUnit;
+    cbLastOwnAction = Date.now();
     supabase.rpc('attack_unit', {
-      p_attacker_id: attackingUnit.id, p_target_id: pick.target_id
+      p_attacker_id: shooter.id, p_target_id: pick.target_id
     }).then(function(r) {
       if (r.error) { alert(r.error.message); return; }
       var res = (r.data && r.data.length) ? r.data[0] : null;
-      if (res) {
-        var msg = !res.hit ? 'Промах'
-          : res.destroyed ? pick.name + ' уничтожен'
-          : 'Попадание · −' + res.damage + ' · осталось ' + res.target_hp;
-        // Цель сидела в окопе и ответила: игрок должен узнать сразу
-        if (res.counter_damage !== null && res.counter_damage !== undefined) {
-          msg += res.counter_damage > 0
-            ? '\nОтветный огонь из окопа: −' + res.counter_damage +
-              (res.attacker_hp > 0 ? ' · у тебя осталось ' + res.attacker_hp : ' · твой боец погиб')
-            : '\nИз окопа ответили огнём — мимо';
-        }
-        alert(msg);
-      }
+      if (res) cbReportShot(shooter, pick, res);
       cancelTargeting();
       selectedUnit = null;
       loadUnits();
@@ -4650,12 +4686,27 @@ function handleTargetTap(cellX, cellY) {
     return;
   }
 
+  var helper = abilityUnit, helpDef = abilityDef;
+  var healBefore = cbHpNow(pick);
+  cbLastOwnAction = Date.now();
   supabase.rpc('use_ability', {
-    p_unit_id: abilityUnit.id, p_ability_id: abilityDef.ability_id,
+    p_unit_id: helper.id, p_ability_id: helpDef.ability_id,
     p_target_id: pick.target_id
   }).then(function(r) {
     if (r.error) { alert(r.error.message); return; }
-    alert(abilityDef.name + ': +' + r.data);
+    cbLastOwnAction = Date.now();
+    var tu = cbTargetUnit(pick);
+    var gain = Number(r.data) || 0;
+    var max = cbTargetMaxHp(pick);
+    var serial = cbReport({
+      kind: 'heal', title: helpDef.name,
+      attacker: cbUnitPic(helper, 'mine'),
+      target: cbTargetPic(pick, tu),
+      heal: gain,
+      hpLeft: Math.min(max || Infinity, healBefore + gain),
+      hpMax: max
+    });
+    cbExpectHp(serial, pick.target_id, healBefore, max, 'heal');
     cancelTargeting();
     selectedUnit = null;
     loadUnits();
@@ -4779,6 +4830,7 @@ function hidePickup() {
   if (!bar || bar.style.visibility === 'hidden') return;
   bar.removeAttribute('data-struct');
   bar.removeAttribute('data-side');
+  bar.removeAttribute('data-intel');
   bar.style.visibility = 'hidden';
   setBottomInset(0);
 }
@@ -5451,12 +5503,13 @@ function startHeroAbility(unit, a) {
   // Купол накрывает своих вокруг героя — целиться некуда
   if (a.target_mode === 'self') {
     heroAbility = null;
+    cbLastOwnAction = Date.now();
     supabase.rpc('use_hero_ability', {
       p_unit_id: unit.id, p_ability_id: a.ability_id
     }).then(function(r) {
       if (r.error) { alert(r.error.message); return; }
       var res = (r.data && r.data.length) ? r.data[0] : null;
-      if (res) alert(res.note);
+      if (res) cbReportArea(a.name, unit, res);
       cancelTargeting();
       selectedUnit = null;
       loadUnits();
@@ -5525,13 +5578,14 @@ function handleHeroAbilityTap(cellX, cellY) {
   var unit = heroAbility.unit;
 
   if (a.target_mode === 'area') {
+    cbLastOwnAction = Date.now();
     supabase.rpc('use_hero_ability', {
       p_unit_id: unit.id, p_ability_id: a.ability_id,
       p_x: cellX, p_y: cellY
     }).then(function(r) {
       if (r.error) { alert(r.error.message); return; }
       var res = (r.data && r.data.length) ? r.data[0] : null;
-      if (res) alert(res.note);
+      if (res) cbReportArea(a.name, unit, res);
       cancelTargeting();
       selectedUnit = null;
       loadUnits();
@@ -5554,6 +5608,8 @@ function handleHeroAbilityTap(cellX, cellY) {
 
   if (!pick) { alert('Эта цель недоступна'); return; }
 
+  var pickBefore = cbHpNow(pick);
+  cbLastOwnAction = Date.now();
   supabase.rpc('use_hero_ability', {
     p_unit_id: unit.id,
     p_ability_id: a.ability_id,
@@ -5562,9 +5618,17 @@ function handleHeroAbilityTap(cellX, cellY) {
     if (r.error) { alert(r.error.message); return; }
 
     var res = (r.data && r.data.length) ? r.data[0] : null;
-    if (res) {
-      alert(res.note + (res.damage ? ' · урон ' + res.damage : '') +
-            (res.killed ? ' · цель уничтожена' : ''));
+    if (res && a.target_mode === 'ally') {
+      // Помощь своему: лечение, щит. Урона нет, есть итог в заметке.
+      cbLastOwnAction = Date.now();
+      cbReport({
+        kind: 'heal', title: a.name,
+        attacker: cbUnitPic(unit, 'mine'),
+        target: cbTargetPic(pick, cbTargetUnit(pick)),
+        lines: res.note ? [{ text: res.note, cls: 'muted' }] : []
+      });
+    } else if (res) {
+      cbReportAbility(a.name, unit, pick, res, pickBefore);
     }
 
     cancelTargeting();
@@ -7335,6 +7399,7 @@ function openStructurePanel(s, keepView) {
   if (st.credits_per_day) props.push('<span title="в сутки">◈ +' + st.credits_per_day + '</span>');
   if (st.satisfaction_bonus) props.push('<span title="довольство поселения">☺ +' + st.satisfaction_bonus + '</span>');
 
+  bar.removeAttribute('data-intel');
   bar.setAttribute('data-struct', s.id);
   bar.setAttribute('data-side', side);
   bar.innerHTML =
@@ -7443,16 +7508,14 @@ function structTargetAt(cellX, cellY) {
 }
 
 function attackStructureTarget(pick) {
+  var shooter = attackingUnit;
+  cbLastOwnAction = Date.now();
   supabase.rpc('attack_structure', {
-    p_attacker_id: attackingUnit.id, p_structure_id: pick.structure_id
+    p_attacker_id: shooter.id, p_structure_id: pick.structure_id
   }).then(function(r) {
     if (r.error) { alert(r.error.message); return; }
     var res = (r.data && r.data.length) ? r.data[0] : null;
-    if (res) {
-      alert(!res.hit ? 'Промах'
-        : res.destroyed ? pick.name + ' разрушен'
-        : 'Попадание · −' + res.damage + ' · осталось ' + res.target_hp);
-    }
+    if (res) cbReportStructShot(shooter, pick, res);
     cancelTargeting();
     selectedUnit = null;
     loadStructures();
@@ -7495,4 +7558,584 @@ function drawShelterMark(sh, x, y, w, h) {
   ctx.strokeStyle = 'rgba(5,6,10,0.9)';
   ctx.lineWidth = 1.5;
   ctx.stroke();
+}
+
+// ===== Боевые сводки и разведданные =====
+// Итог выстрела больше не прячется в системное окно: над целью всплывает
+// урон или «промах», а внизу на несколько секунд встаёт карточка сводки
+// с портретами, уроном и остатком прочности. Тап по чужому бойцу
+// открывает разведданные: только то, что видно в бинокль, — тип, портрет,
+// прочность и паспортные характеристики. Способности, снаряжение и
+// улучшения противника не показываются.
+
+var cbToastEl = null;          // карточка сводки
+var cbToastTimer = null;
+var cbFxLayer = null;          // слой всплывающих цифр поверх холста
+var cbLastOwnAction = 0;       // когда игрок сам стрелял: свой залп не считаем «нас атакуют»
+var cbOwnerNames = {};         // ник командира чужого бойца: id -> имя
+var cbOwnerAsked = {};
+
+// ---------- Всплывающие цифры над картой ----------
+
+// Слой живёт рядом с холстом и двигается вместе с ним. Подписи внутри
+// масштабируются обратно, поэтому на любом зуме читаются одинаково.
+function cbEnsureFxLayer() {
+  if (cbFxLayer && cbFxLayer.parentNode) return cbFxLayer;
+  var vp = document.getElementById('ground-viewport');
+  if (!vp) return null;
+  cbFxLayer = document.createElement('div');
+  cbFxLayer.id = 'gb-fx';
+  vp.appendChild(cbFxLayer);
+  cbSyncFxLayer();
+  return cbFxLayer;
+}
+
+function cbSyncFxLayer() {
+  if (!cbFxLayer) return;
+  cbFxLayer.style.transform = 'translate(' + panX + 'px, ' + panY + 'px) scale(' + scale + ')';
+  cbFxLayer.style.setProperty('--fx-inv', (1 / (scale || 1)).toFixed(4));
+}
+
+// kind: dmg | heal | miss | kill. Точка — верхний центр корпуса.
+function cbFloat(cellX, cellY, w, text, kind, delay) {
+  if (cellX === null || cellX === undefined) return;
+  var layer = cbEnsureFxLayer();
+  if (!layer) return;
+
+  var pos = document.createElement('div');
+  pos.className = 'fx-pos';
+  pos.style.left = ((cellX + (w || 1) / 2) * CELL_PX) + 'px';
+  pos.style.top = (cellY * CELL_PX) + 'px';
+
+  var txt = document.createElement('div');
+  txt.className = 'fx-txt fx-' + kind;
+  txt.textContent = text;
+  if (delay) txt.style.animationDelay = delay + 'ms';
+  pos.appendChild(txt);
+  layer.appendChild(pos);
+
+  setTimeout(function() {
+    if (pos.parentNode) pos.parentNode.removeChild(pos);
+  }, 1700 + (delay || 0));
+}
+
+function cbFloatOnUnit(u, text, kind, delay) {
+  if (!u) return;
+  var b = unitBox(u);
+  cbFloat(u.x, u.y, b.w, text, kind, delay);
+}
+
+// ---------- Разница прочности между двумя загрузками ----------
+
+// Сравниваем, что было на карте, с тем, что пришло: у кого убыло —
+// красная цифра, у кого прибыло — зелёная. Так видно и свой урон,
+// и чужие попадания по нашим, и лечение госпиталем. Пропавших не
+// трогаем: ушёл в туман, сел в транспорт или погиб — по карте не понять.
+function cbDiffUnits(prev, next, requestedAt) {
+  if (!prev || !prev.length) return;
+  var before = {};
+  prev.forEach(function(u) {
+    if (u.x !== null && u.x !== undefined) before[u.id] = u;
+  });
+
+  var hurt = [];
+  next.forEach(function(u) {
+    var p = before[u.id];
+    if (!p || u.x === null || u.x === undefined) return;
+    var d = (u.hp || 0) - (p.hp || 0);
+    if (!d) return;
+    cbFloatOnUnit(u, d < 0 ? '−' + (-d) : '+' + d, d < 0 ? 'dmg' : 'heal');
+    if (d < 0 && u.owner_user_id === currentUserId) hurt.push({ u: u, d: -d });
+  });
+
+  // Нас обстреляли, а игрок мог смотреть в другую сторону. Свой залп
+  // по своим (артиллерия, граната) сюда не попадает: сводку о нём
+  // игрок только что видел.
+  // Отсчёт от момента запроса карты: на медленной связи ответ идёт долго,
+  // и ответный огонь по собственному выстрелу не должен выглядеть атакой
+  var from = requestedAt || Date.now();
+  if (hurt.length && from - cbLastOwnAction > 3000) cbReportIncoming(hurt);
+}
+
+// ---------- Карточка сводки ----------
+
+function cbEnsureToast() {
+  if (cbToastEl && cbToastEl.parentNode) return cbToastEl;
+  cbToastEl = document.createElement('div');
+  cbToastEl.id = 'cb-toast';
+  cbToastEl.addEventListener('click', cbHideToast);
+  document.body.appendChild(cbToastEl);
+  return cbToastEl;
+}
+
+// Карточка встаёт над нижней панелью, а не поверх неё
+function cbPlaceToast() {
+  if (!cbToastEl) return;
+  var inset = uiBottomInset;
+  // Подсказка расстановки бывает открыта без отступа снизу
+  var hint = document.getElementById('placement-hint');
+  if (hint && hint.style.display !== 'none') inset = Math.max(inset, insetFor(hint));
+  cbToastEl.style.bottom = inset > 0 ? (inset + 4) + 'px' : '';
+}
+
+function cbHideToast() {
+  if (cbToastTimer) { clearTimeout(cbToastTimer); cbToastTimer = null; }
+  if (cbToastEl) cbToastEl.classList.remove('show');
+}
+
+function cbPic(p) {
+  if (!p) return '';
+  var cls = 'cb-pic' + (p.veh ? ' veh' : '') + (p.struct ? ' struct' : '') + (p.side ? ' side-' + p.side : '');
+  return '<div class="' + cls + '">' + (p.img ? '<img src="../' + escHtml(p.img) + '" alt="">' : '') + '</div>';
+}
+
+// Портрет и подпись юнита для сводки
+function cbUnitPic(u, side) {
+  if (!u) return null;
+  var t = unitTypeById[u.unit_type] || {};
+  return { img: u.portrait || t.image, veh: !!t.is_vehicle, side: side,
+           name: u.hero_id && u.hero_name ? u.hero_name : (t.name || 'Боец') };
+}
+
+// opts: kind (hit|miss|kill|heal|area|incoming), title, chance,
+// attacker, target ({img,name,veh,struct,side}), damage, hpLeft, hpMax,
+// heal, chips [{text, cls}], lines [{text, cls}]
+var cbToastSerial = 0;
+var cbPendingHp = null;   // сводка ждёт точную прочность цели со свежей карты
+
+function cbHpNow(pick) {
+  var u = cbTargetUnit(pick);
+  return u ? u.hp : (pick && pick.hp) || 0;
+}
+
+function cbExpectHp(serial, id, before, max, kind) {
+  cbPendingHp = { serial: serial, id: id, before: before, max: max, kind: kind, at: Date.now() };
+}
+
+// Свежая карта пришла: правим цифры в сводке, если она ещё та же.
+// Карта, запрошенная раньше действия, не годится — в ней старая прочность.
+function cbReconcileHp(requestedAt) {
+  var p = cbPendingHp;
+  if (!p || requestedAt < p.at) return;
+  cbPendingHp = null;
+  if (p.serial !== cbToastSerial || !cbToastEl || !cbToastEl.classList.contains('show')) return;
+
+  var u = unitsOnMap.filter(function(x) { return x.id === p.id; })[0];
+  if (!u || !p.max) return;
+
+  var left = Math.max(0, Math.min(p.max, u.hp));
+  var change = p.kind === 'heal' ? Math.max(0, left - p.before) : Math.max(0, p.before - left);
+  var lost = p.kind === 'heal' ? 0 : change;
+  var lPct = left / p.max * 100, xPct = lost / p.max * 100;
+
+  var num = cbToastEl.querySelector('.cb-num');
+  var bar = cbToastEl.querySelector('.cb-track i.left');
+  var gone = cbToastEl.querySelector('.cb-track i.lost');
+  var txt = cbToastEl.querySelector('.cb-left');
+  if (num) num.textContent = (p.kind === 'heal' ? '+' : '−') + change;
+  if (bar) bar.style.width = lPct.toFixed(1) + '%';
+  if (gone) { gone.style.left = lPct.toFixed(1) + '%'; gone.style.width = xPct.toFixed(1) + '%'; }
+  if (txt) txt.textContent = left + ' / ' + p.max;
+}
+
+function cbReport(opts) {
+  var el = cbEnsureToast();
+  cbToastSerial++;
+  cbPendingHp = null;
+  var kind = opts.kind || 'hit';
+
+  var titles = { hit: 'Попадание', miss: 'Промах', kill: 'Цель уничтожена', heal: 'Помощь',
+                 area: 'Удар по площади', incoming: 'Под огнём', info: 'Сводка' };
+  var title = opts.title || titles[kind] || 'Сводка';
+
+  var pics = '';
+  if (opts.attacker || opts.target) {
+    pics = '<div class="cb-pics">' + cbPic(opts.attacker) +
+      (opts.attacker && opts.target ? '<span class="cb-arrow">➜</span>' : '') +
+      cbPic(opts.target) + '</div>';
+  }
+
+  var who = '';
+  if (opts.attacker && opts.target) {
+    who = escHtml(opts.attacker.name) + ' <i>→</i> ' + escHtml(opts.target.name);
+  } else if (opts.target) {
+    who = escHtml(opts.target.name);
+  } else if (opts.attacker) {
+    who = escHtml(opts.attacker.name);
+  }
+
+  // Полоса прочности: остаток плюс только что снятый кусок
+  var hp = '';
+  if (opts.hpMax) {
+    var left = Math.max(0, Math.min(opts.hpMax, opts.hpLeft || 0));
+    var lost = Math.max(0, Math.min(opts.hpMax - left, opts.damage || 0));
+    var lPct = left / opts.hpMax * 100, xPct = lost / opts.hpMax * 100;
+    var num = kind === 'heal' ? '+' + (opts.heal || 0)
+            : kind === 'miss' ? '—'
+            : '−' + (opts.damage || 0);
+    hp = '<div class="cb-hp">' +
+           '<span class="cb-num">' + num + '</span>' +
+           '<div class="cb-track"><i class="left" style="width:' + lPct.toFixed(1) + '%"></i>' +
+             (xPct > 0 ? '<i class="lost" style="left:' + lPct.toFixed(1) + '%;width:' + xPct.toFixed(1) + '%"></i>' : '') +
+           '</div>' +
+           '<span class="cb-left">' + left + ' / ' + opts.hpMax + '</span>' +
+         '</div>';
+  } else if (opts.damage && kind !== 'miss') {
+    hp = '<div class="cb-hp solo"><span class="cb-num">−' + opts.damage + '</span></div>';
+  } else if (kind === 'heal' && opts.heal) {
+    hp = '<div class="cb-hp solo"><span class="cb-num">+' + opts.heal + '</span></div>';
+  }
+
+  var chips = (opts.chips || []).filter(Boolean).map(function(c) {
+    return '<span class="cb-chip' + (c.cls ? ' ' + c.cls : '') + '">' + escHtml(c.text) + '</span>';
+  }).join('');
+
+  var lines = (opts.lines || []).filter(Boolean).map(function(l) {
+    return '<div class="cb-line' + (l.cls ? ' ' + l.cls : '') + '">' + escHtml(l.text) + '</div>';
+  }).join('');
+
+  el.className = 'cb-' + kind;
+  el.innerHTML =
+    pics +
+    '<div class="cb-body">' +
+      '<div class="cb-head"><b>' + escHtml(title) + '</b>' +
+        (opts.chance !== null && opts.chance !== undefined
+          ? '<span class="cb-chance">шанс ' + opts.chance + '%</span>' : '') +
+      '</div>' +
+      (who ? '<div class="cb-who">' + who + '</div>' : '') +
+      hp +
+      (chips ? '<div class="cb-chips">' + chips + '</div>' : '') +
+      lines +
+    '</div>';
+
+  cbPlaceToast();
+  // Перезапуск появления, если сводка сменила сводку
+  el.classList.remove('show');
+  void el.offsetWidth;
+  el.classList.add('show');
+
+  if (cbToastTimer) clearTimeout(cbToastTimer);
+  cbToastTimer = setTimeout(cbHideToast, kind === 'miss' ? 3200 : 4800);
+  return cbToastSerial;
+}
+
+function cbReportIncoming(hurt) {
+  var total = hurt.reduce(function(s, h) { return s + h.d; }, 0);
+  if (hurt.length === 1) {
+    var u = hurt[0].u, t = unitTypeById[u.unit_type] || {};
+    cbReport({
+      kind: 'incoming',
+      target: cbUnitPic(u, 'mine'),
+      damage: hurt[0].d, hpLeft: u.hp, hpMax: (t.max_hp || u.hp) + (u.bonus_hp || 0),
+      lines: [{ text: 'Позиция ' + u.x + ':' + u.y }]
+    });
+    return;
+  }
+  cbReport({
+    kind: 'incoming',
+    title: 'Под огнём · ' + hurt.length + ' ' + stlPlural(hurt.length, 'боец', 'бойца', 'бойцов'),
+    damage: total,
+    chips: hurt.slice(0, 4).map(function(h) {
+      var t = unitTypeById[h.u.unit_type] || {};
+      return { text: (h.u.hero_id && h.u.hero_name ? h.u.hero_name : (t.name || 'боец')) + ' −' + h.d, cls: 'bad' };
+    })
+  });
+}
+
+// ---------- Сводки по видам атак ----------
+
+function cbTargetMaxHp(pick) {
+  if (!pick) return 0;
+  if (pick.max_hp) return pick.max_hp;
+  var u = unitsOnMap.filter(function(x) { return x.id === pick.target_id; })[0];
+  var t = u ? (unitTypeById[u.unit_type] || {}) : {};
+  return u ? (t.max_hp || u.hp) + (u.bonus_hp || 0) : 0;
+}
+
+function cbTargetUnit(pick) {
+  return pick ? unitsOnMap.filter(function(x) { return x.id === pick.target_id; })[0] : null;
+}
+
+function cbTargetPic(pick, u) {
+  var t = u ? (unitTypeById[u.unit_type] || {}) : {};
+  return {
+    img: (u && (u.portrait || t.image)) || pick.image,
+    veh: !!t.is_vehicle,
+    side: u && u.faction === myFaction ? 'ally' : 'enemy',
+    name: (u && u.hero_id && u.hero_name) ? u.hero_name : (pick.name || t.name || 'Цель')
+  };
+}
+
+// Обычный выстрел по бойцу
+function cbReportShot(attacker, pick, res) {
+  cbLastOwnAction = Date.now();
+  var u = cbTargetUnit(pick);
+  var max = cbTargetMaxHp(pick);
+  var lines = [];
+
+  // Цель сидела в окопе и ответила: игрок должен узнать сразу
+  if (res.counter_damage !== null && res.counter_damage !== undefined) {
+    var at = unitTypeById[attacker.unit_type] || {};
+    var amax = (at.max_hp || attacker.hp) + (attacker.bonus_hp || 0);
+    lines.push(res.counter_damage > 0
+      ? { text: '↩ Ответный огонь: −' + res.counter_damage +
+          (res.attacker_hp > 0 ? ' · у тебя ' + res.attacker_hp + ' / ' + amax : ' · твой боец погиб'),
+          cls: 'bad' }
+      : { text: '↩ Ответный огонь — мимо', cls: 'muted' });
+    if (res.counter_damage <= 0) cbFloatOnUnit(attacker, 'мимо', 'miss', 250);
+  }
+
+  if (!res.hit) {
+    cbFloatOnUnit(u || pick, 'ПРОМАХ', 'miss');
+  } else if (res.destroyed) {
+    cbFloatOnUnit(u || pick, '−' + res.damage, 'dmg');
+    cbFloatOnUnit(u || pick, 'УНИЧТОЖЕН', 'kill', 220);
+  }
+
+  cbReport({
+    kind: !res.hit ? 'miss' : res.destroyed ? 'kill' : 'hit',
+    chance: pick.chance,
+    attacker: cbUnitPic(attacker, 'mine'),
+    target: cbTargetPic(pick, u),
+    damage: res.hit ? res.damage : 0,
+    hpLeft: res.destroyed ? 0 : (res.target_hp !== null && res.target_hp !== undefined ? res.target_hp : (pick.hp || 0)),
+    hpMax: max,
+    lines: lines
+  });
+}
+
+// Выстрел по постройке: постройки в разнице прочности не участвуют,
+// поэтому цифру над ней ставим сами
+function cbReportStructShot(attacker, pick, res) {
+  cbLastOwnAction = Date.now();
+  var box = { x: pick.x, y: pick.y, w: pick.w || 1 };
+  if (!res.hit) cbFloat(box.x, box.y, box.w, 'ПРОМАХ', 'miss');
+  else {
+    cbFloat(box.x, box.y, box.w, '−' + res.damage, 'dmg');
+    if (res.destroyed) cbFloat(box.x, box.y, box.w, 'РАЗРУШЕН', 'kill', 220);
+  }
+
+  cbReport({
+    kind: !res.hit ? 'miss' : res.destroyed ? 'kill' : 'hit',
+    title: res.destroyed ? 'Постройка разрушена' : null,
+    chance: pick.chance,
+    attacker: cbUnitPic(attacker, 'mine'),
+    target: { img: pick.image, struct: true, side: 'enemy', name: pick.name || 'Постройка' },
+    damage: res.hit ? res.damage : 0,
+    hpLeft: res.destroyed ? 0 : res.target_hp,
+    hpMax: pick.max_hp || 0
+  });
+}
+
+// Способность по одной цели (улучшение бойца или дар героя).
+// Сервер возвращает урон и признак убийства, остаток считаем от того,
+// что было у цели перед ударом.
+function cbReportAbility(name, attacker, pick, res, before) {
+  cbLastOwnAction = Date.now();
+  var u = cbTargetUnit(pick);
+  var max = cbTargetMaxHp(pick);
+  var killed = !!(res.killed && res.killed !== 0);
+  // Промахом считаем только явный отказ сервера. Подчинение, усмирение,
+  // толчок урона не наносят, но сработали — это не промах.
+  var hit = res.hit !== false;
+  if (before === null || before === undefined) before = u ? u.hp : (pick.hp || 0);
+
+  if (!hit) cbFloatOnUnit(u || pick, 'ПРОМАХ', 'miss');
+  else if (killed && u) {
+    cbFloatOnUnit(u, '−' + (res.damage || before), 'dmg');
+    cbFloatOnUnit(u, 'УНИЧТОЖЕН', 'kill', 220);
+  }
+
+  var serial = cbReport({
+    kind: !hit ? 'miss' : killed ? 'kill' : (res.damage ? 'hit' : 'info'),
+    title: name + (!hit ? ' · промах' : killed ? ' · цель уничтожена' : ''),
+    attacker: attacker ? cbUnitPic(attacker, 'mine') : null,
+    target: cbTargetPic(pick, u),
+    damage: res.damage || 0,
+    hpLeft: killed ? 0 : Math.max(0, before - (res.damage || 0)),
+    hpMax: res.damage || killed ? max : 0,
+    lines: res.note ? [{ text: res.note, cls: 'muted' }] : []
+  });
+  // Урон способности сервер называет до укрытия: точный остаток
+  // подставим, когда придёт свежая карта
+  if (hit && !killed && res.damage) cbExpectHp(serial, pick.target_id, before, max, 'dmg');
+}
+
+// Удар по площади: залп артиллерии, граната, дар героя по клетке
+function cbReportArea(name, attacker, res) {
+  cbLastOwnAction = Date.now();
+  var chips = [];
+  if (res.hits !== undefined && res.hits !== null) chips.push({ text: 'попаданий ' + res.hits, cls: res.hits ? 'good' : '' });
+  if (res.misses) chips.push({ text: 'мимо ' + res.misses });
+  // Число убитых приходит не всегда: дар героя отвечает только «да/нет»
+  if (typeof res.killed === 'number' && res.killed > 0) chips.push({ text: 'уничтожено ' + res.killed, cls: 'good' });
+  else if (res.killed === true) chips.push({ text: 'есть убитые', cls: 'good' });
+  if (res.own_losses) chips.push({ text: 'свои потери ' + res.own_losses, cls: 'bad' });
+  if (res.damage) chips.push({ text: 'урон ' + res.damage });
+
+  cbReport({
+    kind: 'area',
+    title: name,
+    attacker: attacker ? cbUnitPic(attacker, 'mine') : null,
+    chips: chips,
+    lines: res.note ? [{ text: res.note, cls: 'muted' }] : []
+  });
+}
+
+// ---------- Разведданные о чужом бойце ----------
+
+function cbUnitSide(u) {
+  if (u.owner_user_id && u.owner_user_id === currentUserId) return 'mine';
+  if (myFaction && u.faction === myFaction) return 'ally';
+  return 'enemy';
+}
+
+function cbHullText(t) {
+  if (t.hull_class === 'air') return 'Авиация';
+  if (t.hull_class === 'artillery') return 'Артиллерия';
+  if (t.is_vehicle) return t.carry_slots > 0 ? 'Техника · транспорт' : 'Техника';
+  return 'Пехота';
+}
+
+function cbLoadOwnerName(id, done) {
+  if (!id) return;
+  if (cbOwnerNames[id] !== undefined) return;
+  if (cbOwnerAsked[id]) return;
+  cbOwnerAsked[id] = true;
+  supabase.from('profiles').select('id, nickname').eq('id', id).maybeSingle().then(function(r) {
+    cbOwnerNames[id] = (!r.error && r.data && r.data.nickname) ? r.data.nickname : null;
+    if (done) done();
+  });
+}
+
+function showUnitIntel(unit, keepView) {
+  var bar = document.getElementById('pickup-bar');
+  if (!bar) return;
+
+  var t = unitTypeById[unit.unit_type] || {};
+  var side = cbUnitSide(unit);
+  var isNpc = !unit.owner_user_id;
+  var isHero = !!unit.hero_id;
+  var max = (t.max_hp || unit.hp) + (unit.bonus_hp || 0);
+  var hpPct = max ? Math.max(0, Math.min(100, unit.hp / max * 100)) : 100;
+  var title = isHero && unit.hero_name ? unit.hero_name : (t.name || 'Неизвестный боец');
+
+  var sideText = side === 'ally' ? 'Союзник' : 'Противник';
+  if (isNpc) sideText = unit.faction === 'marauder' ? 'Банда мародёров' : (side === 'ally' ? 'Ополчение · союзник' : 'Ополчение противника');
+
+  var role = isHero ? (t.name || 'Одарённый') : cbHullText(t);
+  if ((t.width_cells || 1) > 1 || (t.height_cells || 1) > 1) role += ' · ' + (t.width_cells || 1) + '×' + (t.height_cells || 1);
+
+  // Что видно со стороны: укрытие, маскировка, чужая воля, раскрытая позиция
+  var now = gbServerNow();
+  var marks = [];
+  var sh = unitShelter(unit);
+  if (sh && sh.cover) marks.push({ text: (sh.name === 'bunker' ? 'В бункере' : 'В окопе') + ' · урон по нему −' + sh.cover + '%', cls: 'cover' });
+  if (sh && sh.camo) marks.push({ text: 'Под маскировкой', cls: 'camo' });
+  if (unit.control_until && new Date(unit.control_until).getTime() > now) {
+    marks.push({ text: 'Подчинён чужой воле · ещё ' +
+      formatLeft(Math.max(0, Math.round((new Date(unit.control_until).getTime() - now) / 1000))), cls: 'mind' });
+  }
+  if (unit.revealed_until && new Date(unit.revealed_until).getTime() > now) {
+    marks.push({ text: 'Выдал позицию выстрелом', cls: 'reveal' });
+  }
+  if (unit.hp < max * 0.35) marks.push({ text: 'Тяжело ранен', cls: 'wound' });
+
+  var range = t.weapon_range >= GRID_SIZE ? 'вся карта' : (t.weapon_range || 0);
+  var stats = [
+    ['Урон', t.damage || 0, '◎'],
+    ['Дальность', range, '➶'],
+    ['Обзор', t.vision_range || 0, '◈'],
+    ['Ход', t.move_range || 0, '⇢'],
+    ['Точность', (t.accuracy || 0) + '%', '⌖'],
+    ['Уклонение', (t.evasion || 0) + '%', '↯']
+  ];
+
+  // Ник командира показываем, когда он известен; пока грузится — строки нет
+  var owner = '';
+  var nick = isNpc ? null : cbOwnerNames[unit.owner_user_id];
+  if (nick) owner = '<div class="ui-owner">Командир: <b>' + escHtml(nick) + '</b></div>';
+
+  bar.removeAttribute('data-struct');
+  bar.setAttribute('data-side', side);
+  bar.setAttribute('data-intel', unit.id);
+  bar.innerHTML =
+    '<div class="gu-top">' +
+      '<div class="gu-portrait ui-portrait side-' + side + (isHero ? ' hero' : '') + (t.is_vehicle ? ' veh' : '') + '">' +
+        ((unit.portrait || t.image) ? '<img src="../' + escHtml(unit.portrait || t.image) + '" alt="">' : '') +
+        '<span class="ui-tag">' + (side === 'ally' ? 'СВОЙ' : 'ВРАГ') + '</span>' +
+      '</div>' +
+      '<div class="gu-stats">' +
+        '<div class="gu-name">' + escHtml(title) + '</div>' +
+        '<div class="gu-role"><b class="struct-side side-' + side + '">' + sideText + '</b> · ' +
+          escHtml(role) + ' · ' + unit.x + ':' + unit.y + '</div>' +
+        '<div class="gu-hp ui-hp">' +
+          '<span class="gu-hp-num">' + unit.hp + ' / ' + max + '</span>' +
+          '<div class="gu-hp-track"><i style="width:' + hpPct.toFixed(1) + '%"></i></div>' +
+        '</div>' +
+        owner +
+      '</div>' +
+      '<button class="gu-close" id="gu-close">✕</button>' +
+    '</div>' +
+    (marks.length
+      ? '<div class="ui-marks">' + marks.map(function(m) {
+          return '<span class="ui-mark ' + m.cls + '">' + escHtml(m.text) + '</span>';
+        }).join('') + '</div>'
+      : '') +
+    '<div class="gu-panel ui-panel">' +
+      '<div class="ui-label">Паспорт бойца</div>' +
+      '<div class="ui-grid">' + stats.map(function(s) {
+        return '<div class="ui-stat"><i>' + s[2] + '</i><b>' + s[1] + '</b><span>' + s[0] + '</span></div>';
+      }).join('') + '</div>' +
+      (t.description ? '<div class="gu-desc ui-desc">' + escHtml(t.description) + '</div>' : '') +
+      '<div class="ui-hidden">' +
+        '<span class="ui-lock">⛒</span>' +
+        '<span>' + (side === 'ally'
+          ? 'Снаряжение и способности союзника видит только его командир'
+          : 'Способности, снаряжение и улучшения противника неизвестны. Характеристики — заводские.') +
+        '</span>' +
+      '</div>' +
+    '</div>';
+
+  document.getElementById('gu-close').addEventListener('click', function() {
+    selectedUnit = null;
+    hidePickup();
+    redrawScene();
+  });
+
+  bar.style.visibility = 'visible';
+  setBottomInset(insetFor(bar));
+  if (!keepView) focusCell(unit.x, unit.y);
+
+  // Ник командира подтягиваем один раз и дорисовываем, если карточка ещё открыта
+  if (!isNpc && cbOwnerNames[unit.owner_user_id] === undefined) {
+    cbLoadOwnerName(unit.owner_user_id, function() {
+      if (selectedUnit && selectedUnit.id === unit.id &&
+          bar.getAttribute('data-intel') === unit.id) showUnitIntel(selectedUnit, true);
+    });
+  }
+}
+
+// Чужой боец сменил прочность или ушёл — карточка не должна врать
+function cbRefreshIntel() {
+  var bar = document.getElementById('pickup-bar');
+  if (!bar || !selectedUnit || bar.style.visibility === 'hidden') return;
+  var id = bar.getAttribute('data-intel');
+  if (!id || id !== selectedUnit.id) return;
+
+  var fresh = unitsOnMap.filter(function(u) { return u.id === id; })[0];
+  if (!fresh || fresh.x === null || fresh.x === undefined) {
+    // Пропал из обзора, погиб или сел в транспорт
+    selectedUnit = null;
+    hidePickup();
+    redrawScene();
+    return;
+  }
+  selectedUnit = fresh;
+  // Подчинение кончилось — боец снова наш, разведка ему не нужна
+  if (fresh.owner_user_id && fresh.owner_user_id === currentUserId) {
+    offerPickup(fresh);
+    return;
+  }
+  showUnitIntel(fresh, true);
 }
