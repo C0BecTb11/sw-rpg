@@ -132,6 +132,7 @@ function renderStationSlot() {
 }
 
 function onStationSlotTapped() {
+  if (typeof sxCloseIntel === 'function') sxCloseIntel();
   var panel = document.getElementById('station-panel');
   var titleEl = document.getElementById('station-panel-title');
   var textEl = document.getElementById('station-panel-text');
@@ -221,6 +222,7 @@ function loadStation() {
 var ZONE_HEIGHT = 14;
 var myZoneSide = null;
 var sysFaction = null;   // фракция планеты: по ней видно, трофейна ли станция
+var spaceMyFaction = null; // своя фракция: союзные корабли отличаем от вражеских
 
 function loadHyperspaceZone() {
   return supabase.auth.getSession().then(function(res) {
@@ -232,6 +234,7 @@ function loadHyperspaceZone() {
       supabase.from('game_settings').select('key, value')
     ]).then(function(r) {
       var myFaction = (r[0].data && r[0].data.faction) || null;
+      spaceMyFaction = myFaction;
       sysFaction = (r[1].data && r[1].data.faction) || null;
       isDeepSpace = !!(r[1].data && r[1].data.is_deep_space);
 
@@ -362,6 +365,7 @@ function initBuildSwitcher() {
 
 function applyTransform() {
   grid.style.transform = 'translate(' + panX + 'px, ' + panY + 'px) scale(' + scale + ')';
+  if (typeof sxSyncScale === 'function') sxSyncScale();
 }
 
 // Не даёт утащить поле за пределы экрана: если поле крупнее вьюпорта —
@@ -377,6 +381,7 @@ function setBottomInset(px) {
   panY -= delta;
   clampPan();
   applyTransform();
+  if (typeof sxPlaceToast === 'function') sxPlaceToast();
 }
 
 // Доводит карту до клетки, центрируя её над панелью управления
@@ -638,18 +643,27 @@ function getShipImage(path) {
 }
 
 function loadShips() {
+  // Номер запроса: старый ответ не должен лечь поверх нового
+  var req = typeof sxShipsRequested === 'function' ? sxShipsRequested() : null;
   Promise.all([
     // Корабли в гиперпространстве на карте не показываем: они уже
     // покинули систему и физически здесь их нет
     supabase.from('ships').select('*').eq('system_id', systemId).eq('in_transit', false),
     supabase.from('ship_types').select('*')
   ]).then(function(r) {
-    shipsInSystem = (r[0].error || !r[0].data) ? [] : r[0].data;
-    shipTypeById = {};
-    (r[1].data || []).forEach(function(t) { shipTypeById[t.id] = t; });
+    if (req && typeof sxShipsFresh === 'function' && !sxShipsFresh(req)) return;
+    // Сбой запроса не стирает корабли с карты
+    if (r[0].error || !r[0].data) return;
+    var prevShips = shipsInSystem;
+    shipsInSystem = r[0].data;
+    if (!r[1].error && r[1].data && r[1].data.length) {
+      shipTypeById = {};
+      r[1].data.forEach(function(t) { shipTypeById[t.id] = t; });
+    }
     renderShips();
     loadShipOrders();
     if (typeof onShipsReloaded === 'function') onShipsReloaded();
+    if (typeof sxAfterShips === 'function') sxAfterShips(prevShips, req);
   });
 }
 
@@ -690,7 +704,13 @@ function renderShips() {
     el.style.cursor = 'pointer';
 
     var mine = ship.owner_user_id === currentUserId;
-    el.style.outline = '2px solid ' + (mine ? 'rgba(95,217,104,0.8)' : 'rgba(217,74,74,0.8)');
+    // Свои зелёные, союзники синие, враги красные — как на земле
+    var ally = !mine && spaceMyFaction && ship.faction === spaceMyFaction;
+    el.style.outline = '2px solid ' + (mine ? 'rgba(95,217,104,0.8)'
+      : ally ? 'rgba(74,144,217,0.85)' : 'rgba(217,74,74,0.8)');
+
+    // Открыт паспорт этого корабля — подсвечиваем его на карте
+    if (typeof sxIntelId !== 'undefined' && sxIntelId === ship.id) el.classList.add('ship-intel');
 
     // В режиме атаки достижимые цели обводим ярче остальных
     if (!mine && typeof scIsTargetable === 'function' && scIsTargetable(ship.id)) {
@@ -729,7 +749,17 @@ function renderShips() {
       }
 
       if (mine && typeof onOwnShipTapped === 'function') {
+        if (typeof sxCloseIntel === 'function') sxCloseIntel();
         onOwnShipTapped(ship, type);
+      } else if (typeof sxShowIntel === 'function') {
+        // Свой корабль ждёт приказа (ход, разворот, луч, вылет) — не сбиваем
+        // его чужой карточкой: тап по чужому кораблю тут промах мимо клетки
+        if (scShip && (scMode || scHangarMode)) {
+          if (typeof scFail === 'function') scFail('Сначала заверши или отмени приказ');
+          return;
+        }
+        // Повторный тап по тому же кораблю закрывает паспорт
+        if (sxIntelId === ship.id) sxCloseIntel(); else sxShowIntel(ship, type);
       } else {
         openShipInfo(ship, type);
       }
@@ -820,6 +850,7 @@ function closeShipInfo() {
 // ===== Верфь: заказ кораблей на станции =====
 
 function openShipyard() {
+  if (typeof sxCloseIntel === 'function') sxCloseIntel();
   var panel = document.getElementById('shipyard-panel');
   var list = document.getElementById('shipyard-list');
   list.innerHTML = '<div class="shipyard-empty">Загрузка...</div>';

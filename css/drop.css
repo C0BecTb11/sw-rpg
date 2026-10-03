@@ -2298,7 +2298,28 @@
   transition: opacity 0.18s ease, transform 0.22s ease;
   will-change: transform;
 }
-#cb-toast.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+#cb-toast.show { opacity: 1; transform: translateY(0); }
+
+/* Карточка не перехватывает касания: под ней может быть цель.
+   Закрыть её можно крестиком, остальное она пропускает к карте. */
+#cb-toast { padding-right: 34px; }
+.cb-x {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: none;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  color: #55606c;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  line-height: 1;
+  pointer-events: none;
+}
+#cb-toast.show .cb-x { pointer-events: auto; }
 
 #cb-toast.cb-hit      { border-left-color: #d9a940; }
 #cb-toast.cb-kill     { border-left-color: #d94a4a;

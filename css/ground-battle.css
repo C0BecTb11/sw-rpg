@@ -1244,3 +1244,49 @@ html, body {
 .logi-toggle.on { color: #cfd8dc; border-color: #4a90d9; }
 .logi-toggle.on i { background: #1f3a5c; }
 .logi-toggle.on i::after { left: 16px; background: #4a90d9; }
+
+/* Техника снята квадратом: карточка ложится снимком широкой полосой
+   сверху. Сам кадр виден целиком, края полосы закрывает его же
+   размытая копия — без чёрных полей и без обрезанных стволов. */
+.unit-card-media img.bg { display: none; }
+
+.unit-card.wide { flex-direction: column; gap: 10px; }
+
+.unit-card.wide .unit-card-media {
+  position: relative;
+  width: 100%;
+  height: 176px;
+}
+
+.unit-card.wide .unit-card-media img.bg {
+  display: block;
+  position: absolute;
+  top: -16px;
+  left: -16px;
+  width: calc(100% + 32px);
+  height: calc(100% + 32px);
+  object-fit: cover;
+  filter: blur(14px) brightness(0.5) saturate(0.85);
+}
+
+.unit-card.wide .unit-card-media img.fg {
+  position: relative;
+  width: auto;
+  max-width: 100%;
+  height: 100%;
+  margin: 0 auto;
+  object-fit: contain;
+}
+
+/* Края кадра растворяются в размытом фоне, без резкой ступеньки */
+.unit-card.wide .unit-card-media img.fg {
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 9%, #000 91%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 9%, #000 91%, transparent 100%);
+}
+
+/* Высокий снимок заполняет рамку целиком: при contain снизу оставалась
+   тёмная щель из-за рамки в 1px */
+.unit-card:not(.wide) .unit-card-media img.fg {
+  object-fit: cover;
+  object-position: top center;
+}

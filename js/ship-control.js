@@ -11,7 +11,7 @@ var scShip = null;         // выбранный корабль
 var scType = null;         // его тип
 var scMode = null;         // null | 'move' | 'rotate'
 var scTimeOffset = 0;      // серверное время минус локальное, мс
-var scSettings = { cooldown: 30, apMax: 2 };
+var scSettings = { cooldown: 30, apMax: 2, shieldRegenSec: 30 };
 var scTicker = null;
 var scRangeEl = null;
 var scJustSelected = false;
@@ -47,6 +47,7 @@ function scLoadSettings() {
     res.data.forEach(function(row) {
       if (row.key === 'ship_action_cooldown_seconds') scSettings.cooldown = parseInt(row.value, 10) || 30;
       if (row.key === 'ship_action_max') scSettings.apMax = parseInt(row.value, 10) || 2;
+      if (row.key === 'shield_regen_seconds') scSettings.shieldRegenSec = parseInt(row.value, 10) || 30;
     });
   });
 }
@@ -182,8 +183,9 @@ function scRenderHud() {
   var img = document.getElementById('sc-portrait-img');
   if (img && scType.image) img.src = '../' + scType.image;
 
-  var hpPct = Math.max(0, Math.min(100, (scShip.hp / scType.max_hp) * 100));
-  document.getElementById('sc-hp-num').textContent = scShip.hp + ' / ' + scType.max_hp;
+  var hpMaxOwn = (scType.max_hp || scShip.hp) + (scShip.bonus_hp || 0);
+  var hpPct = Math.max(0, Math.min(100, (scShip.hp / hpMaxOwn) * 100));
+  document.getElementById('sc-hp-num').textContent = scShip.hp + ' / ' + hpMaxOwn;
   document.getElementById('sc-hp-fill').style.width = hpPct + '%';
 
   document.getElementById('sc-props').innerHTML =
@@ -194,8 +196,10 @@ function scRenderHud() {
 
   scRenderTabs();
 
-  // Корпус и четыре сектора щитов
-  var maxShield = scType.max_shield || 0;
+  // Корпус и четыре сектора щитов. В базе лежит значение на момент
+  // последнего удара, а щит с тех пор подрос — считаем как сервер
+  var realSh = sxShields(scShip, scType);
+  var maxShield = realSh.max;
   var arcs = [
     { key: 'shield_fore', label: 'Нос' },
     { key: 'shield_starboard', label: 'Правый' },
@@ -206,15 +210,14 @@ function scRenderHud() {
   var html = '<div class="sc-bar sc-bar-hull">' +
     '<span>Корпус</span>' +
     '<div class="sc-track"><i style="width:' +
-      Math.max(0, Math.min(100, (scShip.hp / scType.max_hp) * 100)) + '%"></i></div>' +
+      Math.max(0, Math.min(100, (scShip.hp / hpMaxOwn) * 100)) + '%"></i></div>' +
     '<b>' + scShip.hp + '</b></div>';
 
   if (maxShield > 0) {
     html += '<div class="sc-arcs">';
     arcs.forEach(function(a) {
-      var v = scShip[a.key];
-      v = (v === null || v === undefined) ? 0 : v;
-      var pct = Math.max(0, Math.min(100, (v / maxShield) * 100));
+      var v = realSh[a.key];
+      var pct = Math.max(0, Math.min(100, (v / (a.key === 'shield_fore' ? realSh.maxFore : maxShield)) * 100));
       html += '<div class="sc-arc' + (v === 0 ? ' down' : '') + '">' +
         '<span>' + a.label + '</span>' +
         '<div class="sc-track sc-track-shield"><i style="width:' + pct + '%"></i></div>' +
@@ -697,11 +700,20 @@ function scRenderTractor(box) {
 
       b.addEventListener('click', function() {
         b.disabled = true;
+        var holder = scShip, holderType = scType;
         supabase.rpc('use_tractor', {
           p_ship_id: forShip, p_target_id: t.target_id
         }).then(function(res) {
           if (res.error) { scFail(res.error.message); b.disabled = false; return; }
           scFail('Захват держит ' + res.data + ' с');
+          var held = sxShipById(t.target_id);
+          sxReport({
+            kind: 'info', title: 'Луч захвата',
+            attacker: sxShipPic(holder, holderType, 'mine'),
+            target: { img: held && shipTypeById[held.ship_type] && shipTypeById[held.ship_type].image,
+                      side: held ? sxSide(held) : 'enemy', name: t.ship_name },
+            lines: [{ text: 'Цель удержана ' + res.data + ' с — с места не сдвинется' }]
+          });
           loadShips();
           scRenderTractor(box);
         });
@@ -1170,8 +1182,18 @@ function scLog(kind, title, details) {
 function scDoAttack(target, btn) {
   if (btn) btn.disabled = true;
 
+  // Стрелка запоминаем до запроса: к ответу выбор мог смениться.
+  // Отметку своего выстрела тоже ставим заранее — реалтайм приносит
+  // урон раньше ответа, и это не должно выглядеть как «нас атакуют».
+  var shooter = scShip, shooterType = scType;
+  // Цель как она есть перед выстрелом: к ответу реалтайм мог её уже убрать
+  var snap = sxShipById(target.target_id);
+  if (snap) snap = Object.assign({}, snap);
+  sxLastOwnAction = Date.now();
+  sxSkipDiff[target.target_id] = Date.now() + 4000;
+
   supabase.rpc('attack_ship', {
-    p_attacker_id: scShip.id, p_target_id: target.target_id
+    p_attacker_id: shooter.id, p_target_id: target.target_id
   }).then(function(res) {
     if (res.error) { scFail(res.error.message); if (btn) btn.disabled = false; return; }
 
@@ -1180,28 +1202,15 @@ function scDoAttack(target, btn) {
 
     if (!r) { loadShips(); return; }
 
-    var me = scType.name;
     var arc = SC_ARCS[r.arc] || '';
 
-    if (!r.hit) {
-      hint.textContent = 'Промах по ' + target.ship_name;
-      scLog('miss', 'Промах по ' + target.ship_name, 'шанс был ' + target.chance + '%');
-    } else if (r.destroyed) {
-      hint.textContent = target.ship_name + ' уничтожен';
-      scLog('kill', target.ship_name + ' уничтожен', me + ' · ' + arc + ' · −' + r.damage);
-    } else {
-      // Сколько дошло до корпуса — разница прочности до и после.
-      // Без этого не понять, пробил ты щит или он всё удержал.
-      var byHull = Math.max(0, target.hp - r.target_hp);
-
-      hint.textContent = 'Попадание ' + arc +
-        ' · щит ' + r.shield_left + ' · корпус ' + r.target_hp;
-
-      scLog(byHull > 0 ? 'hull' : 'shield',
-            me + ' → ' + target.ship_name + ' · ' + arc,
-            '−' + r.damage + (byHull > 0 ? ' (по корпусу ' + byHull + ')' : ' весь в щит') +
-            ' · щит ' + r.shield_left + ' · корпус ' + r.target_hp);
+    // Подробности — в карточке сводки; строка в панели остаётся короткой
+    if (hint) {
+      if (!r.hit) hint.textContent = 'Промах по ' + target.ship_name;
+      else if (r.destroyed) hint.textContent = target.ship_name + ' уничтожен';
+      else hint.textContent = 'Попадание ' + arc + ' · щит ' + r.shield_left + ' · корпус ' + r.target_hp;
     }
+    sxReportShot(shooter, shooterType, target, r, snap);
 
     loadShips();
     // Список целей мог измениться: кто-то погиб, кто-то вышел из радиуса
@@ -1235,6 +1244,9 @@ function scInitFieldTap() {
 
   viewport.addEventListener('click', function(e) {
     if (moved) return;
+
+    // Тап в пустоту закрывает паспорт чужого корабля
+    if (!scMode && !scHangarMode && sxIntelId) { sxCloseIntel(); return; }
 
     if (scHangarMode === 'launch' && scHangarPick) {
       var rect0 = viewport.getBoundingClientRect();
@@ -1270,3 +1282,527 @@ document.addEventListener('DOMContentLoaded', function() {
     }, 1000);
   });
 });
+
+// ===== Боевые сводки и разведданные в космосе =====
+// То же, что на земле: над целью всплывает урон или «промах», внизу на
+// несколько секунд встаёт карточка с портретами, уроном и остатком
+// корпуса. У кораблей урон делится на щит и корпус — сводка показывает
+// оба. Тап по чужому кораблю открывает разведданные: паспорт корабля,
+// корпус и щиты по секторам. Улучшения, луч захвата и прочие системы
+// противника не показываются.
+
+var sxToastEl = null;
+var sxToastTimer = null;
+var sxLastOwnAction = 0;
+var sxSkipDiff = {};        // id корабля -> до какого времени не всплывать по разнице (сводка уже показала)
+var sxOwnerNames = {};
+var sxOwnerAsked = {};
+var sxIntelId = null;       // чей паспорт открыт
+var sxIntelEl = null;
+var sxRangeEls = [];
+var sxShipsSeq = 0;
+var sxShipsApplied = 0;
+
+var SX_ARCS = [
+  { key: 'shield_fore', label: 'Нос' },
+  { key: 'shield_starboard', label: 'Правый борт' },
+  { key: 'shield_port', label: 'Левый борт' },
+  { key: 'shield_aft', label: 'Корма' }
+];
+
+function sxEsc(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function sxShipById(id) {
+  for (var i = 0; i < shipsInSystem.length; i++) if (shipsInSystem[i].id === id) return shipsInSystem[i];
+  return null;
+}
+
+function sxMaxHp(ship, type) {
+  return ((type && type.max_hp) || (ship && ship.hp) || 0) + ((ship && ship.bonus_hp) || 0);
+}
+
+// Щит, каким его видит сервер (ship_shields): записанное значение плюс
+// подзарядка с последнего удара, не выше предела. В строке базы лежит
+// значение на момент удара — по нему щит выглядел бы пробитым, когда
+// он давно восстановился.
+function sxShields(ship, type, atMs) {
+  var max = ((type && type.max_shield) || 0) + ((ship && ship.bonus_shield) || 0);
+  var maxFore = max + ((ship && ship.bonus_fore) || 0);
+  var regen = 0;
+  if (ship && ship.shields_updated_at && type && type.shield_regen) {
+    var at = atMs || scServerNow();
+    var step = (scSettings.shieldRegenSec || 30) * 1000;
+    regen = Math.max(0, Math.floor((at - new Date(ship.shields_updated_at).getTime()) / step)) * type.shield_regen;
+  }
+  var res = { max: max, maxFore: maxFore };
+  SX_ARCS.forEach(function(a) {
+    var cap = a.key === 'shield_fore' ? maxFore : max;
+    res[a.key] = Math.max(0, Math.min(cap, (Number(ship && ship[a.key]) || 0) + regen));
+  });
+  return res;
+}
+
+function sxSide(ship) {
+  if (ship.owner_user_id && ship.owner_user_id === currentUserId) return 'mine';
+  if (typeof spaceMyFaction !== 'undefined' && spaceMyFaction && ship.faction === spaceMyFaction) return 'ally';
+  return 'enemy';
+}
+
+function sxRole(type) {
+  if (!type) return 'Корабль';
+  if (type.is_fighter) return type.hull_class === 'bomber' ? 'Бомбардировщик' : 'Истребитель';
+  return type.hull_class === 'corvette' ? 'Корвет' : 'Крупный корабль';
+}
+
+// ---------- Порядок ответов и разница между загрузками ----------
+
+// Вызывается из loadShips до запроса: номер и время запроса
+function sxShipsRequested() {
+  return { seq: ++sxShipsSeq, at: Date.now() };
+}
+
+// Ответ свежее показанного? Старый поверх нового откатил бы корабли назад
+function sxShipsFresh(req) {
+  if (!req || req.seq <= sxShipsApplied) return false;
+  sxShipsApplied = req.seq;
+  return true;
+}
+
+var sxPrevShipsAt = 0;       // серверное время, на которое считан прошлый список
+
+function sxAfterShips(prev, req) {
+  var at = scServerNow();
+  sxDiffShips(prev, shipsInSystem, sxPrevShipsAt || at, at);
+  sxPrevShipsAt = at;
+  sxRefreshIntel();
+}
+
+// Потеря щита — по секторам: каждый сектор сравниваем с самим собой,
+// посчитав подзарядку на момент каждого снимка. Сумма не годится:
+// при ударе сервер записывает подзарядку во все секторы сразу, и сумма
+// растёт, хотя один сектор просел.
+function sxDiffShips(prev, next, prevAt, nowAt) {
+  if (!prev || !prev.length) return;
+  var before = {};
+  prev.forEach(function(s) { before[s.id] = s; });
+  var now = Date.now();
+
+  var hurt = [];
+  next.forEach(function(s) {
+    var p = before[s.id];
+    if (!p) return;
+    var t = shipTypeById[s.ship_type];
+    var dHull = (s.hp || 0) - (p.hp || 0);
+    var a0 = sxShields(p, t, prevAt), a1 = sxShields(s, t, nowAt);
+    var dShield = 0;
+    SX_ARCS.forEach(function(a) { dShield -= Math.max(0, a0[a.key] - a1[a.key]); });
+    if (!dHull && !dShield) return;
+
+    if (!(sxSkipDiff[s.id] && sxSkipDiff[s.id] > now)) {
+      var both = dShield < 0 && dHull;
+      if (dShield < 0) sxFloatOnShip(s, '⛨ −' + (-dShield), 'shield', 0, both ? -0.9 : 0);
+      if (dHull) sxFloatOnShip(s, dHull < 0 ? '−' + (-dHull) : '+' + dHull, dHull < 0 ? 'dmg' : 'heal',
+                               both ? 160 : 0, both ? 0.9 : 0);
+    }
+    if ((dHull < 0 || dShield < 0) && s.owner_user_id === currentUserId) {
+      hurt.push({ s: s, hull: Math.max(0, -dHull), shield: Math.max(0, -dShield) });
+    }
+  });
+
+  // Свои выстрелы в космосе своих не задевают, поэтому по нашим бьёт
+  // только противник. Если на экране свежая сводка своего выстрела,
+  // тревогу показываем следом, а не поверх неё.
+  if (!hurt.length) return;
+  var wait = 1600 - (Date.now() - sxToastShownAt);
+  if (wait > 0) setTimeout(function() { sxReportIncoming(hurt); }, wait);
+  else sxReportIncoming(hurt);
+}
+
+// ---------- Всплывающие цифры ----------
+
+function sxFloat(cellX, cellY, wCells, text, kind, delay, shift) {
+  if (typeof grid === 'undefined' || !grid) return;
+  var pos = document.createElement('div');
+  pos.className = 'fx-pos';
+  // shift — сдвиг в долях клетки, чтобы щит и корпус не слипались
+  pos.style.left = ((cellX + (wCells || 1) / 2 + (shift || 0)) * CELL_PX) + 'px';
+  pos.style.top = (cellY * CELL_PX) + 'px';
+  var txt = document.createElement('div');
+  txt.className = 'fx-txt fx-' + kind;
+  txt.textContent = text;
+  if (delay) txt.style.animationDelay = delay + 'ms';
+  pos.appendChild(txt);
+  grid.appendChild(pos);
+  setTimeout(function() { if (pos.parentNode) pos.parentNode.removeChild(pos); }, 1700 + (delay || 0));
+}
+
+function sxFloatOnShip(ship, text, kind, delay, shift) {
+  if (!ship) return;
+  var t = shipTypeById[ship.ship_type];
+  var box = t ? shipBoxCells(t, ship.facing || 0) : { w: 1, h: 1 };
+  sxFloat(ship.x, ship.y, box.w, text, kind, delay, shift);
+}
+
+// Масштаб подписей обратный масштабу поля — на любом зуме одного размера
+function sxSyncScale() {
+  if (typeof grid !== 'undefined' && grid) grid.style.setProperty('--fx-inv', (1 / (scale || 1)).toFixed(4));
+}
+
+// ---------- Карточка сводки ----------
+
+function sxEnsureToast() {
+  if (sxToastEl && sxToastEl.parentNode) return sxToastEl;
+  sxToastEl = document.createElement('div');
+  sxToastEl.id = 'cb-toast';
+  // Сама карточка касания пропускает — под ней может быть цель.
+  // Закрывает её только крестик.
+  sxToastEl.addEventListener('click', function(e) {
+    if (e.target && e.target.className === 'cb-x') sxHideToast();
+  });
+  document.body.appendChild(sxToastEl);
+  return sxToastEl;
+}
+
+function sxPlaceToast() {
+  if (!sxToastEl) return;
+  sxToastEl.style.bottom = uiBottomInset > 0 ? (uiBottomInset + 4) + 'px' : '';
+}
+
+function sxHideToast() {
+  if (sxToastTimer) { clearTimeout(sxToastTimer); sxToastTimer = null; }
+  if (sxToastEl) sxToastEl.classList.remove('show');
+}
+
+function sxPic(p) {
+  if (!p) return '';
+  return '<div class="cb-pic ship side-' + (p.side || 'enemy') + '">' +
+    (p.img ? '<img src="../' + sxEsc(p.img) + '" alt="">' : '') + '</div>';
+}
+
+function sxShipPic(ship, type, side) {
+  return { img: type && type.image, side: side || (ship ? sxSide(ship) : 'enemy'),
+           name: (type && type.name) || 'Корабль' };
+}
+
+var sxToastShownAt = 0;
+
+function sxReport(o) {
+  var el = sxEnsureToast();
+  sxToastShownAt = Date.now();
+  var kind = o.kind || 'hit';
+  var titles = { hit: 'Попадание', miss: 'Промах', kill: 'Корабль уничтожен',
+                 incoming: 'Под огнём', info: 'Сводка', shield: 'Удар в щит' };
+  var title = o.title || titles[kind] || 'Сводка';
+
+  var pics = (o.attacker || o.target)
+    ? '<div class="cb-pics">' + sxPic(o.attacker) +
+        (o.attacker && o.target ? '<span class="cb-arrow">➜</span>' : '') + sxPic(o.target) + '</div>'
+    : '';
+
+  var who = o.attacker && o.target
+    ? sxEsc(o.attacker.name) + ' <i>→</i> ' + sxEsc(o.target.name)
+    : o.target ? sxEsc(o.target.name) : o.attacker ? sxEsc(o.attacker.name) : '';
+
+  var hp = '';
+  if (o.hpMax) {
+    var left = Math.max(0, Math.min(o.hpMax, o.hpLeft || 0));
+    var lost = Math.max(0, Math.min(o.hpMax - left, o.hullLost || 0));
+    var lPct = left / o.hpMax * 100, xPct = lost / o.hpMax * 100;
+    hp = '<div class="cb-hp">' +
+      '<span class="cb-num">' + (kind === 'miss' ? '—' : '−' + (o.damage || 0)) + '</span>' +
+      '<div class="cb-track"><i class="left" style="width:' + lPct.toFixed(1) + '%"></i>' +
+        (xPct > 0 ? '<i class="lost" style="left:' + lPct.toFixed(1) + '%;width:' + xPct.toFixed(1) + '%"></i>' : '') +
+      '</div>' +
+      '<span class="cb-left">' + left + ' / ' + o.hpMax + '</span>' +
+    '</div>';
+  }
+
+  var chips = (o.chips || []).filter(Boolean).map(function(c) {
+    return '<span class="cb-chip' + (c.cls ? ' ' + c.cls : '') + '">' + sxEsc(c.text) + '</span>';
+  }).join('');
+  var lines = (o.lines || []).filter(Boolean).map(function(l) {
+    return '<div class="cb-line' + (l.cls ? ' ' + l.cls : '') + '">' + sxEsc(l.text) + '</div>';
+  }).join('');
+
+  el.className = 'cb-' + kind;
+  el.innerHTML = '<button class="cb-x" aria-label="Закрыть">✕</button>' + pics +
+    '<div class="cb-body">' +
+      '<div class="cb-head"><b>' + sxEsc(title) + '</b>' +
+        (o.chance !== null && o.chance !== undefined ? '<span class="cb-chance">шанс ' + o.chance + '%</span>' : '') +
+      '</div>' +
+      (who ? '<div class="cb-who">' + who + '</div>' : '') +
+      hp +
+      (chips ? '<div class="cb-chips">' + chips + '</div>' : '') +
+      lines +
+    '</div>';
+
+  sxPlaceToast();
+  el.classList.remove('show');
+  void el.offsetWidth;
+  el.classList.add('show');
+  if (sxToastTimer) clearTimeout(sxToastTimer);
+  sxToastTimer = setTimeout(sxHideToast, kind === 'miss' ? 3200 : 4800);
+}
+
+// Выстрел корабля. Сервер отвечает: сектор, весь урон, остаток щита
+// сектора и корпуса. Сколько ушло в корпус — разница прочности до и после.
+function sxReportShot(attacker, aType, target, r, snap) {
+  sxLastOwnAction = Date.now();
+  var ts = snap || sxShipById(target.target_id);
+  var tt = ts ? shipTypeById[ts.ship_type] : null;
+  var before = ts ? ts.hp : ((target.hp !== null && target.hp !== undefined) ? target.hp : 0);
+  var max = ts ? sxMaxHp(ts, tt) : (target.max_hp || 0);
+  var arc = SC_ARCS[r.arc] || '';
+  var where = ts || { x: target.x, y: target.y, ship_type: null };
+
+  if (!r.hit) {
+    sxFloatOnShip(where, 'ПРОМАХ', 'miss');
+    sxReport({ kind: 'miss', chance: target.chance,
+      attacker: sxShipPic(attacker, aType, 'mine'),
+      target: { img: tt && tt.image, side: ts ? sxSide(ts) : 'enemy', name: target.ship_name },
+      hpLeft: before, hpMax: max });
+    return;
+  }
+
+  var hull = r.destroyed ? before : Math.max(0, before - (r.target_hp || 0));
+  // У сбитого урон сверх корпуса — это перебор, а не щит
+  var shield = r.destroyed ? 0 : Math.max(0, (r.damage || 0) - hull);
+  var both = shield > 0 && hull > 0;
+
+  if (shield > 0) sxFloatOnShip(where, '⛨ −' + shield, 'shield', 0, both ? -0.9 : 0);
+  if (hull > 0) sxFloatOnShip(where, '−' + hull, 'dmg', both ? 160 : 0, both ? 0.9 : 0);
+  if (r.destroyed) sxFloatOnShip(where, 'УНИЧТОЖЕН', 'kill', 380);
+
+  var chips = [];
+  if (arc) chips.push({ text: arc });
+  if (shield > 0) chips.push({ text: 'щит −' + shield, cls: 'shield' });
+  chips.push(hull > 0 ? { text: 'корпус −' + hull, cls: 'bad' } : { text: 'корпус цел' });
+  if (!r.destroyed && r.shield_left !== null && r.shield_left !== undefined) {
+    chips.push({ text: 'щит сектора ' + r.shield_left, cls: r.shield_left > 0 ? '' : 'bad' });
+  }
+
+  sxReport({
+    kind: r.destroyed ? 'kill' : (hull > 0 ? 'hit' : 'shield'),
+    title: r.destroyed ? 'Корабль уничтожен' : (hull > 0 ? 'Попадание' : 'Удар в щит'),
+    chance: target.chance,
+    attacker: sxShipPic(attacker, aType, 'mine'),
+    target: { img: tt && tt.image, side: ts ? sxSide(ts) : 'enemy', name: target.ship_name },
+    damage: r.damage || 0,
+    hullLost: hull,
+    hpLeft: r.destroyed ? 0 : r.target_hp,
+    hpMax: max,
+    chips: chips,
+    lines: (!r.destroyed && hull === 0) ? [{ text: 'Весь урон принял щит — ударь в другой сектор', cls: 'muted' }] : []
+  });
+}
+
+function sxReportIncoming(hurt) {
+  if (hurt.length === 1) {
+    var h = hurt[0], t = shipTypeById[h.s.ship_type];
+    var chips = [];
+    if (h.shield) chips.push({ text: 'щит −' + h.shield, cls: 'shield' });
+    if (h.hull) chips.push({ text: 'корпус −' + h.hull, cls: 'bad' });
+    sxReport({ kind: 'incoming', target: sxShipPic(h.s, t, 'mine'),
+      damage: h.hull + h.shield, hullLost: h.hull, hpLeft: h.s.hp, hpMax: sxMaxHp(h.s, t),
+      chips: chips, lines: [{ text: 'Позиция ' + h.s.x + ':' + h.s.y }] });
+    return;
+  }
+  var total = 0;
+  sxReport({
+    kind: 'incoming',
+    title: 'Под огнём · кораблей: ' + hurt.length,
+    chips: hurt.slice(0, 4).map(function(h) {
+      var t = shipTypeById[h.s.ship_type];
+      total += h.hull + h.shield;
+      return { text: ((t && t.name) || 'корабль') + ' −' + (h.hull + h.shield), cls: 'bad' };
+    })
+  });
+}
+
+// ---------- Разведданные о чужом корабле ----------
+
+function sxEnsureIntel() {
+  if (sxIntelEl && sxIntelEl.parentNode) return sxIntelEl;
+  sxIntelEl = document.createElement('div');
+  sxIntelEl.id = 'sx-intel';
+  sxIntelEl.style.display = 'none';
+  document.body.appendChild(sxIntelEl);
+  return sxIntelEl;
+}
+
+function sxLoadOwner(id, done) {
+  if (!id || sxOwnerNames[id] !== undefined || sxOwnerAsked[id]) return;
+  sxOwnerAsked[id] = true;
+  supabase.from('profiles').select('id, nickname').eq('id', id).maybeSingle().then(function(r) {
+    sxOwnerNames[id] = (!r.error && r.data && r.data.nickname) ? r.data.nickname : null;
+    if (done) done();
+  });
+}
+
+function sxShowIntel(ship, type, keepView) {
+  if (!ship || !type) return;
+  // Своя панель и разведка — одна шторка внизу: одна сменяет другую
+  if (scShip) scDeselect();
+
+  var el = sxEnsureIntel();
+  var side = sxSide(ship);
+  sxIntelId = ship.id;
+
+  var max = sxMaxHp(ship, type);
+  var hpPct = max ? Math.max(0, Math.min(100, ship.hp / max * 100)) : 100;
+  var box = shipBoxCells(type, ship.facing || 0);
+  var nick = sxOwnerNames[ship.owner_user_id];
+
+  // Щиты по секторам: где тонко, туда и бить. Предел берём паспортный —
+  // усиленный щит противника выдаст себя только тем, что держит дольше.
+  var shieldMax = type.max_shield || 0;
+  var sh = sxShields(ship, type);
+  var arcs = '';
+  if (shieldMax > 0) {
+    arcs = '<div class="ui-label">Щиты по секторам</div><div class="sx-arcs">' +
+      SX_ARCS.map(function(a) {
+        var v = sh[a.key];
+        var m = Math.max(shieldMax, v);
+        var pct = m ? Math.max(0, Math.min(100, v / m * 100)) : 0;
+        return '<div class="sx-arc' + (v <= 0 ? ' down' : '') + '">' +
+          '<span>' + a.label + '</span>' +
+          '<div class="sx-arc-track"><i style="width:' + pct.toFixed(1) + '%"></i></div>' +
+          '<b>' + v + '</b></div>';
+      }).join('') + '</div>';
+  }
+
+  var marks = [];
+  var now = scServerNow();
+  if (ship.tractor_until && new Date(ship.tractor_until).getTime() > now) {
+    marks.push({ text: 'Удержан лучом захвата', cls: 'mind' });
+  }
+  if (shieldMax > 0) {
+    var down = SX_ARCS.filter(function(a) { return sh[a.key] <= 0; }).length;
+    if (down) marks.push({ text: 'Щит пробит: секторов ' + down, cls: 'reveal' });
+  }
+  if (ship.hp < max * 0.35) marks.push({ text: 'Корпус на исходе', cls: 'wound' });
+
+  var range = type.weapon_range || 0;
+  var stats = [
+    ['Урон', type.damage || 0, '◎'],
+    ['Дальность', range, '➶'],
+    ['Обзор', type.vision_range || 0, '◈'],
+    ['Ход', type.move_range || 0, '⇢'],
+    ['Точность', (type.accuracy || 0) + '%', '⌖'],
+    ['Уклонение', (type.evasion || 0) + '%', '↯']
+  ];
+
+  var extra = [];
+  if (type.hangar_slots) extra.push('ангар ' + type.hangar_slots);
+  if (type.capacity) extra.push('трюм ' + type.capacity);
+
+  // Реалтайм дёргает перерисовку на каждое движение в системе. Если
+  // у этого корабля ничего не поменялось — не трогаем шторку, иначе
+  // прокрутка прыгает наверх посреди боя.
+  var sig = [ship.id, ship.hp, ship.x, ship.y, ship.facing, ship.tractor_until, nick,
+             SX_ARCS.map(function(a) { return sh[a.key]; }).join(',')].join('|');
+  if (keepView && el.style.display !== 'none' && el.getAttribute('data-sig') === sig) return;
+  var keepScroll = keepView ? el.scrollTop : 0;
+
+  el.setAttribute('data-sig', sig);
+  el.setAttribute('data-side', side);
+  el.innerHTML =
+    '<div class="sc-top">' +
+      '<div class="sc-portrait sx-portrait side-' + side + '">' +
+        (type.image ? '<img src="../' + sxEsc(type.image) + '" alt="">' : '') +
+        '<span class="ui-tag">' + (side === 'enemy' ? 'ВРАГ' : 'СВОЙ') + '</span>' +
+      '</div>' +
+      '<div class="sc-stats">' +
+        '<div class="sc-name sx-name">' + sxEsc(type.name) + '</div>' +
+        '<div class="sc-role"><b class="sx-side side-' + side + '">' + (side === 'enemy' ? 'Противник' : 'Союзник') + '</b> · ' +
+          sxEsc(sxRole(type)) + ' · ' + box.w + '×' + box.h + ' · ' + ship.x + ':' + ship.y + '</div>' +
+        '<div class="sc-hp sx-hp">' +
+          '<span class="sc-hp-num">' + ship.hp + ' / ' + max + '</span>' +
+          '<div class="sc-hp-track"><i style="width:' + hpPct.toFixed(1) + '%"></i></div>' +
+        '</div>' +
+        (nick ? '<div class="ui-owner">Командир: <b>' + sxEsc(nick) + '</b></div>' : '') +
+      '</div>' +
+      '<button class="sc-close" id="sx-close">✕</button>' +
+    '</div>' +
+    (marks.length ? '<div class="ui-marks">' + marks.map(function(m) {
+      return '<span class="ui-mark ' + m.cls + '">' + sxEsc(m.text) + '</span>';
+    }).join('') + '</div>' : '') +
+    '<div class="sx-panel">' +
+      arcs +
+      '<div class="ui-label">Паспорт корабля' + (extra.length ? ' · ' + extra.join(' · ') : '') + '</div>' +
+      '<div class="ui-grid">' + stats.map(function(s) {
+        return '<div class="ui-stat"><i>' + s[2] + '</i><b>' + s[1] + '</b><span>' + s[0] + '</span></div>';
+      }).join('') + '</div>' +
+      (type.description ? '<div class="sc-desc ui-desc">' + sxEsc(type.description) + '</div>' : '') +
+      '<div class="ui-hidden"><span class="ui-lock">⛒</span><span>' + (side === 'enemy'
+        ? 'Улучшения, луч захвата и прочие системы противника неизвестны. Характеристики — заводские.'
+        : 'Улучшения и системы союзника видит только его командир') + '</span></div>' +
+    '</div>';
+
+  document.getElementById('sx-close').addEventListener('click', sxCloseIntel);
+
+  el.style.display = 'block';
+  el.scrollTop = keepScroll;
+  sxDrawRanges(ship, type, side);
+  // Подсветку на карте ставим только при открытии: при обновлении
+  // корабли и так перерисованы загрузкой
+  if (!keepView && typeof renderShips === 'function') renderShips();
+
+  setTimeout(function() {
+    if (sxIntelId !== ship.id) return;
+    setBottomInset(el.offsetHeight + 12);
+    if (!keepView) focusCell(ship.x + box.w / 2, ship.y + box.h / 2);
+  }, 0);
+
+  if (ship.owner_user_id && sxOwnerNames[ship.owner_user_id] === undefined) {
+    sxLoadOwner(ship.owner_user_id, function() {
+      if (sxIntelId === ship.id) {
+        var fresh = sxShipById(ship.id);
+        if (fresh) sxShowIntel(fresh, shipTypeById[fresh.ship_type], true);
+      }
+    });
+  }
+}
+
+// Куда достаёт его орудие и что он видит — от корпуса, паспортные значения
+function sxDrawRanges(ship, type, side) {
+  sxClearRanges();
+  var box = shipBoxCells(type, ship.facing || 0);
+  [[type.weapon_range, side === 'enemy' ? 'fire' : 'ally'], [type.vision_range, 'vision']].forEach(function(r) {
+    if (!r[0]) return;
+    var el = document.createElement('div');
+    el.className = 'sx-range sx-range-' + r[1];
+    el.style.left = ((ship.x - r[0]) * CELL_PX) + 'px';
+    el.style.top = ((ship.y - r[0]) * CELL_PX) + 'px';
+    el.style.width = ((box.w + r[0] * 2) * CELL_PX) + 'px';
+    el.style.height = ((box.h + r[0] * 2) * CELL_PX) + 'px';
+    grid.insertBefore(el, grid.firstChild);
+    sxRangeEls.push(el);
+  });
+}
+
+function sxClearRanges() {
+  sxRangeEls.forEach(function(el) { if (el.parentNode) el.parentNode.removeChild(el); });
+  sxRangeEls = [];
+}
+
+function sxCloseIntel() {
+  if (!sxIntelId) return;
+  sxIntelId = null;
+  sxClearRanges();
+  if (sxIntelEl) { sxIntelEl.style.display = 'none'; sxIntelEl.removeAttribute('data-sig'); }
+  setBottomInset(0);
+  if (typeof renderShips === 'function') renderShips();
+}
+
+function sxRefreshIntel() {
+  if (!sxIntelId) return;
+  var fresh = sxShipById(sxIntelId);
+  var type = fresh ? shipTypeById[fresh.ship_type] : null;
+  if (!fresh || !type || fresh.owner_user_id === currentUserId) { sxCloseIntel(); return; }
+  sxShowIntel(fresh, type, true);
+}

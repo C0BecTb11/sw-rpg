@@ -3261,10 +3261,29 @@ function buildUnitCard(unit) {
 
   var media = document.createElement('div');
   media.className = 'unit-card-media';
+  // Пехота снята в полный рост (1:2) и встаёт в высокую рамку. Технику
+  // снимали квадратом: в той же рамке она висела крошкой между чёрными
+  // полосами. Для неё карточка раскладывается иначе — снимок широкой
+  // полосой сверху. Решает настоящая пропорция файла, а не тип юнита:
+  // артиллерия, например, снята как пехота, в рост.
+  if (unit.is_vehicle && unit.image) card.classList.add('wide');
   if (unit.image) {
+    // Широкий снимок показываем целиком, а пустые края полосы
+    // закрывает размытая копия того же кадра
+    var bg = document.createElement('img');
+    bg.className = 'bg';
+    bg.alt = '';
+    bg.src = '../' + unit.image;
+    media.appendChild(bg);
+
     var img = document.createElement('img');
-    img.src = '../' + unit.image;
+    img.className = 'fg';
     img.alt = '';
+    img.addEventListener('load', function() {
+      if (!img.naturalHeight) return;
+      card.classList.toggle('wide', img.naturalWidth / img.naturalHeight > 0.8);
+    });
+    img.src = '../' + unit.image;
     media.appendChild(img);
   }
   card.appendChild(media);
@@ -7090,7 +7109,7 @@ function structPlaceProblem(unit, st, x, y) {
     var ut = unitTypeById[u.unit_type] || {};
     if (!st.enterable) return 'место занято';
     if (u.faction !== myFaction) return 'место занято';
-    if (st.infantry_only && ut.is_vehicle) return 'здесь стоит техника — окоп и бункер только для пехоты';
+    if (st.infantry_only && ut.is_vehicle) return 'здесь стоит техника — окоп, бункер и сеть только для пехоты';
   }
   return null;
 }
@@ -7663,7 +7682,10 @@ function cbEnsureToast() {
   if (cbToastEl && cbToastEl.parentNode) return cbToastEl;
   cbToastEl = document.createElement('div');
   cbToastEl.id = 'cb-toast';
-  cbToastEl.addEventListener('click', cbHideToast);
+  // Карточка пропускает касания к карте под ней, закрывает её крестик
+  cbToastEl.addEventListener('click', function(e) {
+    if (e.target && e.target.className === 'cb-x') cbHideToast();
+  });
   document.body.appendChild(cbToastEl);
   return cbToastEl;
 }
@@ -7796,6 +7818,7 @@ function cbReport(opts) {
 
   el.className = 'cb-' + kind;
   el.innerHTML =
+    '<button class="cb-x" aria-label="Закрыть">✕</button>' +
     pics +
     '<div class="cb-body">' +
       '<div class="cb-head"><b>' + escHtml(title) + '</b>' +
