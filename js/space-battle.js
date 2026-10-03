@@ -24,6 +24,7 @@ var STATION_IMAGES = {
   cis: 'assets/stations/station-cis.png'
 };
 var stationSlot = null;    // {x, y} — позиция слота в клетках
+var stationLoaded = false; // первый ответ о станции пришёл
 var stationRecord = null;  // запись из space_stations, если станция построена
 var currentUserId = null;
 var isController = false;  // может ли текущий игрок строить в этой системе
@@ -213,6 +214,7 @@ function demolishStation() {
 function loadStation() {
   supabase.from('space_stations').select('*').eq('system_id', systemId).maybeSingle().then(function(res) {
     stationRecord = (!res.error && res.data) ? res.data : null;
+    stationLoaded = true;
     renderStationSlot();
   });
 }
@@ -619,6 +621,7 @@ function initSpaceBattle() {
       initBuildSwitcher();
       initBuildToggle(true);
       subscribeToSpaceChanges();
+      if (typeof sxDeepLink === 'function') sxDeepLink();
     });
   });
 }

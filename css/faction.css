@@ -946,3 +946,82 @@
 
 #pr-toast.show { opacity: 1; transform: translateY(0); }
 #pr-toast.bad { border-color: #d94a4a; }
+
+/* ===== Процессы: живые строки ===== */
+
+/* Сводка сверху: в работе и простой */
+.process-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-family: 'Courier New', monospace;
+}
+.process-sum-cell {
+  flex: 1;
+  padding: 10px 12px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 9px;
+}
+.process-sum-cell b { display: block; font-size: 20px; font-weight: normal; color: #cfd8dc; }
+.process-sum-cell span { font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: #55606c; }
+.process-sum-cell.busy b { color: #5fd968; }
+.process-summary.has-idle .process-sum-cell.idle { border-color: rgba(217,169,64,0.45); }
+.process-summary.has-idle .process-sum-cell.idle b { color: #d9a940; }
+/* Под сводкой первой планете хватит короткого отступа */
+#processes-list .process-summary + .process-planet { margin-top: 8px; }
+
+.process-sum-hint {
+  flex-basis: 100%;
+  font-size: 10px;
+  color: #8fa8c4;
+  padding: 0 2px;
+}
+
+.process-count.idle {
+  background: rgba(217,169,64,0.15);
+  color: #d9a940;
+}
+
+/* Строка — кнопка: тап переносит к зданию */
+.process-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  color: inherit;
+}
+button.process-row { cursor: pointer; }
+button.process-row:active { background: #16202e; }
+.process-body { flex: 1; min-width: 0; }
+
+.process-chev {
+  flex: none;
+  font-size: 20px;
+  line-height: 1;
+  color: #2a3644;
+}
+button.process-row:active .process-chev { color: #4a90d9; }
+
+/* Простой больше не прячется в тени: это повод действовать */
+.process-row.idle {
+  opacity: 1;
+  border-color: rgba(217,169,64,0.28);
+  border-left-color: #d9a940;
+  background: linear-gradient(90deg, rgba(217,169,64,0.08), #10151e 60%);
+}
+.process-row.idle .process-kind { color: #d9a940; }
+.process-row.idle .process-idle { color: #cfd8dc; font-size: 11px; }
+
+.process-go {
+  flex: none;
+  padding: 7px 11px;
+  background: #d9a940;
+  border-radius: 7px;
+  color: #0a0d14;
+  font-size: 11px;
+  font-weight: bold;
+  white-space: nowrap;
+}

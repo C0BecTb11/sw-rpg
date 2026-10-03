@@ -130,10 +130,23 @@ function makeFeedRow(e) {
 
   // У «на подходе» число — это секунды до прибытия, а не количество
   var isEta = e.type === 'enemy_approaching' || e.type === 'trade_approaching';
+  var fmt = FEED_AMOUNT[e.type];
   if (isEta && e.amount > 0) {
     line += (line ? ' · ' : '') + 'прибудет через ' + feedEta(e.amount);
+  } else if (fmt && e.amount > 0 && !(e.meta && e.meta.digest)) {
+    // Число с подписью: урон, лечение или кредиты — голая цифра непонятна
+    line += (line ? ' · ' : '') +
+      (fmt === 'dmg' ? '−' + e.amount : fmt === 'heal' ? '+' + e.amount : e.amount + ' кр.');
   } else if (e.amount && e.amount > 1 && !(e.meta && e.meta.digest)) {
     line += (line ? ' · ' : '') + e.amount;
+  }
+
+  // Стройка: когда закончится — по серверному времени
+  if (e.meta && e.meta.until && typeof svDayWord === 'function') {
+    var until = new Date(e.meta.until).getTime();
+    if (until > (typeof svNow === 'function' ? svNow() : Date.now())) {
+      line += (line ? ' · ' : '') + 'готово ' + svDayWord(until) + 'в ' + svFormatTime(until) + ' ' + svClock.label;
+    }
   }
 
   // Кто привёз: получатель должен видеть отправителя, а не только груз
@@ -159,13 +172,18 @@ function makeFeedRow(e) {
         (where ? ' · ' + where : '') + '</div>' +
     '</div>';
 
-  // Переносить карту есть смысл только туда, где есть что показать
-  if (e.jumpable && e.system_id && !e.is_deep_space) {
+  // «Показать» ведёт туда, где событие произошло: к бойцу на земле,
+  // к кораблю на орбите, к зданию или поселению. Что относится к планете
+  // целиком (выдача планеты, конвои, рынок) — по-прежнему на галактику.
+  var target = e.jumpable && e.system_id ? feedTarget(e) : null;
+  if (target || (e.jumpable && e.system_id && !e.is_deep_space)) {
     var go = document.createElement('button');
     go.className = 'feed-go';
     go.textContent = 'Показать';
     go.addEventListener('click', function() {
       closeEventsFeed();
+
+      if (target) { window.location.href = target; return; }
 
       var ok = (typeof focusGalaxySystem === 'function')
         && focusGalaxySystem(e.system_id);
@@ -214,6 +232,79 @@ function makeFeedRow(e) {
   }
 
   return row;
+}
+
+// ---------- Куда ведёт «Показать» ----------
+
+// Число в событии: урон, лечение, кредиты
+var FEED_AMOUNT = {
+  unit_hit: 'dmg', unit_damaged: 'dmg', artillery_hit: 'dmg', ship_hit: 'dmg',
+  return_fire: 'dmg', unit_healed: 'heal',
+  settlement_festival: 'cr', settlement_donation: 'cr'
+};
+
+function feedSet(list) {
+  var o = {};
+  list.forEach(function(k) { o[k] = true; });
+  return o;
+}
+
+// Орбита: корабли, станция, флот в системе
+var FEED_SPACE = feedSet(['ship_built', 'ship_lost', 'ship_destroyed', 'ship_hit', 'ship_missed',
+  'tractor_locked', 'station_built', 'station_started', 'station_demolished', 'refit_done',
+  'hangar_restocked', 'fleet_arrived', 'fleet_pushed_out', 'fleet_stranded', 'cargo_delivered',
+  'cargo_lost']);
+var FEED_STATION = feedSet(['station_built', 'station_started']);
+
+// Поселение: открываем его панель
+var FEED_SETTLEMENT = feedSet(['district_built', 'district_started', 'settlement_upgrade',
+  'settlement_level_up', 'settlement_hungry', 'settlement_failed', 'settlement_gift',
+  'settlement_donation', 'settlement_festival', 'settlement_income', 'capture_started',
+  'planet_captured', 'marauder_raid', 'marauder_loot']);
+
+// Земля без точного места — просто карта планеты
+var FEED_GROUND = feedSet(['unit_deployed', 'unit_loaded', 'unit_killed', 'unit_damaged',
+  'unit_missed', 'unit_hit', 'unit_healed', 'hero_died', 'hero_hired', 'hero_trained',
+  'hero_training', 'artillery_strike', 'artillery_hit', 'return_fire', 'turret_report',
+  'structure_built', 'structure_started', 'structure_lost', 'structure_destroyed',
+  'scout_arrived', 'scout_jammed', 'building_built', 'building_started', 'building_demolished',
+  'research_done', 'production_idle', 'mind_released', 'troops_pushed_out', 'militia_raised', 'ability_used', 'enemy_spotted',
+  'repair_done']);
+
+// Здание: по готовности сразу открываем его занятие (наём, исследования)
+var FEED_OPEN_SLOT = feedSet(['building_built', 'research_done', 'production_idle']);
+
+function feedTarget(e) {
+  var m = e.meta || {};
+  var sys = 'system=' + encodeURIComponent(e.system_id);
+  var has = function(v) { return v !== null && v !== undefined; };
+  var xy = has(m.x) && has(m.y) ? '&x=' + m.x + '&y=' + m.y : '';
+
+  // Сводка по нескольким планетам — одной карты у неё нет, остаётся галактика
+  if (m.digest && m.lines && m.lines.length > 1) return null;
+
+  var space = m.layer === 'space' || (!m.layer && FEED_SPACE[e.type]);
+  if (space) {
+    if (m.ship_id) return 'space-battle.html?' + sys + '&ship=' + encodeURIComponent(m.ship_id) + xy;
+    if (FEED_STATION[e.type]) return 'space-battle.html?' + sys + '&open=station';
+    return 'space-battle.html?' + sys + xy;
+  }
+
+  // В пустоте земли нет
+  if (e.is_deep_space) return null;
+
+  if (m.unit_id) return 'ground-battle.html?' + sys + '&unit=' + encodeURIComponent(m.unit_id) + xy;
+  if (xy) return 'ground-battle.html?' + sys + xy;
+  // Квартал тоже несёт slot, но это участок поселения, а не базы —
+  // поэтому поселение проверяем раньше построек
+  if (FEED_SETTLEMENT[e.type]) return 'ground-battle.html?' + sys + '&open=settlement';
+  if (has(m.slot)) {
+    return 'ground-battle.html?' + sys + '&slot=' + m.slot +
+      (FEED_OPEN_SLOT[e.type] ? '&open=slot' : '') +
+      (m.building_id ? '&bid=' + encodeURIComponent(m.building_id) : '');
+  }
+  if (FEED_GROUND[e.type]) return 'ground-battle.html?' + sys;
+  return null;
 }
 
 // Сводное событие: по строке на планету. Сервер складывает сюда всё

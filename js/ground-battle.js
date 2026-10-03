@@ -2686,6 +2686,8 @@ function constructBuilding(slotIndex, buildingTypeId) {
   });
 }
 
+var buildingsLoaded = false;   // первый ответ пришёл: переход из ленты ждёт здания
+
 function loadBuildings() {
   // Через функцию, а не прямым запросом: чужим она отдаёт completes_at пустым,
   // поэтому враг не видит, что и когда у тебя достраивается.
@@ -2700,6 +2702,7 @@ function loadBuildings() {
         buildingsBySlot[b.slot_index] = b;
       });
     }
+    buildingsLoaded = true;
     redrawScene();
     updateRedrawTimer();
   });
@@ -2899,6 +2902,7 @@ function initGroundBattle() {
       setInterval(loadCaptureState, 60000);
       setInterval(function() { if (captureState) renderCaptureBar(); }, 1000);
       loadDropCargo();
+      gbDeepLink();
 
       var dropBtn = document.getElementById('drop-btn');
       if (dropBtn) dropBtn.addEventListener('click', openDropPanel);
@@ -5694,10 +5698,17 @@ function stockRow(resourceId) {
   return null;
 }
 
+// Пока справочник не пришёл (или запрос сорвался), код ресурса не должен
+// всплывать латиницей — держим русские названия под рукой
+var RESOURCE_NAMES_RU = {
+  ore: 'Руда', gas: 'Тибанна', crystals: 'Кристаллы', food: 'Продовольствие',
+  durasteel: 'Дюрасталь', electronics: 'Электроника', cells: 'Топливные ячейки'
+};
+
 function resourceName(resourceId) {
   if (resourceNames[resourceId]) return resourceNames[resourceId];
   var r = stockRow(resourceId);
-  return r ? r.name : resourceId;
+  return r ? r.name : (RESOURCE_NAMES_RU[resourceId] || resourceId);
 }
 
 // Есть ли на планете это сырьё — основное или попутное
@@ -7479,6 +7490,8 @@ function openStructurePanel(s, keepView) {
 }
 
 // Строка состояния: стройка, ближайшая выдача или готовность турели
+var structPayTimer = null;
+
 function paintStructStatus(s) {
   var box = document.getElementById('struct-status');
   if (!box) return;
@@ -7496,9 +7509,26 @@ function paintStructStatus(s) {
   }
 
   var text = 'В строю';
-  if ((st.produces_per_day || st.credits_per_day) && s.last_tick_at && structSide(s) !== 'enemy') {
-    var next = new Date(s.last_tick_at).getTime() + structDaySeconds * 1000;
-    text = 'Следующая выдача через ' + formatLeft(Math.max(0, Math.ceil((next - now) / 1000)));
+  if ((st.produces_per_day || st.credits_per_day) && structSide(s) !== 'enemy') {
+    // Выдача у всех одна — в 04:00 по серверу. Заложенное в окне перед
+    // выдачей получает первую долю только через сутки.
+    if (systemFaction && s.faction && s.faction !== systemFaction) {
+      // Сервер платит только на планете своей фракции
+      text = 'Планета под чужим флагом — выдачи нет';
+    } else if (typeof svFirstPayoutFor === 'function' && svClock.ready) {
+      var started = s.created_at ? new Date(s.created_at).getTime() : 0;
+      var done = s.completes_at ? new Date(s.completes_at).getTime() : 0;
+      var next = svFirstPayoutFor(started, done);
+      text = 'Выдача ' + svDayWord(next) + 'в ' + svFormatTime(next) + ' ' + svClock.label +
+             ' · через ' + svLeftText((next - svNow()) / 1000);
+      // Отсчёт поминутный: обновляем строку, пока панель этой постройки открыта
+      clearTimeout(structPayTimer);
+      structPayTimer = setTimeout(function() {
+        if (selectedStructure === s && structPanelOpen()) paintStructStatus(s);
+      }, 30000);
+    } else {
+      text = 'Выдача — в 04:00 по серверу';
+    }
   } else if (st.kind === 'turret' && structSide(s) !== 'enemy') {
     text = s.spotted_at ? 'Цель в прицеле — огонь раз в ' + Math.round(st.cooldown_seconds / 60) + ' мин'
                         : 'Врагов в радиусе нет';
@@ -8161,4 +8191,106 @@ function cbRefreshIntel() {
     return;
   }
   showUnitIntel(fresh, true);
+}
+
+
+// ===== Переход по ссылке из ленты и процессов =====
+// ?system=…&x=…&y=…  — показать клетку
+// &unit=…            — выбрать бойца (свой — панель управления, чужой — разведка)
+// &slot=N&open=slot  — участок базы; open=slot открывает занятие здания
+// &open=settlement   — поселение и его панель
+// Параметры убираются из адреса, чтобы перезагрузка страницы не уводила
+// карту обратно к старому событию.
+
+function gbDeepLink() {
+  var q = new URLSearchParams(window.location.search);
+  var link = {
+    x: q.get('x') !== null ? parseInt(q.get('x'), 10) : null,
+    y: q.get('y') !== null ? parseInt(q.get('y'), 10) : null,
+    unit: q.get('unit'),
+    slot: q.get('slot') !== null ? parseInt(q.get('slot'), 10) : null,
+    bid: q.get('bid'),
+    open: q.get('open')
+  };
+  if (link.x === null && !link.unit && link.slot === null && !link.open) return;
+
+  try {
+    var keep = '?system=' + encodeURIComponent(systemId) + (isBuildMode() ? '&mode=build' : '');
+    window.history.replaceState(null, '', window.location.pathname + keep);
+  } catch (e) {}
+
+  // Ждём, пока карта получит войска, здания и поселение
+  var tries = 0;
+  var wait = setInterval(function() {
+    tries++;
+    var unitsReady = loadUnitsApplied > 0;
+    var slotsReady = link.slot === null || buildingsLoaded;
+    var stlReady = link.open !== 'settlement' || !!settlement;
+    if (!(unitsReady && slotsReady && stlReady) && tries < 50) return;
+    clearInterval(wait);
+    gbApplyLink(link);
+  }, 200);
+}
+
+function gbApplyLink(link) {
+
+  if (link.unit) {
+    var u = unitsOnMap.filter(function(x) { return x.id === link.unit; })[0];
+    if (u && u.x !== null && u.x !== undefined) {
+      var b = unitBox(u);
+      selectedStructure = null;
+      selectedUnit = u;
+      gbLinkZoom(); focusCell(u.x + b.w / 2 - 0.5, u.y + b.h / 2 - 0.5);
+      offerPickup(u);
+      gbPing(u.x, u.y, b.w, b.h);
+      redrawScene();
+      return;
+    }
+    // Боец ушёл, погиб или скрылся в тумане — показываем место события
+  }
+
+  if (link.open === 'settlement' && settlement) {
+    gbLinkZoom(); focusCell(settlement.x + settlement.size / 2 - 0.5, settlement.y + settlement.size / 2 - 0.5);
+    gbPing(settlement.x, settlement.y, settlement.size, settlement.size);
+    openSettlementPanel();
+    return;
+  }
+
+  if (link.slot !== null && buildSlots[link.slot - 1]) {
+    var sl = buildSlots[link.slot - 1];
+    gbLinkZoom(); focusCell(sl.x + SLOT_SIZE / 2 - 0.5, sl.y + SLOT_SIZE / 2 - 0.5);
+    gbPing(sl.x, sl.y, SLOT_SIZE, SLOT_SIZE);
+    // На месте снесённого здания могло встать другое — его не открываем
+    var bld = buildingsBySlot[link.slot];
+    if (link.open === 'slot' && bld && (!link.bid || bld.id === link.bid)) {
+      setTimeout(function() { onSlotTapped(link.slot); }, 350);
+    }
+    redrawScene();
+    return;
+  }
+
+  if (link.x !== null && link.y !== null && !isNaN(link.x) && !isNaN(link.y)) {
+    gbLinkZoom(); focusCell(link.x, link.y);
+    gbPing(link.x, link.y, 1, 1);
+    redrawScene();
+  }
+}
+
+// С обзора всей планеты переходим на рабочий масштаб — только когда
+// действительно есть что показать
+function gbLinkZoom() { if (scale < 0.9) scale = 1; }
+
+// Метка «здесь»: расходящиеся кольца поверх карты на несколько секунд
+function gbPing(x, y, w, h) {
+  var layer = cbEnsureFxLayer();
+  if (!layer) return;
+  var el = document.createElement('div');
+  el.className = 'fx-ping';
+  el.style.left = (x * CELL_PX) + 'px';
+  el.style.top = (y * CELL_PX) + 'px';
+  el.style.width = ((w || 1) * CELL_PX) + 'px';
+  el.style.height = ((h || 1) * CELL_PX) + 'px';
+  el.innerHTML = '<i></i><i></i>';
+  layer.appendChild(el);
+  setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, 4200);
 }

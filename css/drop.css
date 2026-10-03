@@ -2581,3 +2581,23 @@
 }
 .ui-lock { flex: none; font-size: 14px; color: #d94a4a; }
 #pickup-bar[data-side="ally"] .ui-lock { color: #4a90d9; }
+
+/* ===== Метка места из ленты и процессов ===== */
+.fx-ping {
+  position: absolute;
+  pointer-events: none;
+}
+.fx-ping i {
+  position: absolute;
+  inset: -6px;
+  border: 3px solid #d9a940;
+  border-radius: 8px;
+  opacity: 0;
+  animation: fx-ping 1.4s ease-out 3;
+}
+.fx-ping i + i { animation-delay: 0.45s; }
+
+@keyframes fx-ping {
+  0%   { opacity: 0.95; transform: scale(0.85); }
+  100% { opacity: 0; transform: scale(1.6); }
+}

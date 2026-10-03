@@ -1806,3 +1806,97 @@ function sxRefreshIntel() {
   if (!fresh || !type || fresh.owner_user_id === currentUserId) { sxCloseIntel(); return; }
   sxShowIntel(fresh, type, true);
 }
+
+
+// ---------- Переход по ссылке из ленты и процессов ----------
+// ?system=…&ship=… — выбрать корабль (свой — панель, чужой — паспорт)
+// &x=…&y=…         — показать точку
+// &open=shipyard   — верфь станции; open=station — панель станции
+
+function sxDeepLink() {
+  var q = new URLSearchParams(window.location.search);
+  var link = {
+    ship: q.get('ship'),
+    x: q.get('x') !== null ? parseInt(q.get('x'), 10) : null,
+    y: q.get('y') !== null ? parseInt(q.get('y'), 10) : null,
+    open: q.get('open')
+  };
+  if (!link.ship && link.x === null && !link.open) return;
+
+  try {
+    var keep = '?system=' + encodeURIComponent(systemId) +
+               (typeof isBuildMode === 'function' && isBuildMode() ? '&mode=build' : '');
+    window.history.replaceState(null, '', window.location.pathname + keep);
+  } catch (e) {}
+
+  var tries = 0;
+  var wait = setInterval(function() {
+    tries++;
+    var ready = sxShipsApplied > 0 && (typeof stationLoaded === 'undefined' || stationLoaded);
+    if (!ready && tries < 50) return;
+    clearInterval(wait);
+    sxApplyLink(link);
+  }, 200);
+}
+
+function sxApplyLink(link) {
+
+  if (link.ship) {
+    var s = sxShipById(link.ship);
+    var t = s ? shipTypeById[s.ship_type] : null;
+    if (s && t && s.x !== null && s.x !== undefined) {
+      var box = shipBoxCells(t, s.facing || 0);
+      if (s.owner_user_id === currentUserId) onOwnShipTapped(s, t);
+      else sxShowIntel(s, t);
+      // Центрируем, когда панель уже заняла низ экрана
+      setTimeout(function() {
+        sxLinkZoom(); focusCell(s.x + box.w / 2 - 0.5, s.y + box.h / 2 - 0.5);
+        sxPing(s.x, s.y, box.w, box.h);
+      }, 120);
+      return;
+    }
+  }
+
+  if (link.open === 'shipyard' || link.open === 'station') {
+    // Слота станции в системе нет — показывать нечего, остаёмся на обзоре
+    if (typeof stationSlot === 'undefined' || !stationSlot) return;
+    sxLinkZoom(); focusCell(stationSlot.x + STATION_SIZE / 2 - 0.5, stationSlot.y + STATION_SIZE / 2 - 0.5);
+    sxPing(stationSlot.x, stationSlot.y, STATION_SIZE, STATION_SIZE);
+    setTimeout(function() {
+      if (typeof onStationSlotTapped !== 'function') return;
+      // Панель станции сама решает, доступна ли верфь: стройка, трофей,
+      // чужой контроль. Если кнопка верфи видна — сразу в верфь,
+      // иначе остаётся панель с объяснением
+      onStationSlotTapped();
+      var yardBtn = document.getElementById('station-shipyard-btn');
+      if (link.open === 'shipyard' && yardBtn && yardBtn.style.display === 'block' &&
+          typeof openShipyard === 'function') {
+        if (typeof closeStationPanel === 'function') closeStationPanel();
+        openShipyard();
+      }
+    }, 350);
+    return;
+  }
+
+  if (link.x !== null && link.y !== null && !isNaN(link.x) && !isNaN(link.y)) {
+    sxLinkZoom(); focusCell(link.x, link.y);
+    sxPing(link.x, link.y, 1, 1);
+  }
+}
+
+// С обзора всей системы переходим на рабочий масштаб — только когда
+// действительно есть что показать
+function sxLinkZoom() { if (scale < 0.8) scale = 0.95; }
+
+function sxPing(x, y, w, h) {
+  if (typeof grid === 'undefined' || !grid) return;
+  var el = document.createElement('div');
+  el.className = 'fx-ping';
+  el.style.left = (x * CELL_PX) + 'px';
+  el.style.top = (y * CELL_PX) + 'px';
+  el.style.width = ((w || 1) * CELL_PX) + 'px';
+  el.style.height = ((h || 1) * CELL_PX) + 'px';
+  el.innerHTML = '<i></i><i></i>';
+  grid.appendChild(el);
+  setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, 4200);
+}
