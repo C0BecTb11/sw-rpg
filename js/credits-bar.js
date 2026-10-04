@@ -225,3 +225,28 @@ function initServerClock() {
 }
 
 document.addEventListener('DOMContentLoaded', initServerClock);
+
+// ===== Присутствие =====
+// Отметка «в сети» для окна фракции (profiles.last_seen_at). Раз в 2 минуты
+// и при возврате во вкладку; пока вкладка спрятана — ни одного запроса.
+// Сервер сам не пишет чаще раза в минуту.
+
+var presenceLastAt = 0;
+
+function touchPresence() {
+  if (typeof supabase === 'undefined' || document.hidden) return;
+  if (Date.now() - presenceLastAt < 60000) return;
+  presenceLastAt = Date.now();
+  supabase.rpc('touch_presence').then(function() {}, function() {});
+}
+
+function initPresence() {
+  if (typeof supabase === 'undefined') return;
+  touchPresence();
+  setInterval(touchPresence, 120000);
+  document.addEventListener('visibilitychange', function() {
+    if (!document.hidden) touchPresence();
+  });
+}
+
+document.addEventListener('DOMContentLoaded', initPresence);

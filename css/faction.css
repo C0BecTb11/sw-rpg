@@ -2,146 +2,1069 @@
    Держим тот же язык, что и в cargo/shipcargo: тёмная подложка,
    моноширинный шрифт, рамки #1c2530, акцент #4a90d9. */
 
-/* ---------- Окно фракции ---------- */
+/* ---------- Окно фракции ----------
+   Полноэкранная сводка, как «Процессы» и «Армия»: шапка прилипает,
+   всё остальное листается. Цвет фракции — через переменные на
+   #faction-screen-box (.fs-republic / .fs-cis), а не захардкоженный синий. */
 
 #faction-screen {
   position: fixed;
   inset: 0;
   z-index: 2200;
-  align-items: flex-end;
+  align-items: stretch;
   justify-content: center;
-  background: rgba(3,5,9,0.78);
+  background: rgba(3,5,9,0.86);
   -webkit-backdrop-filter: blur(2px);
   backdrop-filter: blur(2px);
+  font-family: 'Courier New', monospace;
 }
 
 #faction-screen-box {
+  --fc: #8fa8c4;
+  --fc-rgb: 143,168,196;
+  --fe: #55606c;
+  --fe-rgb: 85,96,108;
   position: relative;
   width: 100%;
-  max-width: 460px;
-  max-height: 86vh;
+  max-width: 520px;
+  height: 100%;
   overflow-y: auto;
+  overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  padding: 18px 18px calc(20px + env(safe-area-inset-bottom));
-  background: linear-gradient(180deg, #0d1119 0%, #080b11 100%);
-  border: 1px solid #1c2530;
-  border-bottom: none;
-  border-radius: 14px 14px 0 0;
-  box-shadow: 0 -8px 40px rgba(0,0,0,0.65);
-  animation: faction-rise 0.18s ease-out;
+  box-sizing: border-box;
+  background: linear-gradient(180deg, #0d1119 0px, #080b11 360px);
+  border-left: 1px solid #1c2530;
+  border-right: 1px solid #1c2530;
+  color: #cfd8dc;
+  animation: faction-rise 0.22s ease-out;
 }
+
+#faction-screen-box.fs-republic { --fc: #4a90d9; --fc-rgb: 74,144,217; --fe: #d94a4a; --fe-rgb: 217,74,74; }
+#faction-screen-box.fs-cis      { --fc: #d94a4a; --fc-rgb: 217,74,74; --fe: #4a90d9; --fe-rgb: 74,144,217; }
 
 @keyframes faction-rise {
   from { transform: translateY(14px); opacity: 0; }
   to   { transform: translateY(0);    opacity: 1; }
 }
 
+#faction-screen button { font-family: 'Courier New', monospace; -webkit-tap-highlight-color: transparent; }
+
+/* Шапка */
+#fs-top {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(13,17,25,0.94);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid #1c2530;
+}
+
+.fs-top-title {
+  flex: 1;
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--fc);
+}
+
+.fs-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #55606c;
+}
+
+.fs-live i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #2a3644;
+}
+
+.fs-live.ok i { background: #5fd968; animation: fs-blink 2.4s ease-in-out infinite; }
+.fs-live.loading i { background: #d9a940; animation: fs-blink 0.6s ease-in-out infinite; }
+.fs-live.stale { color: #d94a4a; }
+.fs-live.stale i { background: #d94a4a; }
+
+@keyframes fs-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
 #faction-screen-close {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  width: 26px;
-  height: 26px;
+  flex: none;
+  width: 34px;
+  height: 34px;
   background: none;
   border: 1px solid #2a3644;
-  border-radius: 6px;
+  border-radius: 7px;
   color: #8fa8c4;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1;
   cursor: pointer;
 }
 
-#faction-screen-name {
-  font-family: 'Courier New', monospace;
-  font-size: 15px;
-  letter-spacing: 3px;
-  text-transform: uppercase;
-  color: #4a90d9;
-  padding-right: 34px;
-  margin-bottom: 4px;
+#faction-screen-close:active { border-color: var(--fc); color: #cfd8dc; }
+
+/* Знамя фракции */
+#fs-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: 58px 1fr;
+  align-items: center;
+  gap: 12px 13px;
+  margin: 14px 14px 0;
+  padding: 15px 14px 13px;
+  border: 1px solid rgba(var(--fc-rgb), 0.3);
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(var(--fc-rgb), 0.16), transparent 62%),
+    linear-gradient(180deg, #10151e, #0b0f16);
+  overflow: hidden;
 }
 
-/* Тонкая линия под названием — граница блока управления, а не украшение */
-#faction-screen-name::after {
+/* Крупная эмблема-водяной знак справа: знамя читается издалека */
+#fs-hero::after {
   content: '';
-  display: block;
-  width: 42px;
-  height: 2px;
-  margin-top: 10px;
-  background: #4a90d9;
-  opacity: 0.55;
+  position: absolute;
+  right: -34px;
+  top: -26px;
+  width: 150px;
+  height: 150px;
+  background: center / contain no-repeat;
+  opacity: 0.07;
+  pointer-events: none;
 }
 
-.faction-section {
-  margin-top: 18px;
+.fs-republic #fs-hero::after { background-image: url('../assets/ui/faction-republic.png'); }
+.fs-cis #fs-hero::after      { background-image: url('../assets/ui/faction-cis.png'); }
+
+#fs-emblem {
+  position: relative;
+  z-index: 1;
+  width: 58px;
+  height: 58px;
+  box-sizing: border-box;
+  border: 1px solid rgba(var(--fc-rgb), 0.55);
+  border-radius: 50%;
+  background: #0a0d14 center / 34px no-repeat;
+  box-shadow: 0 0 18px rgba(var(--fc-rgb), 0.22), inset 0 0 12px rgba(var(--fc-rgb), 0.12);
+  animation: fs-glow 4s ease-in-out infinite;
 }
 
-.faction-section-title {
-  font-family: 'Courier New', monospace;
-  font-size: 10px;
-  letter-spacing: 2px;
+.fs-republic #fs-emblem { background-image: url('../assets/ui/faction-republic.png'); }
+.fs-cis #fs-emblem      { background-image: url('../assets/ui/faction-cis.png'); }
+
+@keyframes fs-glow {
+  0%, 100% { box-shadow: 0 0 14px rgba(var(--fc-rgb), 0.18), inset 0 0 12px rgba(var(--fc-rgb), 0.1); }
+  50%      { box-shadow: 0 0 24px rgba(var(--fc-rgb), 0.34), inset 0 0 14px rgba(var(--fc-rgb), 0.18); }
+}
+
+.fs-hero-text { position: relative; z-index: 1; min-width: 0; }
+
+#faction-screen-name {
+  font-size: 18px;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--fc);
+  text-shadow: 0 0 14px rgba(var(--fc-rgb), 0.35);
+}
+
+#fs-fullname {
+  margin-top: 3px;
+  font-size: 9px;
+  letter-spacing: 1px;
   text-transform: uppercase;
   color: #55606c;
-  margin-bottom: 6px;
 }
 
-.faction-screen-text {
-  font-family: 'Courier New', monospace;
-  font-size: 12px;
-  line-height: 1.65;
-  color: #cfd8dc;
-  background: #10151e;
-  border: 1px solid #1c2530;
+.fs-hero-leader {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #8fa8c4;
+}
+
+#faction-screen-leader { color: #cfd8dc; }
+
+.fs-crown { margin-right: 4px; color: #d9a940; }
+
+.fs-you {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 6px;
+  border: 1px solid rgba(var(--fc-rgb), 0.5);
   border-radius: 8px;
-  padding: 10px 12px;
-  word-break: break-word;
+  color: var(--fc);
+  font-size: 8px;
+  font-style: normal;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  vertical-align: 1px;
 }
 
-/* Планеты чипами: список через запятую нечитаем уже на десятке систем */
-.faction-planet-chips {
+#fs-hero-chips {
+  position: relative;
+  z-index: 1;
+  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.faction-planet-chip {
-  font-family: 'Courier New', monospace;
-  font-size: 11px;
-  color: #cfd8dc;
-  background: #10151e;
-  border: 1px solid #1c2530;
-  border-left: 2px solid #4a90d9;
-  border-radius: 6px;
-  padding: 6px 10px;
+#fs-hero-chips:empty { display: none; }
+
+.fs-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid #2a3644;
+  border-radius: 12px;
+  background: rgba(10,13,20,0.65);
+  color: #8fa8c4;
+  font-size: 10px;
 }
 
-.faction-planet-count {
-  font-family: 'Courier New', monospace;
+.fs-chip > i { font-style: normal; color: var(--fc); }
+.fs-chip b { font-weight: normal; }
+.fs-chip-pay { border-color: rgba(217,169,64,0.38); }
+.fs-chip-pay > i, .fs-chip-pay b { color: #d9a940; }
+.fs-chip-online { color: #5fd968; border-color: rgba(95,217,104,0.3); }
+
+/* Точка «в сети» дышит — видно, что фракция живая */
+.fs-dot {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2a3644;
+}
+
+.fs-dot.on { background: #5fd968; }
+
+.fs-dot.on::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  border: 1px solid #5fd968;
+  animation: fs-ping 2s ease-out infinite;
+}
+
+@keyframes fs-ping {
+  from { transform: scale(1);   opacity: 0.9; }
+  to   { transform: scale(2.2); opacity: 0; }
+}
+
+/* Действия: запрос планеты, запросы лидеру, панель управления, снабжение */
+#fs-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 18px 14px 0;
+}
+
+#faction-screen-box:not(.fs-ready) #fs-actions { display: none; }
+
+#fs-actions .fs-sec-head { margin-bottom: 2px; }
+#fs-actions .faction-section { margin: 0; }
+#fs-actions .faction-section-title { display: none; }
+#fs-actions .pr-review { margin-top: 0; }
+#fs-actions .pr-open { min-height: 46px; padding: 8px 12px; }
+#fs-actions .pr-open-ico { width: 28px; height: 28px; font-size: 12px; }
+#fs-actions .pr-open:active { border-color: var(--fc); background: #141b27; }
+#fs-actions .pr-open-ico { color: var(--fc); border-color: rgba(var(--fc-rgb), 0.45); box-sizing: border-box; }
+
+#faction-control-open-btn .pr-open-ico { color: #d9a940; border-color: rgba(217,169,64,0.45); }
+#fs-supply-btn .pr-open-ico { color: #5fd968; border-color: rgba(95,217,104,0.4); }
+
+/* Тело */
+#fs-body { padding: 0 14px calc(30px + env(safe-area-inset-bottom)); }
+
+.fs-sec { margin-top: 22px; }
+
+.fs-sec-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+
+.fs-sec-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #8fa8c4;
+}
+
+.fs-sec-title::before {
+  content: '';
+  width: 3px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--fc);
+  opacity: 0.8;
+}
+
+.fs-sec-meta { font-size: 10px; color: #55606c; text-align: right; }
+.fs-sec-meta b { font-weight: normal; }
+.fs-sec-meta b.on { color: #5fd968; }
+.fs-sec-meta b.hot { color: #d9a940; }
+
+/* Появление разделов лесенкой — только при открытии, не при обновлении */
+.fs-anim .fs-sec { animation: fs-up 0.38s ease-out both; }
+.fs-anim .fs-sec:nth-child(2) { animation-delay: 0.06s; }
+.fs-anim .fs-sec:nth-child(3) { animation-delay: 0.12s; }
+.fs-anim .fs-sec:nth-child(4) { animation-delay: 0.18s; }
+.fs-anim .fs-sec:nth-child(5) { animation-delay: 0.24s; }
+
+@keyframes fs-up {
+  from { transform: translateY(10px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+/* Баланс сил: территория */
+.fs-territory,
+.fs-tile,
+.fs-settle {
+  box-sizing: border-box;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 10px;
+}
+
+.fs-territory { padding: 12px 14px 11px; }
+
+.fs-terr-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.fs-terr-side b {
+  display: block;
+  font-size: 28px;
+  font-weight: normal;
+  line-height: 1;
+}
+
+.fs-terr-side span {
+  display: block;
+  margin-top: 5px;
+  font-size: 9px;
   letter-spacing: 1px;
+  text-transform: uppercase;
   color: #55606c;
+}
+
+.fs-terr-side.own b { color: var(--fc); text-shadow: 0 0 12px rgba(var(--fc-rgb), 0.3); }
+.fs-terr-side.foe { text-align: right; }
+.fs-terr-side.foe b { color: var(--fe); }
+
+.fs-terr-mid {
+  padding-bottom: 2px;
+  font-size: 13px;
+  color: #cfd8dc;
+  text-align: center;
+}
+
+.fs-terr-mid i {
+  display: block;
+  margin-top: 3px;
+  font-size: 8px;
+  font-style: normal;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #55606c;
+}
+
+.fs-split {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  margin: 11px 0 9px;
+  padding: 1px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 5px;
+}
+
+.fs-split i { display: block; height: 100%; transition: width 0.8s ease; }
+.fs-split i[style*="width:0%"] { display: none; }
+
+.fs-split i.own {
+  border-radius: 3px 0 0 3px;
+  background: linear-gradient(90deg, rgba(var(--fc-rgb), 0.5), var(--fc));
+  box-shadow: 0 0 8px rgba(var(--fc-rgb), 0.45);
+  transform-origin: left center;
+}
+
+.fs-split i.foe {
+  border-radius: 0 3px 3px 0;
+  background: linear-gradient(90deg, var(--fe), rgba(var(--fe-rgb), 0.45));
+  transform-origin: right center;
+}
+
+.fs-anim .fs-split i { animation: fs-grow 0.9s cubic-bezier(.2,.8,.2,1) both 0.15s; }
+
+@keyframes fs-grow {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+
+.fs-terr-foot {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #55606c;
+}
+
+.fs-terr-foot b { font-weight: normal; color: #cfd8dc; }
+
+/* Плитки */
+.fs-tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
   margin-top: 8px;
 }
 
-#faction-control-open-btn {
+.fs-tile { padding: 10px 12px 11px; min-width: 0; }
+
+.fs-tile-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #55606c;
+}
+
+.fs-tile-head > i { font-style: normal; font-size: 11px; color: var(--fc); }
+
+.fs-tile > b {
+  display: block;
+  margin: 7px 0 5px;
+  font-size: 22px;
+  font-weight: normal;
+  line-height: 1;
+  color: #cfd8dc;
+}
+
+.fs-tile-sub span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: #8fa8c4;
+}
+
+.fs-tile-sub span + span { color: #55606c; }
+.fs-tile-sub span.sci { color: #a06fd9; }
+.fs-tile-sub .fs-pulse-text { color: #5fd968; }
+
+.fs-tile.troops .fs-tile-head > i { color: #5fd968; }
+.fs-tile.fleet .fs-tile-head > i { color: #8fa8c4; }
+.fs-tile.income .fs-tile-head > i,
+.fs-tile.income > b { color: #d9a940; }
+
+/* Поселения по уровням */
+.fs-settle { margin-top: 8px; padding: 10px 12px 11px; }
+.fs-settle .fs-tile-head > i { color: #5fd968; }
+
+.fs-territory .fs-tile-head { margin-bottom: 9px; }
+
+.fs-territory .fs-tile-head em,
+.fs-settle .fs-tile-head em {
+  margin-left: auto;
+  font-size: 11px;
+  font-style: normal;
+  letter-spacing: 0;
+  color: #cfd8dc;
+}
+
+.fs-lvls {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.fs-lvl { min-width: 0; text-align: center; }
+
+.fs-lvl-bar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 34px;
+  padding: 0 28%;
+  background: rgba(10,13,20,0.7);
+  border: 1px solid #1c2530;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.fs-lvl-bar i {
   display: block;
   width: 100%;
-  margin-top: 20px;
-  padding: 12px;
-  background: #4a90d9;
-  border: none;
-  border-radius: 8px;
-  color: #0a0d14;
-  font-family: 'Courier New', monospace;
+  border-radius: 3px 3px 0 0;
+  background: linear-gradient(0deg, rgba(var(--fc-rgb), 0.3), var(--fc));
+  transform-origin: bottom center;
+}
+
+.fs-anim .fs-lvl-bar i { animation: fs-rise-bar 0.8s cubic-bezier(.2,.8,.2,1) both 0.25s; }
+
+@keyframes fs-rise-bar {
+  from { transform: scaleY(0); }
+  to   { transform: scaleY(1); }
+}
+
+.fs-lvl b {
+  display: block;
+  margin-top: 5px;
+  font-size: 13px;
+  font-weight: normal;
+  color: #cfd8dc;
+}
+
+.fs-lvl span {
+  display: block;
+  margin-top: 2px;
+  font-size: 8px;
+  line-height: 1.25;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #55606c;
+}
+
+.fs-lvl.none b, .fs-lvl.none span { opacity: 0.5; }
+
+/* Фронт: идущие захваты */
+.fs-cap {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+  padding: 11px 12px 10px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-left: 3px solid #2a3644;
+  border-radius: 10px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fs-cap.defend {
+  border-color: rgba(var(--fe-rgb), 0.38);
+  border-left-color: var(--fe);
+  background: linear-gradient(90deg, rgba(var(--fe-rgb), 0.11), #10151e 70%);
+}
+
+.fs-cap.attack {
+  border-color: rgba(var(--fc-rgb), 0.38);
+  border-left-color: var(--fc);
+  background: linear-gradient(90deg, rgba(var(--fc-rgb), 0.11), #10151e 70%);
+}
+
+.fs-cap:active { background: #16202e; }
+
+.fs-cap-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.fs-cap-name { font-size: 13px; letter-spacing: 1px; color: #cfd8dc; }
+
+.fs-cap-text { margin-top: 4px; font-size: 11px; color: #8fa8c4; }
+
+.fs-cap-track {
+  height: 7px;
+  margin-top: 9px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.fs-cap-track i {
+  display: block;
+  width: 0;
+  height: 100%;
+  background-color: var(--fe);
+  transition: width 1s linear;
+}
+
+.fs-cap.attack .fs-cap-track i { background-color: var(--fc); }
+.fs-cap.st-contested .fs-cap-track i { background-color: #d9a940; }
+
+/* Полоса движется — по ней бегут штрихи, как по индикатору загрузки */
+.fs-cap.st-capturing .fs-cap-track i,
+.fs-cap.st-reverting .fs-cap-track i {
+  background-image: repeating-linear-gradient(-45deg, rgba(255,255,255,0.18) 0 5px, transparent 5px 10px);
+  background-size: 14px 14px;
+  animation: fs-stripes 0.8s linear infinite;
+}
+
+.fs-cap.st-reverting .fs-cap-track i { animation-direction: reverse; }
+
+@keyframes fs-stripes {
+  from { background-position: 0 0; }
+  to   { background-position: 14px 0; }
+}
+
+.fs-cap-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 10px;
+  color: #55606c;
+}
+
+.fs-cap-foot span + span { color: #cfd8dc; }
+.fs-cap.defend.st-capturing .fs-cap-foot span + span { color: #d94a4a; }
+
+/* Пилюли статусов */
+.fs-pill {
+  flex: none;
+  padding: 3px 7px;
+  border: 1px solid #2a3644;
+  border-radius: 10px;
+  color: #55606c;
+  font-size: 8px;
+  font-style: normal;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.fs-pill.capture { color: #d94a4a; border-color: rgba(217,74,74,0.55); background: rgba(217,74,74,0.1); }
+.fs-pill.attack  { color: #5fd968; border-color: rgba(95,217,104,0.5); background: rgba(95,217,104,0.08); }
+.fs-pill.dist    { color: #d9a940; border-color: rgba(217,169,64,0.5); background: rgba(217,169,64,0.08); }
+.fs-pill.front   { color: #d9a940; border-color: rgba(217,169,64,0.35); }
+.fs-pill.rear    { color: #55606c; border-color: #2a3644; }
+
+/* Строки фронта */
+.fs-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 46px;
+  box-sizing: border-box;
+  margin-bottom: 6px;
+  padding: 8px 10px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 9px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fs-row:active { background: #16202e; border-color: #2a3644; }
+
+.fs-row-ico {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border: 1px solid #2a3644;
+  border-radius: 50%;
+  font-size: 11px;
+  color: #8fa8c4;
+}
+
+.fs-row-ico.front {
+  color: var(--fe);
+  border-color: rgba(var(--fe-rgb), 0.5);
+  background: rgba(var(--fe-rgb), 0.08);
+}
+
+.fs-row-body { flex: 1; min-width: 0; }
+
+.fs-row-body b {
+  display: block;
   font-size: 12px;
-  font-weight: bold;
+  font-weight: normal;
+  color: #cfd8dc;
+}
+
+.fs-row-body i {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  font-style: normal;
+  color: #55606c;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fs-row-body i em { font-style: normal; color: #8fa8c4; }
+
+.fs-row-side {
+  flex: none;
+  max-width: 96px;
+  font-size: 10px;
+  color: #8fa8c4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fs-row-side em.free, .fs-planet-line .who.free { font-style: normal; color: #d9a940; }
+
+.fs-chev { flex: none; font-size: 18px; line-height: 1; color: #2a3644; }
+.fs-row:active .fs-chev { color: var(--fc); }
+
+.fs-row.fs-dist {
+  border-color: rgba(217,169,64,0.4);
+  background: linear-gradient(90deg, rgba(217,169,64,0.09), #10151e 70%);
+}
+
+.fs-row.fs-dist .fs-row-ico { color: #d9a940; border-color: rgba(217,169,64,0.5); }
+.fs-row.fs-dist .fs-row-body i { color: #d9a940; }
+
+/* Состав */
+.fs-members,
+.fs-feed {
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.fs-member {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid #1c2530;
+}
+
+.fs-member:last-child { border-bottom: none; }
+
+.fs-member.me {
+  background: rgba(var(--fc-rgb), 0.07);
+  box-shadow: inset 3px 0 0 var(--fc);
+}
+
+.fs-ava {
+  position: relative;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border: 1px solid rgba(var(--fc-rgb), 0.45);
+  border-radius: 50%;
+  background: #0a0d14;
+  color: var(--fc);
+  font-size: 12px;
+}
+
+.fs-member.leader .fs-ava { border-color: rgba(217,169,64,0.6); color: #d9a940; }
+
+.fs-ava .fs-dot {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  border: 2px solid #10151e;
+}
+
+.fs-member-body { flex: 1; min-width: 0; }
+
+.fs-member-body b {
+  display: block;
+  font-size: 12px;
+  font-weight: normal;
+  color: #cfd8dc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fs-member-body i {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  font-style: normal;
+  color: #55606c;
+}
+
+.fs-member-body i.on { color: #5fd968; }
+
+.fs-member-pl {
+  flex: none;
+  min-width: 46px;
+  font-size: 8px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #55606c;
+  text-align: right;
+}
+
+.fs-member-pl b {
+  display: block;
+  font-size: 15px;
+  font-weight: normal;
+  color: #cfd8dc;
+}
+
+.fs-member-pl.zero b { color: #55606c; }
+
+/* Планеты */
+.fs-planet {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 6px;
+  padding: 9px 12px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-left: 3px solid rgba(var(--fc-rgb), 0.45);
+  border-radius: 9px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fs-planet:active { background: #16202e; }
+.fs-planet.st-capture { border-left-color: #d94a4a; }
+.fs-planet.st-dist { border-left-color: #d9a940; }
+.fs-planet.st-front { border-left-color: rgba(217,169,64,0.7); }
+
+.fs-planet-body { flex: 1; min-width: 0; }
+
+.fs-planet-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fs-planet-top b {
+  font-size: 12px;
+  font-weight: normal;
+  letter-spacing: 0.5px;
+  color: #cfd8dc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fs-planet-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 4px;
+  font-size: 10px;
+  color: #8fa8c4;
+}
+
+.fs-planet-line > i { margin: 0 5px; font-style: normal; color: #2a3644; }
+.fs-planet-line .who { color: #cfd8dc; }
+.fs-planet-line em.up { font-style: normal; color: #5fd968; }
+
+.fs-mood.good { color: #5fd968; }
+.fs-mood.mid { color: #d9a940; }
+.fs-mood.bad { color: #d94a4a; }
+
+.fs-planet-inc {
+  flex: none;
+  font-size: 8px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #55606c;
+  text-align: right;
+}
+
+.fs-planet-inc b {
+  display: block;
+  font-size: 13px;
+  font-weight: normal;
+  letter-spacing: 0;
+  color: #d9a940;
+}
+
+.fs-planet-inc.zero b { color: #55606c; }
+
+/* Сводка */
+.fs-ev {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 12px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid #1c2530;
+  color: inherit;
+  text-align: left;
+}
+
+.fs-ev:last-child { border-bottom: none; }
+button.fs-ev { cursor: pointer; }
+button.fs-ev:active { background: #16202e; }
+
+.fs-ev-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-top: 4px;
+  box-sizing: border-box;
+  border: 1px solid #2a3644;
+  border-radius: 50%;
+}
+
+.fs-ev.tone-good .fs-ev-dot { background: #5fd968; border-color: #5fd968; }
+.fs-ev.tone-warn .fs-ev-dot { background: #d9a940; border-color: #d9a940; }
+.fs-ev.tone-bad .fs-ev-dot  { background: #d94a4a; border-color: #d94a4a; box-shadow: 0 0 6px rgba(217,74,74,0.6); }
+
+.fs-ev-body { flex: 1; min-width: 0; }
+
+.fs-ev-body b {
+  display: block;
+  font-size: 11px;
+  font-weight: normal;
+  color: #cfd8dc;
+}
+
+.fs-ev.tone-bad .fs-ev-body b { color: #e08a8a; }
+
+.fs-ev-body i {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  font-style: normal;
+  color: #8fa8c4;
+  word-break: break-word;
+}
+
+.fs-ev-body i em { font-style: normal; color: #55606c; }
+
+.fs-ev-when {
+  flex: none;
+  margin-top: 1px;
+  font-size: 9px;
+  color: #55606c;
+  white-space: nowrap;
+}
+
+/* Общие мелочи */
+.fs-more {
+  display: block;
+  width: 100%;
+  min-height: 38px;
+  margin-top: 8px;
+  padding: 10px;
+  background: none;
+  border: 1px dashed #2a3644;
+  border-radius: 8px;
+  color: #8fa8c4;
+  font-size: 10px;
   letter-spacing: 1px;
   text-transform: uppercase;
   cursor: pointer;
 }
 
-#faction-control-open-btn:active {
-  background: #3b7ab8;
+.fs-more:active { border-color: var(--fc); color: #cfd8dc; }
+
+.fs-empty {
+  padding: 14px 12px;
+  background: #10151e;
+  border: 1px dashed #1c2530;
+  border-radius: 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #55606c;
+  text-align: center;
+}
+
+.fs-error {
+  margin-top: 22px;
+  padding: 16px 14px 12px;
+  background: rgba(217,74,74,0.06);
+  border: 1px solid rgba(217,74,74,0.4);
+  border-radius: 10px;
+  text-align: center;
+}
+
+.fs-error b {
+  display: block;
+  font-size: 11px;
+  font-weight: normal;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #d94a4a;
+}
+
+.fs-error span {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #8fa8c4;
+}
+
+/* Заготовка, пока сводка грузится */
+.fs-sk {
+  border-radius: 10px;
+  background: linear-gradient(90deg, #10151e 0%, #172131 50%, #10151e 100%);
+  background-size: 200% 100%;
+  animation: fs-shimmer 1.2s linear infinite;
+}
+
+.fs-sk-title { width: 38%; height: 10px; margin: 24px 0 10px; border-radius: 4px; }
+.fs-sk-big { height: 98px; }
+.fs-sk-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.fs-sk-grid .fs-sk { height: 86px; }
+.fs-sk-row { height: 46px; margin-bottom: 6px; }
+
+@keyframes fs-shimmer {
+  from { background-position: 100% 0; }
+  to   { background-position: -100% 0; }
+}
+
+@media (max-width: 370px) {
+  #fs-hero { grid-template-columns: 50px 1fr; }
+  #fs-emblem { width: 50px; height: 50px; background-size: 30px; }
+  #faction-screen-name { font-size: 16px; letter-spacing: 3px; }
+  .fs-tile > b { font-size: 20px; }
+  .fs-terr-side b { font-size: 24px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #faction-screen-box, #fs-emblem, .fs-anim .fs-sec, .fs-anim .fs-split i, .fs-anim .fs-lvl-bar i,
+  .fs-dot.on::after, .fs-live i, .fs-sk, .fs-cap-track i { animation: none !important; }
 }
 
 /* ---------- Панель управления фракции ---------- */

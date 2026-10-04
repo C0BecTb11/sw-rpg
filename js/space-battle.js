@@ -126,6 +126,8 @@ function renderStationSlot() {
 
   el.addEventListener('click', function(e) {
     e.stopPropagation();
+    // В режиме автохода слот — просто точка на карте
+    if (typeof amFieldEvent === 'function' && amFieldEvent(e)) return;
     onStationSlotTapped();
   });
 
@@ -368,6 +370,7 @@ function initBuildSwitcher() {
 function applyTransform() {
   grid.style.transform = 'translate(' + panX + 'px, ' + panY + 'px) scale(' + scale + ')';
   if (typeof sxSyncScale === 'function') sxSyncScale();
+  if (typeof amOnTransform === 'function') amOnTransform();
 }
 
 // Не даёт утащить поле за пределы экрана: если поле крупнее вьюпорта —
@@ -667,6 +670,7 @@ function loadShips() {
     loadShipOrders();
     if (typeof onShipsReloaded === 'function') onShipsReloaded();
     if (typeof sxAfterShips === 'function') sxAfterShips(prevShips, req);
+    if (typeof amAfterShips === 'function') amAfterShips(prevShips);
   });
 }
 
@@ -720,6 +724,12 @@ function renderShips() {
       el.classList.add('ship-targetable');
     }
 
+    // Автоход: ведущий и корабли флота в кольце
+    if (typeof amShipMark === 'function') {
+      var amMark = amShipMark(ship);
+      if (amMark) el.classList.add(amMark);
+    }
+
     var img = getShipImage(type.image);
     if (img && img.complete && !img.failed) {
       var inner = document.createElement('div');
@@ -743,6 +753,9 @@ function renderShips() {
 
     el.addEventListener('click', function(e) {
       e.stopPropagation();
+
+      // Выбор точки и флота для автохода
+      if (typeof amShipTap === 'function' && amShipTap(ship, type, mine, e)) return;
 
       // В режиме атаки тап по чужому кораблю — это выстрел. В месиве
       // одинаковых кораблей выбирать из списка невозможно, а палец

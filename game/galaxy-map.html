@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="../css/faction.css">
 <link rel="stylesheet" href="../css/transfer.css">
 <link rel="stylesheet" href="../css/quest.css">
+<link rel="stylesheet" href="../css/supply.css">
 </head>
 <body>
 
@@ -59,6 +60,11 @@
       <div class="panel-item-icon">⧗</div>
       <span class="panel-item-label">Процессы</span>
     </button>
+    <button class="panel-item" id="panel-item-supply">
+      <div class="panel-item-icon">⇄</div>
+      <i class="panel-item-badge" id="supply-badge"></i>
+      <span class="panel-item-label">Снабжение</span>
+    </button>
   </div>
 </div>
 
@@ -69,6 +75,9 @@
   </div>
   <div id="processes-list"></div>
 </div>
+
+<!-- Снабжение: содержимое строит js/supply.js -->
+<div id="supply-screen" style="display:none;"></div>
 
 <div id="army-screen" style="display:none;">
   <div id="army-screen-header">
@@ -193,35 +202,54 @@
 
 <div id="faction-screen" style="display:none;">
   <div id="faction-screen-box">
-    <button id="faction-screen-close">✕</button>
-    <div id="faction-screen-name">—</div>
-
-    <div class="faction-section">
-      <div class="faction-section-title">Планеты</div>
-      <div id="faction-screen-planets" class="faction-screen-text">—</div>
+    <div id="fs-top">
+      <span class="fs-top-title">Фракция</span>
+      <span id="fs-live" class="fs-live"><i></i><span>в эфире</span></span>
+      <button id="faction-screen-close" aria-label="Закрыть">✕</button>
     </div>
 
-    <div class="faction-section">
-      <div class="faction-section-title">Лидер фракции</div>
-      <div id="faction-screen-leader" class="faction-screen-text">—</div>
+    <div id="fs-hero">
+      <div id="fs-emblem"></div>
+      <div class="fs-hero-text">
+        <div id="faction-screen-name">—</div>
+        <div id="fs-fullname"></div>
+        <div class="fs-hero-leader">Лидер · <span id="faction-screen-leader">—</span></div>
+      </div>
+      <div id="fs-hero-chips"></div>
     </div>
 
-    <div class="faction-section" id="pr-section" style="display:none;">
-      <div class="faction-section-title">Управление планетой</div>
-      <button id="pr-open-btn" class="pr-open">
-        <span class="pr-open-ico">◉</span>
-        <span class="pr-open-text"><b>Запросить планету у лидера</b><i id="pr-open-sub">выбери планету — лидер получит уведомление</i></span>
+    <div id="fs-actions">
+      <div class="fs-sec-head"><span class="fs-sec-title">Действия</span></div>
+
+      <div class="faction-section" id="pr-section" style="display:none;">
+        <div class="faction-section-title">Управление планетой</div>
+        <button id="pr-open-btn" class="pr-open">
+          <span class="pr-open-ico">◉</span>
+          <span class="pr-open-text"><b>Запросить планету у лидера</b><i id="pr-open-sub">выбери планету — лидер получит уведомление</i></span>
+          <span class="pr-open-arrow">›</span>
+        </button>
+      </div>
+
+      <button id="pr-review-btn" class="pr-open pr-review" style="display:none;">
+        <span class="pr-open-ico">✉</span>
+        <span class="pr-open-text"><b>Запросы игроков на планеты</b><i>кто просит управление</i></span>
+        <em id="pr-review-count">0</em>
+      </button>
+
+      <button id="faction-control-open-btn" class="pr-open" style="display:none;">
+        <span class="pr-open-ico">♛</span>
+        <span class="pr-open-text"><b>Панель управления фракции</b><i>кому какую планету отдать</i></span>
+        <span class="pr-open-arrow">›</span>
+      </button>
+
+      <button id="fs-supply-btn" class="pr-open" style="display:none;">
+        <span class="pr-open-ico">⇄</span>
+        <span class="pr-open-text"><b>Снабжение</b><i>склады фракции, рейсы и доступ</i></span>
         <span class="pr-open-arrow">›</span>
       </button>
     </div>
 
-    <button id="pr-review-btn" class="pr-open pr-review" style="display:none;">
-      <span class="pr-open-ico">✉</span>
-      <span class="pr-open-text"><b>Запросы игроков на планеты</b><i>кто просит управление</i></span>
-      <em id="pr-review-count">0</em>
-    </button>
-
-    <button id="faction-control-open-btn" style="display:none;">Панель управления фракции</button>
+    <div id="fs-body"></div>
   </div>
 </div>
 
@@ -293,6 +321,7 @@
 <script src="../js/army.js"></script>
 <script src="../js/troop-transfer.js"></script>
 <script src="../js/processes.js"></script>
+<script src="../js/supply.js"></script>
 <script src="../js/ship-cargo.js"></script>
 <script src="../js/planet-info.js"></script>
 <script src="../js/faction-panel.js"></script>

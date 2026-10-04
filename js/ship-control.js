@@ -432,6 +432,9 @@ function scRenderTiles() {
       canAct ? null : 'нет очков действий');
   });
 
+  // Автоход: дальняя точка шагами, по действию на шаг (js/automove-space.js)
+  if (typeof amAddTile === 'function') amAddTile(add, describe);
+
   // Притягивающий луч — способность, а не пассивка. Плитка появляется
   // только там, где дополнение действительно стоит.
   if (scShip.has_tractor) {
@@ -807,6 +810,7 @@ function scRenderAp() {
 
   // Доступность действий показывают сами плитки
   scRenderTiles();
+  if (typeof amRenderStatus === 'function') amRenderStatus();
 }
 
 function scRenderMode() {
@@ -850,11 +854,14 @@ function scRenderMode() {
     hint.textContent = 'Коснись клетки — корабль встанет на неё серединой';
   } else if (scMode === 'rotate') {
     hint.textContent = 'Стрелка — направление носа';
+  } else if (scMode === 'auto') {
+    hint.textContent = typeof amHintText === 'function' ? amHintText() : '';
   } else {
     hint.textContent = '';
   }
 
   scRenderRange();
+  if (typeof amRenderBox === 'function') { amRenderBox(); amRender(); }
 }
 
 // Якорь корабля — клетка, в которую игрок целится пальцем.
@@ -964,7 +971,8 @@ function scResetSections() {
   scPreview = null;
 
   var hud = document.getElementById('ship-hud');
-  if (hud) hud.classList.remove('mode-move', 'mode-rotate', 'mode-attack', 'mode-hangar');
+  if (hud) hud.classList.remove('mode-move', 'mode-rotate', 'mode-attack', 'mode-hangar', 'mode-auto');
+  if (typeof amReset === 'function') amReset();
 
   ['sc-targets', 'sc-hangar'].forEach(function(id) {
     var el = document.getElementById(id);
@@ -982,10 +990,11 @@ function scSetMode(mode) {
   // а не полосы щитов
   var hud = document.getElementById('ship-hud');
   if (hud) {
-    hud.classList.remove('mode-move', 'mode-rotate', 'mode-attack', 'mode-hangar');
+    hud.classList.remove('mode-move', 'mode-rotate', 'mode-attack', 'mode-hangar', 'mode-auto');
     if (mode) hud.classList.add('mode-' + mode);
   }
   if (mode !== 'move') scPreview = null;
+  if (typeof amOnMode === 'function') amOnMode(mode);
   scRenderGhost();
   scRenderMode();
 }
@@ -1004,11 +1013,12 @@ function onShipsReloaded() {
 
 // ===== действия =====
 
+// Пока сервер не ответил, повторный тап не должен отправить второй приказ
 function scBusy(on) {
-  ['sc-move', 'sc-rotate'].forEach(function(id) {
-    var b = document.getElementById(id);
-    if (b) b.disabled = on;
-  });
+  var b = document.getElementById('sc-go');
+  if (b) b.disabled = on;
+  var dirs = document.querySelectorAll('#sc-dial .sc-dir');
+  for (var i = 0; i < dirs.length; i++) dirs[i].disabled = on;
 }
 
 function scDoRotate(deg) {
@@ -1264,10 +1274,14 @@ function scInitFieldTap() {
       return;
     }
 
-    if (scMode !== 'move') return;
+    if (scMode !== 'move' && scMode !== 'auto') return;
     var rect = viewport.getBoundingClientRect();
     var gx = (e.clientX - rect.left - panX) / scale;
     var gy = (e.clientY - rect.top - panY) / scale;
+    if (scMode === 'auto') {
+      if (typeof amFieldTap === 'function') amFieldTap(Math.floor(gx / CELL_PX), Math.floor(gy / CELL_PX));
+      return;
+    }
     scAimAt(Math.floor(gx / CELL_PX), Math.floor(gy / CELL_PX));
   });
 }

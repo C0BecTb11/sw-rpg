@@ -2601,3 +2601,341 @@
   0%   { opacity: 0.95; transform: scale(0.85); }
   100% { opacity: 0; transform: scale(1.6); }
 }
+
+/* ===== Автоход: нить пути, выбор точки, строка в панели ===== */
+
+/* Нить живёт в слое #gb-fx и масштабируется вместе с картой, а толщины
+   делятся на зум (--fx-inv) — линия одинаково тонкая на любом масштабе */
+#am-svg {
+  position: absolute;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.am-thread path,
+.am-thread rect { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+
+.am-shadow {
+  stroke: rgba(4,6,10,0.55);
+  stroke-width: calc(var(--fx-inv, 1) * 5px);
+}
+
+.am-line {
+  stroke-width: calc(var(--fx-inv, 1) * 2px);
+  stroke-dasharray: calc(var(--fx-inv, 1) * 7px) calc(var(--fx-inv, 1) * 5px);
+}
+
+/* Узел шага — отрезок нулевой длины с круглым концом: точка того же
+   размера на любом зуме. Тёмная сердцевина делает из неё колечко */
+.am-node { stroke-width: calc(var(--fx-inv, 1) * 8px); }
+.am-node-in { stroke: #0a0d14; stroke-width: calc(var(--fx-inv, 1) * 3px); }
+
+.am-fin { stroke-width: calc(var(--fx-inv, 1) * 2px); }
+
+.am-fin-halo {
+  stroke-width: calc(var(--fx-inv, 1) * 2px);
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0;
+}
+
+/* Чужие глаза нить не видят; свои идущие — тонко и тускло */
+.am-thread.live { opacity: 0.5; }
+.am-thread.live .am-line,
+.am-thread.live .am-node,
+.am-thread.live .am-fin { stroke: #5fd968; }
+.am-thread.live .am-fin { fill: rgba(95,217,104,0.08); }
+.am-thread.live .am-shadow { stroke-width: calc(var(--fx-inv, 1) * 4px); }
+.am-thread.live .am-node { stroke-width: calc(var(--fx-inv, 1) * 6px); }
+.am-thread.live .am-node-in { stroke-width: calc(var(--fx-inv, 1) * 2px); }
+
+/* Выбранный боец или отряд — ярко, с бегущим пунктиром и пульсом финиша */
+.am-thread.live.hi { opacity: 1; }
+.am-thread.live.hi .am-line { stroke-width: calc(var(--fx-inv, 1) * 2.5px); animation: am-ants 0.9s linear infinite; }
+.am-thread.live.hi .am-node { stroke-width: calc(var(--fx-inv, 1) * 8px); }
+.am-thread.live.hi .am-node-in { stroke-width: calc(var(--fx-inv, 1) * 3px); }
+.am-thread.live.hi .am-fin { fill: rgba(95,217,104,0.16); }
+.am-thread.live.hi .am-fin-halo { stroke: #5fd968; animation: am-pulse 1.8s ease-out infinite; }
+
+/* Предпросмотр — золотом: это ещё план, не приказ */
+.am-thread.plan .am-line,
+.am-thread.plan .am-fin { stroke: #d9a940; }
+.am-thread.plan .am-line { stroke-width: calc(var(--fx-inv, 1) * 2.5px); animation: am-ants 0.9s linear infinite; }
+.am-thread.plan .am-node { stroke: #d9a940; }
+.am-thread.plan .am-fin { fill: rgba(217,169,64,0.16); }
+.am-thread.plan .am-fin-halo { stroke: #d9a940; animation: am-pulse 1.8s ease-out infinite; }
+.am-thread.plan.blocked .am-fin { stroke-dasharray: calc(var(--fx-inv, 1) * 4px) calc(var(--fx-inv, 1) * 3px); fill: rgba(217,169,64,0.06); }
+
+@keyframes am-ants {
+  to { stroke-dashoffset: calc(var(--fx-inv, 1) * -12px); }
+}
+
+@keyframes am-pulse {
+  0%   { opacity: 0.9; transform: scale(1); }
+  100% { opacity: 0;   transform: scale(1.7); }
+}
+
+/* Отряд в сборе — золотые рамки вокруг бойцов, у ведущего плотнее */
+.am-ring {
+  fill: rgba(217,169,64,0.10);
+  stroke: #d9a940;
+  stroke-width: calc(var(--fx-inv, 1) * 2px);
+  stroke-dasharray: calc(var(--fx-inv, 1) * 5px) calc(var(--fx-inv, 1) * 3px);
+}
+.am-ring.lead {
+  fill: rgba(217,169,64,0.18);
+  stroke-width: calc(var(--fx-inv, 1) * 3px);
+  stroke-dasharray: none;
+}
+
+/* Подпись над финишем: как всплывающие цифры — обратный масштаб */
+#am-tags { position: absolute; left: 0; top: 0; width: 0; height: 0; }
+
+.am-tagpos {
+  position: absolute;
+  width: 0;
+  height: 0;
+  transform: scale(var(--fx-inv, 1));
+  transform-origin: 0 0;
+}
+
+.am-tag {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px 4px 7px;
+  white-space: nowrap;
+  background: rgba(8,11,17,0.92);
+  border: 1px solid rgba(95,217,104,0.55);
+  border-radius: 11px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.45);
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  color: #cfd8dc;
+}
+.am-tag i { font-style: normal; font-size: 11px; color: #5fd968; }
+.am-tag.plan { border-color: rgba(217,169,64,0.7); }
+.am-tag.plan i { color: #d9a940; }
+
+/* ----- Карточка выбора точки ----- */
+
+#am-card {
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  bottom: calc(14px + env(safe-area-inset-bottom));
+  z-index: 1500;
+  max-width: 460px;
+  margin: 0 auto;
+  padding: 11px 12px 12px;
+  background: linear-gradient(180deg, rgba(16,21,30,0.97) 0%, rgba(8,11,17,0.97) 100%);
+  border: 1px solid #1c2530;
+  border-left: 3px solid #d9a940;
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.55);
+  font-family: 'Courier New', monospace;
+  color: #cfd8dc;
+  box-sizing: border-box;
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+.am-head { display: flex; align-items: center; gap: 10px; }
+
+.am-ico {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(217,169,64,0.45);
+  border-radius: 9px;
+  background: radial-gradient(circle at 50% 40%, rgba(217,169,64,0.20) 0%, #0a0d14 75%);
+  color: #d9a940;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.am-ttl { flex: 1; min-width: 0; }
+.am-ttl b {
+  display: block;
+  font-size: 12px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #d9a940;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.am-ttl span { display: block; margin-top: 3px; font-size: 10px; line-height: 1.4; color: #8fa8c4; }
+
+.am-stats { display: flex; gap: 6px; margin-top: 10px; }
+.am-stat {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 8px 6px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 8px;
+  text-align: center;
+}
+.am-stat.wide { flex: 1.7; }
+.am-stat b { display: block; font-size: 15px; color: #cfd8dc; letter-spacing: 0.5px; white-space: nowrap; }
+.am-stat span { display: block; margin-top: 1px; font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: #55606c; }
+
+.am-warn { margin-top: 8px; font-size: 10px; line-height: 1.4; color: #d9a940; }
+.am-warn::before { content: '⚠ '; }
+.am-warn.err { color: #d94a4a; }
+
+.am-btns { display: flex; gap: 6px; margin-top: 9px; }
+
+.am-b {
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  padding: 8px 6px;
+  background: #10151e;
+  border: 1px solid #2a3644;
+  border-radius: 8px;
+  color: #8fa8c4;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.am-b i {
+  display: inline-block;
+  min-width: 16px;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: #2a3644;
+  color: #cfd8dc;
+  font-style: normal;
+  font-weight: bold;
+}
+.am-b.on { border-color: #d9a940; color: #d9a940; background: rgba(217,169,64,0.10); }
+.am-b.on i { background: #d9a940; color: #0a0d14; }
+.am-b:disabled { opacity: 0.4; }
+
+.am-b.go {
+  flex: 2.2;
+  background: #d9a940;
+  border-color: #d9a940;
+  color: #0a0d14;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+.am-b.go:disabled { opacity: 0.45; }
+
+/* ----- Строка состояния в панели бойца ----- */
+
+.am-strip {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 9px;
+  padding: 6px 6px 6px 8px;
+  background: linear-gradient(90deg, rgba(95,217,104,0.10) 0%, rgba(16,21,30,0.6) 70%);
+  border: 1px solid rgba(95,217,104,0.35);
+  border-radius: 9px;
+}
+.am-strip.ask {
+  background: linear-gradient(90deg, rgba(217,74,74,0.10) 0%, rgba(16,21,30,0.6) 70%);
+  border-color: rgba(217,74,74,0.4);
+}
+
+.am-strip-ico {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: rgba(95,217,104,0.14);
+  color: #5fd968;
+  font-size: 14px;
+  animation: am-blink 1.6s ease-in-out infinite;
+}
+.am-strip.ask .am-strip-ico { background: rgba(217,74,74,0.14); color: #d94a4a; animation: none; }
+
+@keyframes am-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+
+.am-strip-txt { flex: 1; min-width: 0; }
+.am-strip-txt b {
+  display: block;
+  font-size: 10px;
+  font-weight: normal;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #5fd968;
+}
+.am-strip.ask .am-strip-txt b { color: #d94a4a; }
+.am-strip-txt span {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: #8fa8c4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.am-strip-btn {
+  flex: none;
+  min-height: 34px;
+  padding: 0 11px;
+  background: #10151e;
+  border: 1px solid #2a3644;
+  border-radius: 7px;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+.am-strip-btn.stop { border-color: rgba(217,74,74,0.6); color: #d94a4a; background: rgba(217,74,74,0.08); }
+.am-strip-btn.x { padding: 0 9px; color: #55606c; }
+.am-strip-btn:disabled { opacity: 0.4; }
+
+/* Плитка автохода, пока он идёт, — с зелёной меткой в углу */
+.gu-tile.am-going { position: relative; }
+.gu-tile.am-going::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #5fd968;
+  box-shadow: 0 0 6px rgba(95,217,104,0.8);
+}
+
+/* ----- Сводки автохода ----- */
+#cb-toast.cb-am-ok   { border-left-color: #5fd968; }
+#cb-toast.cb-am-near { border-left-color: #d9a940; }
+#cb-toast.cb-am-stop { border-left-color: #d94a4a; animation: cb-alarm 1.2s ease-out 1; }
+#cb-toast.cb-am-info { border-left-color: #55606c; }
+#cb-toast.cb-am-go   { border-left-color: #d9a940; }
+#cb-toast.cb-am-ok .cb-head b   { color: #5fd968; }
+#cb-toast.cb-am-near .cb-head b { color: #d9a940; }
+#cb-toast.cb-am-stop .cb-head b { color: #d94a4a; }
+#cb-toast.cb-am-info .cb-head b { color: #8fa8c4; }
+#cb-toast.cb-am-go .cb-head b   { color: #d9a940; }
+
+/* Плитки способностей держатся кучно сверху, даже когда описание справа
+   длинное: иначе третья плитка уезжала вниз на высоту текста */
+.gu-tiles { align-content: start; }

@@ -2101,6 +2101,13 @@ function handleTap(clientX, clientY) {
     return;
   }
 
+  // Выбор точки автохода: уступает всем режимам выше, но раньше
+  // обычного выбора бойца — тапы по своим собирают отряд
+  if (typeof amPick !== 'undefined' && amPick) {
+    amHandleTap(cellX, cellY);
+    return;
+  }
+
   // Тап по своему юниту показывает его радиус обзора
   // По всему корпусу: тап по любой из четырёх клеток выбирает машину
   // Поселение проверяем раньше юнитов: оно занимает 6x6 и на нём никто
@@ -2735,6 +2742,7 @@ function redrawScene() {
     terrainCache = generateTerrain(hashStringToSeed(systemId));
   }
   drawScene(terrainCache);
+  if (typeof amOnRedraw === 'function') amOnRedraw();
 }
 
 // Пока на карте есть недостроенное здание, обновляем картинку раз в секунду,
@@ -2936,6 +2944,7 @@ function initGroundBattle() {
       initBuildSwitcher();
       initBuildToggle(false);
       subscribeToGroundChanges();
+      if (typeof amInit === 'function') amInit();
     });
   });
 }
@@ -3588,6 +3597,7 @@ function loadUnits() {
     redrawScene();
     cbDiffUnits(prevUnits, unitsOnMap, requestedAt);
     cbReconcileHp(requestedAt);
+    if (typeof amAfterUnits === 'function') amAfterUnits();
   });
 }
 
@@ -3597,6 +3607,12 @@ function loadUnits() {
 function unitBox(u) {
   var t = unitTypeById[u.unit_type];
   return { w: (t && t.width_cells) || 1, h: (t && t.height_cells) || 1 };
+}
+
+// Дальность хода с улучшениями — так же, как unit_stats на сервере
+function unitMoveRange(u) {
+  var t = unitTypeById[u.unit_type] || {};
+  return Math.max(1, (t.move_range || 0) + (u.bonus_move || 0));
 }
 
 // Кличку одарённого придумывает игрок, а видят её и союзники, и враги.
@@ -3736,7 +3752,7 @@ function drawUnits() {
     var t = unitTypeById[selectedUnit.unit_type];
     if (t && selectedUnit.owner_user_id === currentUserId) {
       drawCellRange(selectedUnit, t.vision_range, 'rgba(95,217,104,0.55)');
-      drawCellRange(selectedUnit, t.move_range, 'rgba(74,144,217,0.55)');
+      drawCellRange(selectedUnit, unitMoveRange(selectedUnit), 'rgba(74,144,217,0.55)');
     } else if (t) {
       // Чужой: куда достаёт его ствол и что он видит. Паспортные значения,
       // без улучшений — их мы знать не должны.
@@ -3931,6 +3947,9 @@ function showPickup(unit, ships, carriers, inside, boardable, ap, liftCarriers) 
     selectedUnit = null; hidePickup(); redrawScene();
   });
 
+  // Идёт автоход — строка состояния и «Стоп» под очками действий
+  if (typeof amPanelStrip === 'function') amPanelStrip(bar, unit);
+
   bar.style.visibility = 'visible';
   setBottomInset(insetFor(bar));
   focusCell(unit.x, unit.y);
@@ -4031,7 +4050,7 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
   // Ход и атака — базовые действия, они есть у всех
   addTile('move', '⇢', 'Идти', canAct, function() {
     info.innerHTML = '<div class="gu-abil-name">Перемещение</div>' +
-      '<div class="gu-abil-text">До ' + (type.move_range || 4) + ' клеток за одно действие.</div>';
+      '<div class="gu-abil-text">До ' + unitMoveRange(unit) + ' клеток за одно действие.</div>';
     guAbilityAction(info, 'Идти', canAct, function() { startGroundMove(unit); });
   });
 
@@ -4085,6 +4104,9 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
       guAbilityAction(info, 'Выбрать цель', canAct, function() { startGroundAttack(unit); });
     });
   }
+
+  // Автоход: сам идёт к дальней точке, шагая по мере очков действий
+  if (typeof amAddTile === 'function') amAddTile(addTile, info, unit, type);
 
   // Способности из дополнений: приходят с сервера вместе с откатом
   supabase.rpc('get_unit_upgrade_abilities', { p_unit_id: unit.id }).then(function(res) {
@@ -4819,8 +4841,7 @@ function cancelGroundMove() {
 function drawMoveCells() {
   if (!movingUnit) return;
 
-  var type = unitTypeById[movingUnit.unit_type] || {};
-  var r = type.move_range || 4;
+  var r = unitMoveRange(movingUnit);
   var box = unitBox(movingUnit);
 
   var x0 = (movingUnit.x - r) * CELL_PX;
