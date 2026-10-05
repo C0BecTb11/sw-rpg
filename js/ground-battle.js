@@ -2593,6 +2593,8 @@ function researchEffectText(r) {
     case 'ability_headshot': return 'уничтожает выбранную цель';
     case 'ability_twin':
       return 'бьёт первую цель, вторую рядом с шансом ' + v + '%';
+    case 'ability_lunge':
+      return 'рывок к врагу до ' + v + ' клеток и удар клинком · урон ' + d + ', укрытие не спасает';
     case 'unlock_structure':
       return structUnlockText(r);
   }
@@ -2857,6 +2859,8 @@ function checkBuildRights() {
       supabase.rpc('get_my_profile').then(function(profRes) {
         if (!profRes.error && profRes.data && profRes.data.length > 0) {
           currentUserFaction = profRes.data[0].faction;
+          // Цвет своей стороны для каталога исследований и кнопок науки
+          document.body.classList.toggle('fac-cis', currentUserFaction === 'cis');
         }
       }),
       supabase.from('systems').select('faction').eq('id', systemId).maybeSingle().then(function(sysRes) {
@@ -4506,6 +4510,7 @@ function upgradeAbilityHint(a) {
     case 'ability_ap':          return 'двойной урон по технике';
     case 'ability_headshot':    return 'уничтожает цель';
     case 'ability_twin':        return 'вторая цель с шансом ' + a.power + '%';
+    case 'ability_lunge':       return 'рывок до ' + a.power + ' кл. · урон ' + (a.ability_damage || '');
     default:                    return '';
   }
 }
@@ -4581,6 +4586,15 @@ function startUpgradeAbility(unit, a) {
 
   supabase.rpc('get_ground_targets', { p_unit_id: unit.id }).then(function(res) {
     groundTargets = (!res.error && res.data) ? res.data : [];
+    // Рывок бьёт на свою дистанцию, а не на дальность стрельбы
+    if (a.kind === 'ability_lunge') {
+      groundTargets = groundTargets.filter(function(t) { return t.gap === undefined || t.gap <= a.power; });
+      showTargetHint(a.name, groundTargets.length
+        ? 'рывок до ' + a.power + ' кл. · целей: ' + groundTargets.length
+        : 'в ' + a.power + ' клетках врагов нет', cancelTargeting);
+      redrawScene();
+      return;
+    }
     showTargetHint(a.name, groundTargets.length
       ? 'целей рядом: ' + groundTargets.length
       : 'целей нет', cancelTargeting);
@@ -4628,10 +4642,12 @@ function handleUpgradeAbilityTap(cellX, cellY) {
   var mainPick = twinFirst || pick;
   var twoTargets = !!twinFirst;
   var mainBefore = cbHpNow(mainPick);
+  var lungeFrom = a.kind === 'ability_lunge' ? { x: unit.x, y: unit.y } : null;
   cbLastOwnAction = Date.now();
   supabase.rpc('use_unit_ability', args).then(function(r) {
     if (r.error) { alert(r.error.message); return; }
     var res = (r.data && r.data.length) ? r.data[0] : null;
+    if (lungeFrom) gbLungeFx(lungeFrom, unitBox(unit), mainPick);
     // Две цели: убитым может оказаться любая, поэтому итог — общей сводкой
     if (res && twoTargets) cbReportArea(a.name, unit, res);
     else if (res) cbReportAbility(a.name, unit, mainPick, res, mainBefore);
@@ -8392,4 +8408,37 @@ function gbPing(x, y, w, h) {
   el.innerHTML = '<i></i><i></i>';
   layer.appendChild(el);
   setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, 4200);
+}
+
+
+// ===== Рывок BX-коммандос =====
+// Красный росчерк от места старта к цели: игрок видит, что дроид
+// сорвался с места и ударил, ещё до того, как карта перечитает позиции
+function gbLungeFx(from, box, target) {
+  var layer = cbEnsureFxLayer();
+  if (!layer || !target) return;
+  var tb = unitTypeById[target.unit_type] || {};
+  var x1 = (from.x + (box.w || 1) / 2) * CELL_PX, y1 = (from.y + (box.h || 1) / 2) * CELL_PX;
+  var x2 = (target.x + (tb.width_cells || 1) / 2) * CELL_PX, y2 = (target.y + (tb.height_cells || 1) / 2) * CELL_PX;
+  var len = Math.sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
+  var ang = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
+
+  var trail = document.createElement('div');
+  trail.className = 'fx-lunge';
+  trail.style.left = x1 + 'px';
+  trail.style.top = y1 + 'px';
+  trail.style.width = Math.max(8, len) + 'px';
+  trail.style.transform = 'rotate(' + ang + 'deg)';
+  layer.appendChild(trail);
+
+  var slash = document.createElement('div');
+  slash.className = 'fx-slash';
+  slash.style.left = x2 + 'px';
+  slash.style.top = y2 + 'px';
+  layer.appendChild(slash);
+
+  setTimeout(function() {
+    if (trail.parentNode) trail.parentNode.removeChild(trail);
+    if (slash.parentNode) slash.parentNode.removeChild(slash);
+  }, 900);
 }

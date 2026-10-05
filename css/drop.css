@@ -924,6 +924,7 @@
 .rs-tile.locked { opacity: 0.45; }
 
 #research-info {
+  font-family: 'Courier New', monospace;
   margin-top: 12px;
   padding: 11px;
   background: #16202e;
@@ -3002,3 +3003,53 @@
 }
 .stl-raid-bar i { display: block; height: 100%; background: linear-gradient(90deg, #d9a940, #d94a4a); }
 .stl-verdict.wait { background: rgba(217,169,64,0.10); color: #d9a940; }
+
+/* ===== Каталог исследований в цвете КНС ===== */
+body.fac-cis #research-title { color: #d94a4a; }
+body.fac-cis .rs-tile.active {
+  border-color: #d94a4a;
+  box-shadow: 0 0 0 2px rgba(217,74,74,0.25);
+}
+body.fac-cis .rs-go { background: #d94a4a; }
+body.fac-cis .rs-ship.active { background: #2a1517; border-color: #d94a4a; }
+body.fac-cis #building-info-research {
+  background: #2a1517;
+  border-color: #d94a4a;
+  color: #e07a7a;
+}
+
+/* ===== Рывок BX-коммандос: росчерк и удар клинком ===== */
+.fx-lunge {
+  position: absolute;
+  height: 6px;
+  margin-top: -3px;
+  transform-origin: 0 50%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgba(217,74,74,0) 0%, rgba(217,74,74,0.55) 55%, #ffb0a0 100%);
+  box-shadow: 0 0 10px rgba(217,74,74,0.8);
+  pointer-events: none;
+  animation: fx-lunge 0.7s ease-out forwards;
+}
+@keyframes fx-lunge {
+  0%   { opacity: 0; clip-path: inset(0 100% 0 0); }
+  25%  { opacity: 1; clip-path: inset(0 0 0 0); }
+  100% { opacity: 0; clip-path: inset(0 0 0 0); }
+}
+.fx-slash {
+  position: absolute;
+  width: 46px;
+  height: 46px;
+  margin: -23px 0 0 -23px;
+  border-radius: 50%;
+  border-top: 4px solid #ffd0c4;
+  border-right: 4px solid rgba(217,74,74,0.9);
+  box-shadow: 0 0 14px rgba(217,74,74,0.9);
+  pointer-events: none;
+  opacity: 0;
+  animation: fx-slash 0.6s 0.18s ease-out forwards;
+}
+@keyframes fx-slash {
+  0%   { opacity: 0; transform: rotate(-80deg) scale(0.6); }
+  35%  { opacity: 1; transform: rotate(10deg) scale(1.05); }
+  100% { opacity: 0; transform: rotate(60deg) scale(1.25); }
+}
