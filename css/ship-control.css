@@ -1159,7 +1159,7 @@
 /* Режим выбора точки: плитки уступают место карточке автохода */
 #ship-hud.mode-auto .sc-abils { display: none; }
 
-/* Плитка: автоход уже идёт — золотая точка в углу */
+/* Плитка: автоход уже идёт — золотая точка в углу (неподвижная) */
 .sc-tile { position: relative; }
 .sc-tile.am-running { border-color: rgba(217,169,64,0.55); color: #d9a940; }
 .sc-tile.am-running::after {
@@ -1171,12 +1171,7 @@
   height: 6px;
   border-radius: 50%;
   background: #d9a940;
-  box-shadow: 0 0 0 0 rgba(217,169,64,0.6);
-  animation: am-dot 1.8s ease-out infinite;
-}
-@keyframes am-dot {
-  0%   { box-shadow: 0 0 0 0 rgba(217,169,64,0.6); }
-  100% { box-shadow: 0 0 0 7px rgba(217,169,64,0); }
+  box-shadow: 0 0 6px rgba(217,169,64,0.7);
 }
 
 .am-ico { color: #d9a940; font-size: 14px; line-height: 1; }
@@ -1361,6 +1356,33 @@
   pointer-events: none;
 }
 
+/* Свой корабль на автоходе — значок ⇉ в правом верхнем углу: нити
+   спрятаны, а по значку видно, кто идёт; тап по кораблю покажет путь.
+   Неподвижный, одного размера на любом зуме */
+.ship-sprite.am-going::before {
+  content: '⇉';
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 2;
+  width: 18px;
+  height: 14px;
+  margin: -8px -6px 0 0;
+  box-sizing: border-box;
+  border: 1px solid #d9a940;
+  border-radius: 7px;
+  background: #0a0d14;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.65);
+  color: #d9a940;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  line-height: 12px;
+  text-align: center;
+  transform: scale(min(var(--fx-inv, 1), 2.4));
+  transform-origin: 12px 8px;
+  pointer-events: none;
+}
+
 /* --- нить маршрута ---
    Слой SVG живёт внутри поля и масштабируется вместе с ним. Толщину,
    штрих и узлы держим постоянными на экране через --fx-inv (обратный
@@ -1388,10 +1410,9 @@
   stroke-width: calc(2px * var(--am-k));
   stroke-linecap: round;
   stroke-linejoin: round;
+  /* Пунктир неподвижный: бегущий перерисовывал слой каждый кадр */
   stroke-dasharray: calc(8px * var(--am-k)) calc(7px * var(--am-k));
-  animation: am-flow 0.9s linear infinite;
 }
-@keyframes am-flow { to { stroke-dashoffset: calc(-15px * var(--am-k)); } }
 
 .am-node {
   r: calc(4px * var(--am-k));
@@ -1405,12 +1426,17 @@
   stroke-width: calc(1.5px * var(--am-k));
   stroke-dasharray: calc(6px * var(--am-k)) calc(4px * var(--am-k));
 }
-.am-pulse {
-  fill: none;
-  stroke: #d9a940;
-  stroke-width: calc(2px * var(--am-k));
-  transform-box: fill-box;
-  transform-origin: center;
+/* Пульс финиша — единственная анимация автохода на поле и только одна:
+   у выбранного корабля или в предпросмотре. HTML-рамка под кораблями:
+   transform и opacity у неё считает видеокарта */
+.am-pulse-box {
+  position: absolute;
+  box-sizing: border-box;
+  border: calc(2px * var(--fx-inv, 1)) solid #d9a940;
+  border-radius: 4px;
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform, opacity;
   animation: am-pulse 2s ease-out infinite;
 }
 @keyframes am-pulse {
@@ -1421,12 +1447,14 @@
 .am-dot { r: calc(3px * var(--am-k)); fill: #d9a940; }
 .am-ghost { opacity: 0.32; }
 
-/* Чужие для выбора нити — тише, выбранный корабль и его флот — ярче */
+/* Тусклая — прежний путь кораблей, которым сейчас выбирают новую точку;
+   выбранный корабль и его флот — ярко (без фильтра свечения: он дорогой) */
 .am-g.dim { opacity: 0.42; }
-.am-g.dim .am-line { animation-duration: 1.8s; stroke-width: calc(1.5px * var(--am-k)); }
+.am-g.dim .am-line { stroke-width: calc(1.5px * var(--am-k)); }
 .am-g.dim .am-under { stroke-width: calc(3.5px * var(--am-k)); }
 .am-g.dim .am-node { r: calc(3px * var(--am-k)); }
-.am-g.live:not(.dim) .am-line { filter: drop-shadow(0 0 calc(3px * var(--am-k)) rgba(217,169,64,0.55)); }
+.am-g.live:not(.dim) .am-line { stroke-width: calc(2.5px * var(--am-k)); }
+.am-g.live:not(.dim) .am-under { stroke-width: calc(6px * var(--am-k)); }
 .am-g.plan .am-line { stroke: #f0c35a; }
 .am-g.plan:not(.lead) { opacity: 0.85; }
 
@@ -1461,5 +1489,5 @@
 .am-tag.below { bottom: auto; top: 6px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .am-line, .am-pulse, .sc-tile.am-running::after { animation: none; }
+  .am-pulse-box { animation: none; opacity: 0.6; }
 }

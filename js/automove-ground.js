@@ -8,6 +8,11 @@
 // с холстом, а сам холст 4608×4608 перерисовывать ради линий дорого.
 // Толщины и пунктир держатся одинаковыми на любом зуме через --fx-inv.
 //
+// Бережём устройство: нить видна только у выбранного бойца с его отрядом
+// (и в выборе точки). Остальных идущих выдаёт неподвижный значок ⇉ в углу
+// бойца. Пунктир неподвижный; живёт одна анимация — пульс финиша
+// выбранного, и та на отдельном HTML-слое (только transform и opacity).
+//
 // Геометрия шагов совпадает с серверной один в один (см. контракт):
 // n = ceil(dist / range), xk = x0 + floor((2·dx·k + n) / (2n)).
 
@@ -25,8 +30,13 @@ var amPollTimer = null;
 var amTicker = null;
 var amSvg = null;
 var amTags = null;
+var amMarks = null;        // слой значков ⇉ у идущих бойцов
+var amRenderSig = '';      // что нарисовано сейчас: одинаковое не перерисовываем
+var amMarkSig = '';
+var amPosMemo = {};        // где стояли идущие: сдвинулся — значит, был шаг
+var amFocusTimer = null;
 var amPick = null;         // режим выбора: { leaderId, ids, grouping, target, busy, error }
-var amFocusIds = null;     // только что отправленный отряд светится ярко, пока не выбран другой
+var amFocusIds = null;     // только что отправленный отряд виден несколько секунд после «Вперёд»
 var amLeaders = {};        // group_id -> id ведущего (знаем только для своих запусков)
 var amLeadUnits = {};      // кого вели при запуске: по ним находим ведущего в строках отряда
 var amHpMemo = {};         // прочность идущих: по ней видно, кого именно ранили
@@ -239,8 +249,25 @@ function amApply(rows) {
   if (amPollTimer) { clearTimeout(amPollTimer); amPollTimer = null; }
   if (amHasActive()) amPollTimer = setTimeout(function() { amPollTimer = null; amLoad(); }, 20000);
 
+  amMovedSince();
   amRender();
+  amRenderMarks();
   amRefreshStrip();
+}
+
+// Сдвинулся ли кто-то из идущих с прошлого раза. Заодно запоминаем,
+// где стоят сейчас
+function amMovedSince() {
+  var moved = false, next = {};
+  amRows.forEach(function(r) {
+    if (r.status !== 'active') return;
+    var u = amUnit(r.unit_id);
+    var at = amOnMap(u) ? u.x + ':' + u.y : '-';
+    next[r.unit_id] = at;
+    if (amPosMemo[r.unit_id] !== undefined && amPosMemo[r.unit_id] !== at) moved = true;
+  });
+  amPosMemo = next;
+  return moved;
 }
 
 // ---------- Сводки об окончании ----------
@@ -377,14 +404,40 @@ function amEnsureLayer() {
     amSvg = document.createElementNS(AM_SVG_NS, 'svg');
     amSvg.setAttribute('id', 'am-svg');
     layer.insertBefore(amSvg, layer.firstChild);
+    amMarks = document.createElement('div');
+    amMarks.id = 'am-marks';
+    layer.insertBefore(amMarks, amSvg.nextSibling);
     amTags = document.createElement('div');
     amTags.id = 'am-tags';
-    layer.insertBefore(amTags, amSvg.nextSibling);
+    layer.insertBefore(amTags, amMarks.nextSibling);
+    amRenderSig = '';
+    amMarkSig = '';
   }
   return true;
 }
 
-// Кого показывать ярко: выбранного бойца со всем его отрядом
+// Значок ⇉ в правом верхнем углу каждого своего идущего бойца: по нему
+// их видно на карте, когда нити спрятаны. Без анимации, перерисовка —
+// только когда кто-то сдвинулся, начал или закончил путь
+function amRenderMarks() {
+  if (!amEnsureLayer()) return;
+  var html = [], sig = [];
+  amRows.forEach(function(r) {
+    if (r.status !== 'active') return;
+    var u = amUnit(r.unit_id);
+    if (!amOnMap(u)) return;
+    var b = unitBox(u);
+    sig.push(r.unit_id + ':' + u.x + ':' + u.y + ':' + b.w);
+    html.push('<div class="am-markpos" style="left:' + ((u.x + b.w) * CELL_PX) + 'px;top:' +
+              (u.y * CELL_PX) + 'px"><i class="am-mark">⇉</i></div>');
+  });
+  var s = sig.join('|');
+  if (s === amMarkSig) return;
+  amMarkSig = s;
+  amMarks.innerHTML = html.join('');
+}
+
+// Чью нить показывать: выбранного бойца со всем его отрядом
 function amBrightSet() {
   var set = {};
   if (selectedUnit && selectedUnit.owner_user_id === currentUserId) {
@@ -402,6 +455,7 @@ function amCenter(x, y, b) {
 function amRender() {
   if (!amEnsureLayer()) return;
   var svg = [], tags = [];
+  var pulse = '';
   var bb = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
   var grow = function(px, py) {
     if (px < bb.x0) bb.x0 = px; if (py < bb.y0) bb.y0 = py;
@@ -428,9 +482,16 @@ function amRender() {
       '<path class="am-shadow" d="' + d + '"/>' +
       '<path class="am-line" d="' + d + '"/>' +
       (nodes ? '<path class="am-node" d="' + nodes + '"/><path class="am-node-in" d="' + nodes + '"/>' : '') +
-      '<rect class="am-fin-halo" x="' + (fx + 1) + '" y="' + (fy + 1) + '" width="' + (fw - 2) + '" height="' + (fh - 2) + '" rx="5"/>' +
       '<rect class="am-fin" x="' + (fx + 1) + '" y="' + (fy + 1) + '" width="' + (fw - 2) + '" height="' + (fh - 2) + '" rx="5"/>' +
       '</g>');
+  };
+
+  // Пульс финиша — один на карте: HTML-рамка с анимацией transform/opacity,
+  // её считает видеокарта, а не перерисовка всего SVG
+  var pulseAt = function(u, f, cls) {
+    var b = unitBox(u);
+    pulse = '<div class="am-pulse-box ' + cls + '" style="left:' + (f[0] * CELL_PX + 1) + 'px;top:' +
+      (f[1] * CELL_PX + 1) + 'px;width:' + (b.w * CELL_PX - 2) + 'px;height:' + (b.h * CELL_PX - 2) + 'px"></div>';
   };
 
   var tag = function(u, f, text, cls) {
@@ -451,17 +512,20 @@ function amRender() {
   var picking = {};
   if (amPick) amPick.ids.forEach(function(id) { picking[id] = true; });
 
-  // Идущие автоходы: всегда, тонко; выбранный отряд — ярко
+  // Идущие автоходы: нить только у выбранного бойца и его отряда.
+  // В выборе точки прежний путь бойцов отряда виден тускло, пока
+  // новая точка не выбрана, — потом его сменяет предпросмотр
   var bright = amBrightSet();
   var lit = [];
   amRows.forEach(function(r) {
     if (r.status !== 'active' || !r.path || !r.path.length) return;
+    var old = !!(amPick && picking[r.unit_id]);
+    if (old && amPick.target) return;
+    if (!old && !bright[r.unit_id]) return;
     var u = amUnit(r.unit_id);
     if (!amOnMap(u)) return;
-    // У тех, кому сейчас выбирают новую точку, старая нить приглушена
-    var hi = bright[r.unit_id] && !(amPick && amPick.target && picking[r.unit_id]);
-    thread(u, r.path, hi ? 'live hi' : 'live');
-    if (hi) lit.push(r);
+    thread(u, r.path, old ? 'live' : 'live hi');
+    if (!old) lit.push(r);
   });
 
   // Подпись у финиша выбранного: у ведущего или у самого дальнего
@@ -477,8 +541,9 @@ function amRender() {
       lit.forEach(function(r) { if (amLeaders[r.group_id] === r.unit_id) main = r; });
     }
     main = main || lit[0];
-    tag(amUnit(main.unit_id), main.path[main.path.length - 1],
-        amStepsWord(steps) + ' · ' + amEtaText(eta), 'live');
+    var mu = amUnit(main.unit_id), mf = main.path[main.path.length - 1];
+    tag(mu, mf, amStepsWord(steps) + ' · ' + amEtaText(eta), 'live');
+    pulseAt(mu, mf, 'live');
   }
 
   // Предпросмотр
@@ -494,9 +559,17 @@ function amRender() {
       if (L && L.path.length) {
         tag(L.u, L.path[L.path.length - 1],
             amStepsWord(plan.steps) + ' · ' + amEtaText(plan.eta), 'plan');
+        pulseAt(L.u, L.path[L.path.length - 1], 'plan');
       }
     }
   }
+
+  amLastSelId = selectedUnit ? selectedUnit.id : null;
+  // То же самое уже на карте — DOM не трогаем: перерисовка войск
+  // каждые несколько секунд не должна пересобирать нити
+  var sig = svg.join('') + '#' + pulse + tags.join('');
+  if (sig === amRenderSig) return;
+  amRenderSig = sig;
 
   if (!svg.length) {
     amSvg.style.display = 'none';
@@ -513,9 +586,8 @@ function amRender() {
     amSvg.style.display = 'block';
     amSvg.innerHTML = svg.join('');
   }
-  amTags.innerHTML = tags.join('');
+  amTags.innerHTML = pulse + tags.join('');
   amFitTags();
-  amLastSelId = selectedUnit ? selectedUnit.id : null;
 }
 
 // Подпись у края экрана не должна уезжать за него: сдвигаем внутрь.
@@ -538,14 +610,21 @@ function amFitTags() {
   }
 }
 
-// Карта перерисовалась — возможно, сменился выбранный боец
+// Карта перерисовалась — возможно, сменился выбранный боец.
+// Выбор сменился — подсветка только что отправленного отряда гаснет
 function amOnRedraw() {
   var id = selectedUnit ? selectedUnit.id : null;
-  if (amFocusIds && id && !amFocusIds[id]) amFocusIds = null;
-  if (id !== amLastSelId) amRender();
+  if (id === amLastSelId) return;
+  amClearFocus();
+  amRender();
 }
 
-// Войска сдвинулись: начало нити переезжает за бойцом
+function amClearFocus() {
+  amFocusIds = null;
+  if (amFocusTimer) { clearTimeout(amFocusTimer); amFocusTimer = null; }
+}
+
+// Войска сдвинулись: начало нити и значки переезжают за бойцами
 function amAfterUnits() {
   if (amPick) {
     // Кто ушёл с карты (сел в транспорт, погиб), из отряда выпадает
@@ -554,7 +633,10 @@ function amAfterUnits() {
     amPaintCard();
   }
   amRender();
-  if (amHasActive()) amLoadSoon(600);
+  amRenderMarks();
+  // Кто-то из идущих шагнул — путь на сервере стал короче. Реалтайм
+  // обычно уже сказал об этом; если нет, перечитываем сами
+  if (amMovedSince()) amLoadSoon(600);
 }
 
 // ---------- Строка состояния в панели бойца ----------
@@ -641,6 +723,7 @@ function amStripAction(unit, act, btn) {
     amSaveSeen();
     ids.forEach(function(id) { var u = amUnit(id); if (amOnMap(u)) cbFloatOnUnit(u, 'стоп', 'miss'); });
     amRender();
+    amRenderMarks();
     amPanelStrip(document.getElementById('pickup-bar'), unit);
     if (bar && bar.style.visibility !== 'hidden') setBottomInset(insetFor(bar));
     amLoadSoon(300);
@@ -702,6 +785,7 @@ function amStartPick(unit) {
     if (r.unit_id !== unit.id && amOnMap(amUnit(r.unit_id)) && ids.length < AM_MAX_GROUP) ids.push(r.unit_id);
   });
 
+  amClearFocus();
   amPick = { leaderId: unit.id, ids: ids, grouping: false, target: null, busy: false, error: '' };
   // Плитка не остаётся «нажатой» с пустым описанием, когда панель откроют снова
   guPickedAbility = null;
@@ -941,8 +1025,16 @@ function amGo() {
     rows.forEach(function(x) { steps = Math.max(steps, x.steps || 0); });
     if (!steps) steps = plan.steps;
 
+    // Только что отправленный отряд виден несколько секунд, потом
+    // нить прячется — дальше его выдаёт значок ⇉ и тап по бойцу
+    amClearFocus();
     amFocusIds = {};
     ids.forEach(function(id) { amFocusIds[id] = true; delete amLeadUnits[id]; });
+    amFocusTimer = setTimeout(function() {
+      amFocusTimer = null;
+      amFocusIds = null;
+      amRender();
+    }, 6000);
     amLeadUnits[pick.leaderId] = true;
     amCancelPick();
 

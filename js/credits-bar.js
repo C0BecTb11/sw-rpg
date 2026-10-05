@@ -24,11 +24,7 @@ function initCreditsBar() {
     if (!res.data.session) return;
     creditsBarUserId = res.data.session.user.id;
 
-    supabase.rpc('get_my_profile').then(function(profRes) {
-      if (!profRes.error && profRes.data && profRes.data.length > 0) {
-        renderCreditsBar(profRes.data[0].credits);
-      }
-    });
+    refreshCreditsBar();
 
     supabase
       .channel('credits-' + creditsBarUserId)
@@ -38,12 +34,34 @@ function initCreditsBar() {
         table: 'profiles',
         filter: 'id=eq.' + creditsBarUserId
       }, function(payload) {
+        // Столбец credits закрыт от чтения напрямую (чужой баланс не должен
+        // быть виден), поэтому в событии его нет — сумму берём у сервера
         if (payload.new && typeof payload.new.credits !== 'undefined') {
           renderCreditsBar(payload.new.credits);
+        } else {
+          refreshCreditsSoon();
         }
       })
       .subscribe();
   });
+}
+
+function refreshCreditsBar() {
+  supabase.rpc('get_my_profile').then(function(profRes) {
+    if (!profRes.error && profRes.data && profRes.data.length > 0) {
+      renderCreditsBar(profRes.data[0].credits);
+    }
+  });
+}
+
+// Несколько изменений подряд (покупка + списание) — один запрос
+var creditsRefreshTimer = null;
+function refreshCreditsSoon() {
+  if (creditsRefreshTimer) return;
+  creditsRefreshTimer = setTimeout(function() {
+    creditsRefreshTimer = null;
+    refreshCreditsBar();
+  }, 400);
 }
 
 document.addEventListener('DOMContentLoaded', initCreditsBar);

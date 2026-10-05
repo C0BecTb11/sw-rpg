@@ -239,7 +239,7 @@ function makeFeedRow(e) {
 // Число в событии: урон, лечение, кредиты
 var FEED_AMOUNT = {
   unit_hit: 'dmg', unit_damaged: 'dmg', artillery_hit: 'dmg', ship_hit: 'dmg',
-  return_fire: 'dmg', unit_healed: 'heal',
+  return_fire: 'dmg', npc_return_fire: 'dmg', unit_healed: 'heal',
   settlement_festival: 'cr', settlement_donation: 'cr'
 };
 
@@ -260,16 +260,23 @@ var FEED_STATION = feedSet(['station_built', 'station_started']);
 var FEED_SETTLEMENT = feedSet(['district_built', 'district_started', 'settlement_upgrade',
   'settlement_level_up', 'settlement_hungry', 'settlement_failed', 'settlement_gift',
   'settlement_donation', 'settlement_festival', 'settlement_income', 'capture_started',
-  'planet_captured', 'marauder_raid', 'marauder_loot']);
+  'planet_captured', 'marauder_raid', 'marauder_loot',
+  // Дневной налёт: разведка, подход, итог — к строке задачи в панели поселения
+  // (marauder_raid несёт x/y вожака и ведёт прямо к банде)
+  'marauder_scouted', 'marauder_approach', 'marauder_defeated', 'marauder_left']);
 
 // Земля без точного места — просто карта планеты
 var FEED_GROUND = feedSet(['unit_deployed', 'unit_loaded', 'unit_killed', 'unit_damaged',
   'unit_missed', 'unit_hit', 'unit_healed', 'hero_died', 'hero_hired', 'hero_trained',
-  'hero_training', 'artillery_strike', 'artillery_hit', 'return_fire', 'turret_report',
+  'hero_training', 'artillery_strike', 'artillery_hit', 'return_fire', 'npc_return_fire', 'turret_report',
   'structure_built', 'structure_started', 'structure_lost', 'structure_destroyed',
   'scout_arrived', 'scout_jammed', 'building_built', 'building_started', 'building_demolished',
   'research_done', 'production_idle', 'mind_released', 'troops_pushed_out', 'militia_raised', 'ability_used', 'enemy_spotted',
   'repair_done']);
+
+// Поселение: события налёта и условий — сразу на вкладку «Условия»
+var FEED_STL_TASKS = feedSet(['marauder_scouted', 'marauder_approach', 'marauder_defeated',
+  'marauder_left', 'settlement_failed', 'settlement_hungry']);
 
 // Здание: по готовности сразу открываем его занятие (наём, исследования)
 var FEED_OPEN_SLOT = feedSet(['building_built', 'research_done', 'production_idle']);
@@ -297,7 +304,9 @@ function feedTarget(e) {
   if (xy) return 'ground-battle.html?' + sys + xy;
   // Квартал тоже несёт slot, но это участок поселения, а не базы —
   // поэтому поселение проверяем раньше построек
-  if (FEED_SETTLEMENT[e.type]) return 'ground-battle.html?' + sys + '&open=settlement';
+  if (FEED_SETTLEMENT[e.type]) {
+    return 'ground-battle.html?' + sys + '&open=settlement' + (FEED_STL_TASKS[e.type] ? '&tab=tasks' : '');
+  }
   if (has(m.slot)) {
     return 'ground-battle.html?' + sys + '&slot=' + m.slot +
       (FEED_OPEN_SLOT[e.type] ? '&open=slot' : '') +

@@ -7,15 +7,22 @@
 // раз в полминуты и только пока экран открыт; значок на нижней панели —
 // раз в минуту, двумя лёгкими запросами.
 //
-// Снаружи нужны: openSupplyScreen(tab) — её зовёт фракционная панель,
-// closeSupplyScreen(). Вкладки: 'network' | 'routes' | 'stores' | 'access'.
+// Снаружи нужны: openSupplyScreen(tab, ctx) — её зовут фракционная панель,
+// нижняя панель галактики и логистический хаб на наземной карте;
+// closeSupplyScreen(). Вкладки: 'network' | 'routes' | 'stores' | 'market' | 'access'.
+// ctx = { hub: system_id, name } — экран открыт из хаба этой планеты:
+// склады отфильтрованы по ней, новый рейс и вывоз покупок начинаются отсюда.
+//
+// Экран — единственный интерфейс логистики: старая панель хаба (конвои и
+// рынок) перенесена сюда целиком, торговый пост и добыча живут отдельно.
 
 (function() {
 
   var TABS = [
     { id: 'network', label: 'Сеть' },
     { id: 'routes',  label: 'Рейсы' },
-    { id: 'stores',  label: 'Мои склады' },
+    { id: 'stores',  label: 'Склады' },
+    { id: 'market',  label: 'Рынок' },
     { id: 'access',  label: 'Доступ' }
   ];
 
@@ -49,7 +56,18 @@
     openRule: {},                    // 'sys|res' → раскрыт редактор правила
     showAll: {},                     // планета → показать все ресурсы
     drafts: {},                      // 'sys|res' → черновик правила
-    saving: {}
+    saving: {},
+    hub: null,                       // { id, name } — экран открыт из хаба этой планеты
+    storeSys: null,                  // «Склады»: показать только эту планету
+    convoys: null,                   // конвои старого образца, ещё в пути
+    lots: null, orders: null, mylots: null,   // рынок
+    mkt: 'lots',                     // рынок: lots | orders | mine
+    mktRes: 'all',                   // фильтр лотов по ресурсу
+    buyQty: {},                      // лот → сколько купить
+    pick: null,                      // открытая форма вывоза покупки
+    cmds: null, cmdsError: null,     // командиры для вывоза
+    hubs: {},                        // планета → есть ли достроенный хаб (true/false)
+    lotForm: null                    // черновик нового лота
   };
 
   var timer = null, ticks = 0, badgeTimer = null, toastTimer = null;
@@ -159,15 +177,30 @@
     routes:   'get_my_supply_routes',
     planets:  'get_my_supply_planets',
     grants:   'get_supply_grants',
-    partners: 'get_supply_partners'
+    partners: 'get_supply_partners',
+    convoys:  'get_my_convoys',
+    lots:     { fn: 'get_market_lots', args: { p_resource: null } },
+    orders:   'get_my_market_orders',
+    mylots:   'get_my_market_lots'
   };
 
   var TAB_KEYS = {
     network: ['network', 'grants', 'routes', 'planets'],
-    routes:  ['routes'],
+    routes:  ['routes', 'convoys'],
     stores:  ['planets'],
+    market:  ['lots', 'orders', 'mylots', 'planets'],
     access:  ['grants', 'partners']
   };
+
+  // Списки с обратным отсчётом: сервер даёт «осталось секунд», а мы
+  // превращаем это в момент по своим часам — так отсчёт не зависит от
+  // расхождения часов клиента и сервера
+  function stampUntil(rows) {
+    var now = Date.now();
+    (rows || []).forEach(function(r) {
+      if (r && r.seconds_left !== undefined && r.seconds_left !== null) r._until = now + num(r.seconds_left) * 1000;
+    });
+  }
 
   // Один и тот же список не запрашиваем дважды: второй ждёт первый ответ
   var waiters = {};
@@ -180,12 +213,14 @@
       if (st.loading[k]) { waiters[k].push(fin); return; }
       st.loading[k] = true;
       waiters[k] = [fin];
-      call(LOADERS[k]).then(function(res) {
+      var L = LOADERS[k];
+      call(L.fn || L, L.args).then(function(res) {
         st.loading[k] = false;
         if (res.error) st.errors[k] = errText(res.error);
         else {
           st[k] = res.data || [];
           st.errors[k] = null;
+          if (k === 'orders' || k === 'convoys') stampUntil(st[k]);
           // Свежие правила с сервера: черновики без правок больше не нужны,
           // иначе после смены правила или контроля они покажут старое
           if (k === 'planets') {
@@ -274,7 +309,8 @@
     el.innerHTML =
       '<div class="sup-head">' +
         '<div class="sup-head-row">' +
-          '<span class="sup-title">Снабжение</span>' +
+          '<div class="sup-title-box"><span class="sup-title">Снабжение</span>' +
+            '<span class="sup-sub" id="sup-sub"></span></div>' +
           '<button type="button" class="sup-close" id="sup-close" aria-label="Закрыть">✕</button>' +
         '</div>' +
         '<div class="sup-tabs" id="sup-tabs">' +
@@ -297,9 +333,24 @@
     return el;
   }
 
-  function openSupplyScreen(tab) {
+  function openSupplyScreen(tab, ctx) {
     var el = buildShell();
     if (tab && TAB_KEYS[tab]) st.tab = tab;
+
+    // Из хаба — склады этой планеты и рейсы отсюда; без контекста — вся сеть
+    var hubId = ctx && ctx.hub ? String(ctx.hub) : null;
+    if (hubId) {
+      st.hub = { id: hubId, name: ctx.name || null };
+      st.storeSys = hubId;
+      st.hubs[hubId] = true;
+    } else {
+      st.hub = null;
+      st.storeSys = null;
+    }
+    st.pick = null;
+    st.lotForm = null;
+    paintSubtitle();
+
     st.open = true;
     el.style.display = 'block';
     el.scrollTop = 0;
@@ -307,8 +358,10 @@
     bodyEl().innerHTML = '<div class="sup-loading">Загрузка…</div>';
 
     ensureBasics(function() {
+      // Имя планеты хаба знает справочник систем — на наземной карте его больше негде взять
+      if (st.hub && !st.hub.name) loadSystems(function() { if (st.hub) { st.hub.name = sysName(st.hub.id); paintSubtitle(); if (st.open) render(); } });
       // Остальные вкладки — фоном, ради счётчиков на них
-      load(['routes', 'grants', 'network', 'planets'], function() { if (st.open) { updateTabCounts(); updateNavBadge(); } });
+      load(['routes', 'grants', 'network', 'planets', 'orders'], function() { if (st.open) { updateTabCounts(); updateNavBadge(); } });
       refreshTab();
     });
 
@@ -327,6 +380,22 @@
     if (el) el.style.display = 'none';
     closeEditor();
     if (timer) { clearInterval(timer); timer = null; }
+  }
+
+  function hubName() {
+    return st.hub ? (st.hub.name || sysName(st.hub.id)) : '';
+  }
+
+  function paintSubtitle() {
+    var el = document.getElementById('sup-sub');
+    if (!el) return;
+    if (st.hub) {
+      el.innerHTML = '<i></i>Логистический хаб · <b>' + esc(hubName()) + '</b>';
+      el.style.display = '';
+    } else {
+      el.innerHTML = '';
+      el.style.display = 'none';
+    }
   }
 
   function switchTab(tab) {
@@ -377,7 +446,19 @@
     (st.planets || []).forEach(function(p) { planets[p.system_id] = 1; });
     setTabCount('stores', Object.keys(planets).length, '');
 
+    // Рынок: оплаченные покупки, за которыми ещё не послан флот
+    setTabCount('market', waitingOrders().length, 'gold');
+
     setTabCount('access', incomingRequests().length, 'alert');
+  }
+
+  function waitingOrders() {
+    return (st.orders || []).filter(function(o) { return !o.fleet_sent && untilLeft(o) > 0; });
+  }
+
+  function untilLeft(row) {
+    if (!row || !row._until) return num(row && row.seconds_left);
+    return Math.max(0, Math.round((row._until - Date.now()) / 1000));
   }
 
   // ── Значок на нижней панели ────────────────────────────────────────
@@ -412,6 +493,9 @@
     var body = bodyEl();
     if (!body || !st.open) return;
     var keys = TAB_KEYS[st.tab];
+    // Рынок сам показывает загрузку и ошибки под переключателем разделов —
+    // иначе сбой одного списка отрезал бы два других
+    if (st.tab === 'market') { body.innerHTML = renderMarket(); return; }
     var mainKey = { network: 'network', routes: 'routes', stores: 'planets', access: 'grants' }[st.tab];
     if (st[mainKey] === null && st.errors[mainKey]) {
       body.innerHTML = '<div class="sup-empty"><b>Не удалось загрузить</b>' + esc(st.errors[mainKey]) +
@@ -479,8 +563,8 @@
     if (!order.length) {
       return h + '<div class="sup-empty"><b>Сеть пока пуста</b>' +
         'Никто во фракции не открыл склады и не заявил нужд.<br>' +
-        'Открой свои — во вкладке «Мои склады»: выбери ресурс, включи «В сеть» и задай, сколько оставлять себе.' +
-        '<br><button type="button" class="sup-btn" data-act="tab" data-tab="stores">Мои склады ›</button></div>';
+        'Открой свои — во вкладке «Склады»: выбери ресурс, включи «В сеть» и задай, сколько оставлять себе.' +
+        '<br><button type="button" class="sup-btn" data-act="tab" data-tab="stores">Склады ›</button></div>';
     }
 
     h += '<div class="sup-seg sup-filter">' +
@@ -490,7 +574,7 @@
     '</div>';
 
     // Сначала планеты с нуждой (туда и надо везти), потом самые полные склады.
-    // Свои — в конце: они видны и во «Моих складах»
+    // Свои — в конце: они видны и во вкладке «Склады»
     var list = order.map(function(id) { return bySys[id]; });
     list.sort(function(a, b) {
       if (a.mine !== b.mine) return a.mine ? 1 : -1;
@@ -636,7 +720,10 @@
         var toward = r.phase === 'travel' && r.status !== 'stopped' && i === idx;
         chain += '<span class="sup-link' + (toward ? (stt.cls === 'travel' ? ' moving' : ' toward') : '') + '"></span>';
       }
-      chain += '<div class="' + cls + '"><span class="sup-node-dot">' + (i + 1) + '</span>' +
+      // Разовый рейс «и домой»: последняя остановка без действий на первой планете
+      var home = !r.loop && i > 0 && i === stops.length - 1 && stops[0] && s.system_id === stops[0].system_id &&
+        !(s.actions || []).length;
+      chain += '<div class="' + cls + (home ? ' home' : '') + '"><span class="sup-node-dot">' + (home ? '↩' : (i + 1)) + '</span>' +
         '<span class="sup-node-name">' + esc(shortName(stopName(s))) + '</span></div>';
     });
     if (r.loop && stops.length) {
@@ -711,14 +798,22 @@
     var rank = { stalled: 0, active: 1, paused: 2 };
     live.sort(function(a, b) { return (rank[a.status] || 3) - (rank[b.status] || 3); });
 
-    var h = '<button type="button" class="sup-new" data-act="route-new"><span>+</span>Новый рейс</button>';
+    var h = '<button type="button" class="sup-new" data-act="route-new"><span>+</span>Новый рейс' +
+      (st.hub ? '<em>отсюда · ' + esc(hubName()) + '</em>' : '') + '</button>';
+
+    var convoys = (st.convoys || []).filter(function(c) { return c.status === 'in_flight' || c.status === 'stalled'; });
 
     if (!live.length) {
       h += '<div class="sup-empty"><b>Рейсов нет</b>' +
-        'Рейс — это флот, который сам возит груз между планетами по кругу: забирает там, где отдают, и выгружает там, где нужно.<br><br>' +
+        'Рейс — это флот, который сам возит груз: один раз туда (и, если нужно, обратно) или по кругу — забирает там, где отдают, и выгружает там, где нужно.<br><br>' +
         'Чтобы запускать рейсы, нужен логистический хаб хотя бы на одной твоей планете.</div>';
     } else {
       h += live.map(renderRoute).join('');
+    }
+
+    if (convoys.length) {
+      h += '<div class="sup-section">Конвои в пути<span class="sup-count blue">' + convoys.length + '</span></div>';
+      h += convoys.map(renderConvoy).join('');
     }
 
     if (done.length) {
@@ -728,8 +823,40 @@
     return h;
   }
 
+  // Конвой старого образца (отправка со склада или вывоз покупки):
+  // только показ — управлять им уже нечем, он долетит сам
+  var CONVOY_STAGE = { to_pickup: 'к продавцу', to_dest: 'везёт груз', returning: 'возвращается' };
+
+  function renderConvoy(c) {
+    var bad = c.status === 'stalled';
+    var path = (c.kind === 'market' && c.pickup_name)
+      ? esc(c.pickup_name) + ' → ' + esc(c.to_name)
+      : esc(c.from_name) + ' → ' + esc(c.to_name);
+    var left = untilLeft(c);
+    return '<div class="sup-convoy' + (bad ? ' bad' : '') + '">' +
+      '<div class="sup-convoy-info">' +
+        '<div class="sup-convoy-cargo">' + (c.kind === 'market' ? '<span class="sup-tag buy">покупка</span> ' : '') +
+          esc(c.cargo_text || 'груз') + '</div>' +
+        '<div class="sup-convoy-path">' + path + (c.return_home ? ' <span>· и обратно</span>' : '') + '</div>' +
+      '</div>' +
+      '<div class="sup-convoy-state">' +
+        (bad ? '<span class="sup-pill stalled"><i></i>встал</span>'
+             : '<span class="sup-pill travel"><i></i>' + esc(CONVOY_STAGE[c.stage] || 'в пути') + '</span>' +
+               '<span class="sup-left" data-until="' + num(c._until) + '" data-zero="прибывает">' + (left > 0 ? leftText(left) : 'прибывает') + '</span>') +
+      '</div>' +
+    '</div>';
+  }
+
   // Локальный отсчёт: только цифры, без перерисовки карточек
   function tickRoutes() {
+    // Брони и конвои: отсчёт от момента, а не от счётчика
+    var us = document.querySelectorAll('#sup-body [data-until]');
+    for (var u = 0; u < us.length; u++) {
+      var ms = num(us[u].getAttribute('data-until'));
+      if (!ms) continue;
+      var sec = Math.max(0, Math.round((ms - Date.now()) / 1000));
+      us[u].textContent = sec > 0 ? leftText(sec) : (us[u].getAttribute('data-zero') || '');
+    }
     if (!st.routes) return;
     var arrived = false;
     st.routes.forEach(function(r) {
@@ -753,7 +880,7 @@
     return null;
   }
 
-  // ── Вкладка «Мои склады» ───────────────────────────────────────────
+  // ── Вкладка «Склады» ───────────────────────────────────────────────
 
   function ruleKey(sys, res) { return sys + '|' + res; }
 
@@ -798,7 +925,25 @@
       bySys[r.system_id].push(r);
     });
 
-    var h = '<div class="sup-note">Включи «В сеть» — и снабженцы фракции смогут забирать излишки рейсами. ' +
+    var h = '';
+    // Из хаба: сначала склад этой планеты, остальные — по кнопке
+    if (st.hub) {
+      var hubMine = !!bySys[st.hub.id];
+      h += '<div class="sup-seg sup-scope">' +
+        segBtn('scope', 'hub', '<i class="sup-dot"></i><span>' + esc(hubName()) + '</span>', st.storeSys === st.hub.id, hubMine ? '' : 'dim') +
+        segBtn('scope', 'all', 'Все планеты · ' + order.length, st.storeSys !== st.hub.id) +
+      '</div>';
+      if (st.storeSys === st.hub.id) {
+        if (!hubMine) {
+          return h + '<div class="sup-empty"><b>Склад не твой</b>Планетой ' + esc(hubName()) +
+            ' сейчас управляет другой игрок — правила её склада задаёт он.' +
+            '<br><button type="button" class="sup-btn" data-act="seg" data-group="scope" data-val="all">Все мои склады ›</button></div>';
+        }
+        order = [st.hub.id];
+      }
+    }
+
+    h += '<div class="sup-note">Включи «В сеть» — и снабженцы фракции смогут забирать излишки рейсами. ' +
       '«Оставлять себе» никто, кроме тебя, не тронет. «Желаемый запас» покажет планету в сети как нужду.</div>';
 
     order.forEach(function(sysId) {
@@ -1069,6 +1214,671 @@
     return h;
   }
 
+  // ── Вкладка «Рынок» ────────────────────────────────────────────────
+  // Лоты галактики, оплаченные покупки (их вывозит свой флот) и свои лоты.
+  // Деньги, остатки и пути считает сервер; здесь — формы и подсказки.
+
+  var HUB_CODES = { rep_logistics: 1, cis_logistics: 1 };
+
+  function renderMarket() {
+    var waiting = waitingOrders().length;
+    var lots = foreignLots();
+    var h = '<div class="sup-seg sup-mkt">' +
+      segBtn('mkt', 'lots', 'Лоты' + (st.lots ? ' · ' + lots.length : ''), st.mkt === 'lots') +
+      segBtn('mkt', 'orders', 'Куплено' + (waiting ? '<i class="sup-seg-n">' + waiting + '</i>' : ''), st.mkt === 'orders') +
+      segBtn('mkt', 'mine', 'Мои лоты' + (st.mylots && st.mylots.length ? ' · ' + st.mylots.length : ''), st.mkt === 'mine') +
+    '</div>';
+
+    var key = { lots: 'lots', orders: 'orders', mine: 'mylots' }[st.mkt];
+    if (st[key] === null) {
+      if (st.errors[key]) {
+        return h + '<div class="sup-empty"><b>Не удалось загрузить</b>' + esc(st.errors[key]) +
+          '<br><button type="button" class="sup-btn" data-act="retry">Повторить</button></div>';
+      }
+      return h + '<div class="sup-loading">Загрузка…</div>';
+    }
+    if (st.mkt === 'lots') return h + renderLots(lots);
+    if (st.mkt === 'orders') return h + renderOrders();
+    return h + renderMine();
+  }
+
+  function foreignLots() {
+    return (st.lots || []).filter(function(l) { return !l.mine && num(l.amount_left) > 0; });
+  }
+
+  function findBy(list, key, id) {
+    list = list || [];
+    for (var i = 0; i < list.length; i++) if (String(list[i][key]) === String(id)) return list[i];
+    return null;
+  }
+
+  function resDot(res, color) {
+    return '<i style="background:' + esc(color || resInfo(res).color) + '"></i>';
+  }
+
+  function money(n) {
+    // 12400 → «12 400»: тонкий неразрывный пробел между тысячами
+    return String(num(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  }
+
+  // ---------- Лоты ----------
+
+  function buyQty(l) {
+    var q = st.buyQty[l.lot_id];
+    if (q === undefined) q = Math.min(10, num(l.amount_left));
+    return Math.max(0, Math.min(num(l.amount_left), q));
+  }
+
+  function renderLots(list) {
+    if (!list.length) {
+      return '<div class="sup-empty"><b>Лотов нет</b>Сейчас в галактике никто ничего не продаёт.<br>' +
+        'Выставить свой товар можно в разделе «Мои лоты».</div>';
+    }
+
+    var kinds = [];
+    list.forEach(function(l) { if (kinds.indexOf(l.resource) < 0) kinds.push(l.resource); });
+    if (st.mktRes !== 'all' && kinds.indexOf(st.mktRes) < 0) st.mktRes = 'all';
+
+    var h = '';
+    if (kinds.length > 1) {
+      h += '<div class="sup-fchips">' +
+        '<button type="button" class="sup-fchip' + (st.mktRes === 'all' ? ' on' : '') + '" data-act="seg" data-group="mktres" data-val="all">Все · ' + list.length + '</button>' +
+        kinds.map(function(k) {
+          var n = list.filter(function(l) { return l.resource === k; }).length;
+          return '<button type="button" class="sup-fchip' + (st.mktRes === k ? ' on' : '') + '" data-act="seg" data-group="mktres" data-val="' + esc(k) + '">' +
+            resDot(k) + esc(resInfo(k).name) + ' · ' + n + '</button>';
+        }).join('') + '</div>';
+    }
+
+    h += '<div class="sup-note">Покупка ждёт на складе продавца сутки — за ней летит твой флот (раздел «Куплено»). ' +
+      'Деньги списываются сразу.</div>';
+
+    list.filter(function(l) { return st.mktRes === 'all' || l.resource === st.mktRes; }).forEach(function(l) {
+      h += renderLot(l);
+    });
+    return h;
+  }
+
+  function renderLot(l) {
+    var q = buyQty(l);
+    var color = resInfo(l.resource).color;
+    var tags = '';
+    if (l.foreign_side) tags += '<span class="sup-tag enemy">противник</span>';
+    else if (l.open_to === 'all') tags += '<span class="sup-tag open">открыт всем</span>';
+    var id = esc(l.lot_id);
+    return '<div class="sup-lot' + (l.foreign_side ? ' foreign' : '') + '" data-lot="' + id + '" style="border-left-color:' + esc(color) + '">' +
+      '<div class="sup-lot-top">' +
+        '<span class="sup-lot-res">' + esc(l.resource_name || resInfo(l.resource).name) + '</span>' +
+        '<span class="sup-lot-price"><b>' + money(l.price_per_unit) + '</b> кр/ед</span>' +
+      '</div>' +
+      '<div class="sup-lot-sub"><b>' + esc(l.seller_name || '—') + '</b> · ' + esc(l.system_name || '—') +
+        ' · в наличии <b>' + num(l.amount_left) + '</b>' + (tags ? ' ' + tags : '') + '</div>' +
+      '<div class="sup-lot-buy">' +
+        '<div class="sup-qty">' +
+          '<button type="button" data-act="buy-step" data-id="' + id + '" data-d="-1" aria-label="меньше">−</button>' +
+          '<input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" data-mk="buyq" data-id="' + id + '" value="' + q + '">' +
+          '<button type="button" data-act="buy-step" data-id="' + id + '" data-d="1" aria-label="больше">+</button>' +
+        '</div>' +
+        '<button type="button" class="sup-mini" data-act="buy-max" data-id="' + id + '">всё</button>' +
+        '<button type="button" class="sup-btn buy" data-act="buy" data-id="' + id + '"' + (q > 0 ? '' : ' disabled') + '>Купить</button>' +
+      '</div>' +
+      '<div class="sup-lot-cost" data-cost="' + id + '">' + costText(l, q, false) + '</div>' +
+    '</div>';
+  }
+
+  function costText(l, q, confirm) {
+    if (!(q > 0)) return 'Укажи, сколько купить';
+    var sum = money(q * num(l.price_per_unit));
+    if (confirm) return '<span class="y">Спишется <b>' + sum + ' кр</b> — нажми ещё раз. Забирать флотом с планеты ' + esc(l.system_name) + '</span>';
+    return 'Итого <b>' + sum + ' кр</b>' + (l.foreign_side ? ' · <span class="r">вывоз — только через свои миры</span>' : '');
+  }
+
+  function refreshLotLive(id) {
+    var l = findBy(st.lots, 'lot_id', id);
+    if (!l) return;
+    var q = buyQty(l);
+    var cost = document.querySelector('#sup-body [data-cost="' + cssEsc(id) + '"]');
+    if (cost) cost.innerHTML = costText(l, q, false);
+    var btn = document.querySelector('#sup-body [data-act="buy"][data-id="' + cssEsc(id) + '"]');
+    if (btn) { btn.disabled = !(q > 0); btn.classList.remove('confirm'); btn.textContent = 'Купить'; }
+  }
+
+  function buyLot(id, btn) {
+    var l = findBy(st.lots, 'lot_id', id);
+    if (!l) return;
+    var q = buyQty(l);
+    if (!(q > 0)) return;
+    // Двойное касание вместо системного окна: первое показывает сумму
+    if (!btn.classList.contains('confirm')) {
+      btn.classList.add('confirm');
+      btn.textContent = 'Точно?';
+      var cost = document.querySelector('#sup-body [data-cost="' + cssEsc(id) + '"]');
+      if (cost) cost.innerHTML = costText(l, q, true);
+      setTimeout(function() {
+        if (document.body.contains(btn) && btn.classList.contains('confirm')) refreshLotLive(id);
+      }, 4000);
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = 'Покупаю…';
+    call('buy_market_lot', { p_lot_id: l.lot_id, p_amount: q }).then(function(res) {
+      if (res.error) {
+        toast(errText(res.error), true);
+        load(['lots'], function() { if (st.tab === 'market') render(); });
+        return;
+      }
+      delete st.buyQty[l.lot_id];
+      toast('Куплено: ' + (l.resource_name || resInfo(l.resource).name).toLowerCase() + ' ' + q + ' за ' + money(q * num(l.price_per_unit)) +
+        ' кр. Теперь отправь за покупкой флот');
+      // Сразу к вывозу: форма новой брони уже раскрыта
+      st.mkt = 'orders';
+      if (res.data) { openPick(String(res.data)); st.pick.scroll = true; }
+      load(['lots', 'orders'], function() { updateTabCounts(); if (st.tab === 'market') { render(); scrollToPick(); } });
+      if (typeof refreshCreditsBar === 'function') { try { refreshCreditsBar(); } catch (e) { /* полоса кредитов догонит сама */ } }
+    });
+  }
+
+  // ---------- Куплено ----------
+
+  function renderOrders() {
+    var list = (st.orders || []).slice();
+    if (!list.length) {
+      return '<div class="sup-empty"><b>Оплаченных покупок нет</b>Купи лот в разделе «Лоты» — он сутки ждёт на складе продавца, ' +
+        'пока за ним не прилетит твой флот.<br><button type="button" class="sup-btn" data-act="seg" data-group="mkt" data-val="lots">К лотам ›</button></div>';
+    }
+    var h = '<div class="sup-note">Флот сам долетит до продавца через свои миры, заберёт покупку и отвезёт куда скажешь. ' +
+      'Весь заказ должен влезть в трюм.</div>';
+    list.sort(function(a, b) { return (a.fleet_sent ? 1 : 0) - (b.fleet_sent ? 1 : 0) || untilLeft(a) - untilLeft(b); });
+    return h + list.map(renderOrder).join('');
+  }
+
+  function renderOrder(o) {
+    var id = esc(o.order_id);
+    var left = untilLeft(o);
+    var expired = left <= 0;
+    var soon = !expired && left < 3600;
+    var open = st.pick && st.pick.orderId === String(o.order_id) && !o.fleet_sent && !expired;
+    var pill = o.fleet_sent ? '<span class="sup-pill travel"><i></i>флот в пути</span>'
+      : expired ? '<span class="sup-pill stalled"><i></i>истекла</span>'
+      : '<span class="sup-pill waiting"><i></i>ждёт вывоза</span>';
+
+    var h = '<div class="sup-order' + (o.fleet_sent ? ' sent' : '') + (open ? ' open' : '') + '" data-order="' + id + '"' +
+      ' style="border-left-color:' + esc(resInfo(o.resource).color) + '">' +
+      '<div class="sup-lot-top"><span class="sup-lot-res">' + esc(o.resource_name || resInfo(o.resource).name) +
+        ' <b>' + num(o.amount_left) + '</b></span>' + pill + '</div>' +
+      '<div class="sup-lot-sub">У продавца на <b>' + esc(o.system_name || '—') + '</b> · оплачено ' + money(o.paid) + ' кр</div>';
+
+    if (!o.fleet_sent) {
+      h += '<div class="sup-order-left' + (soon ? ' soon' : '') + (expired ? ' gone' : '') + '">' +
+        (expired ? 'Срок брони истёк' : 'Бронь ещё <span data-until="' + num(o._until) + '" data-zero="истекает">' + leftText(left) + '</span>') + '</div>';
+      if (!expired) {
+        h += open
+          ? renderPickForm(o)
+          : '<button type="button" class="sup-btn buy wide" data-act="pick-open" data-id="' + id + '">Вывезти флотом</button>';
+      }
+    } else {
+      h += '<div class="sup-order-left">Флот уже летит — смотри «Конвои в пути» во вкладке «Рейсы»</div>';
+    }
+    return h + '</div>';
+  }
+
+  function openPick(orderId) {
+    st.pick = { orderId: orderId, commanderId: null, dest: null, destTouched: false, back: false, sending: false };
+    st.cmds = null;
+    st.cmdsError = null;
+    loadSystems(function() { if (st.tab === 'market' && st.mkt === 'orders') render(); });
+    call('get_supply_commanders').then(function(res) {
+      if (!st.pick || st.pick.orderId !== orderId) return;
+      st.cmds = sortByHub(res.error ? [] : (res.data || []));
+      st.cmdsError = res.error ? errText(res.error) : null;
+      var o = findBy(st.orders, 'order_id', orderId);
+      st.pick.commanderId = pickPickupCommander(st.cmds, o ? num(o.amount_left) : 0);
+      if (st.tab === 'market' && st.mkt === 'orders') { render(); scrollToPick(); }
+    });
+  }
+
+  // Новая покупка встаёт в список не первой — подводим экран к её форме
+  function scrollToPick() {
+    if (!st.pick || !st.pick.scroll) return;
+    var el = document.querySelector('#sup-body .sup-order.open');
+    var scr = screenEl();
+    if (!el || !scr) return;
+    if (st.cmds !== null) st.pick.scroll = false;
+    var head = scr.querySelector('.sup-head');
+    scr.scrollTop = Math.max(0, el.offsetTop - (head ? head.offsetHeight : 0) - 12);
+  }
+
+  // Готовый свободный флот с местом под весь заказ; из хаба — тот, что у хаба
+  function pickPickupCommander(list, need) {
+    var ok = (list || []).filter(function(c) { return !c.busy && c.ready && num(c.free_cargo) >= need; });
+    if (st.hub) {
+      var here = ok.filter(function(c) { return c.system_id === st.hub.id; });
+      if (here.length) return here[0].commander_id;
+    }
+    if (ok.length) return ok[0].commander_id;
+    var free = (list || []).filter(function(c) { return !c.busy; });
+    return free.length ? free[0].commander_id : null;
+  }
+
+  function pickCommanderRow() {
+    return st.pick ? findBy(st.cmds, 'commander_id', st.pick.commanderId) : null;
+  }
+
+  // Куда везти по умолчанию: в хаб, из которого открыт экран, иначе туда, где стоит флот
+  function pickDest() {
+    var p = st.pick;
+    if (!p) return null;
+    if (p.destTouched && p.dest) return p.dest;
+    if (st.hub) return st.hub.id;
+    var c = pickCommanderRow();
+    return c && c.system_id ? c.system_id : (p.dest || null);
+  }
+
+  function renderPickForm(o) {
+    var p = st.pick;
+    var h = '<div class="sup-pick">';
+
+    h += '<span class="sup-label">Флот</span>';
+    if (st.cmds === null) {
+      h += '<div class="sup-loading" style="padding:10px">Загрузка…</div></div>';
+      return h;
+    }
+    if (!st.cmds.length) {
+      h += '<div class="sup-note">' + (st.cmdsError ? esc(st.cmdsError) :
+        'Нет командиров с флотом. Назначь командиру корабли в разделе «Армия».') + '</div></div>';
+      return h;
+    }
+
+    var need = num(o.amount_left);
+    var cv = hubCommanders(st.cmds, p.commanderId, p.showAll);
+    h += cv.shown.map(function(c) {
+      var s = cmdState(c);
+      if (!c.busy && c.ready && num(c.free_cargo) < need) s = { cls: 'warn', text: 'мало места' };
+      var on = c.commander_id === p.commanderId;
+      return '<button type="button" class="sup-cmd' + (on ? ' on' : '') + '" data-act="pick-cmd" data-id="' + esc(c.commander_id) + '"' +
+        (c.busy ? ' disabled' : '') + '><span class="sup-radio"></span><div class="sup-cmd-info">' +
+        '<div class="sup-cmd-name">' + esc(c.name) + '</div>' +
+        '<div class="sup-cmd-sub">' + (st.hub && c.system_id === st.hub.id ? '<span class="sup-here">у хаба</span> ' : '') +
+          esc(c.system_name || '—') + ' · трюм ' + num(c.free_cargo) + '</div></div>' +
+        '<span class="sup-cmd-state ' + s.cls + '">' + s.text + '</span></button>';
+    }).join('');
+    if (cv.hidden) {
+      h += '<button type="button" class="sup-more" data-act="pick-all">флоты на других планетах · ' + cv.hidden + ' ▾</button>';
+    }
+
+    var c = pickCommanderRow();
+    var origin = c ? c.system_id : null;
+    var dest = pickDest();
+
+    h += '<span class="sup-label" style="margin-top:10px">Куда выгрузить</span>' +
+      '<select class="sup-select" data-mk="pick-dest">' + destOptions(dest, origin) + '</select>';
+
+    var showBack = !!(origin && dest && dest !== origin);
+    if (showBack) {
+      h += '<button type="button" class="sup-looprow' + (p.back ? ' on' : '') + '" data-act="pick-back">' +
+        '<span>Вернуться домой<i>' + (p.back ? 'после выгрузки флот вернётся на ' + esc(c.system_name || sysName(origin))
+          : 'флот останется на ' + esc(sysName(dest))) + '</i></span>' +
+        '<span class="sup-toggle' + (p.back ? ' on' : '') + '"><i></i>' + (p.back ? 'да' : 'нет') + '</span></button>';
+    }
+
+    // Путь словами: откуда → продавец → куда (→ обратно)
+    if (c && dest) {
+      var parts = [];
+      if (origin !== o.system_id) parts.push(esc(c.system_name || sysName(origin)));
+      parts.push('<b>' + esc(o.system_name) + '</b> <em>погрузка</em>');
+      if (dest !== o.system_id) parts.push(esc(sysName(dest)) + ' <em>выгрузка</em>');
+      else parts[parts.length - 1] = '<b>' + esc(o.system_name) + '</b> <em>погрузка и выгрузка</em>';
+      if (showBack && p.back) parts.push(esc(c.system_name || sysName(origin)));
+      h += '<div class="sup-pick-path"><span>' + parts.join('</span><i>→</i><span>') + '</span></div>';
+    }
+
+    var why = null;
+    if (!c) why = 'Выбери флот';
+    else if (c.busy) why = 'Этот флот занят';
+    else if (!c.ready) why = 'Флот не в зоне прыжка — выведи весь флот в полосу у края орбиты';
+    else if (num(c.free_cargo) < need) why = 'Не влезет: покупка ' + need + ', свободно ' + num(c.free_cargo);
+    else if (!dest) why = 'Выбери планету выгрузки';
+
+    h += '<div class="sup-pick-fit' + (c && num(c.free_cargo) < need ? ' over' : '') + '">' +
+      (c ? 'Покупка <b>' + need + '</b> · свободно в трюме <b>' + num(c.free_cargo) + '</b>' : '') + '</div>';
+    if (why && c) h += '<div class="sup-hint warn">' + esc(why) + '</div>';
+    h += '<div class="sup-pick-btns">' +
+      '<button type="button" class="sup-btn ghost" data-act="pick-close">Отмена</button>' +
+      '<button type="button" class="sup-btn gold" data-act="pick-go"' + (why || p.sending ? ' disabled' : '') + '>' +
+        (p.sending ? 'Отправляю…' : 'Отправить за покупкой') + '</button></div>';
+    return h + '</div>';
+  }
+
+  function destOptions(sel, origin) {
+    var h = '';
+    var have = false;
+    var list = (st.systems || []).slice();
+    // Наверх — хаб и место стоянки флота: чаще всего везут туда
+    list.sort(function(a, b) {
+      var ra = (st.hub && a.id === st.hub.id) ? 0 : a.id === origin ? 1 : isMyPlanet(a.id) ? 2 : 3;
+      var rb = (st.hub && b.id === st.hub.id) ? 0 : b.id === origin ? 1 : isMyPlanet(b.id) ? 2 : 3;
+      return ra - rb || String(a.name).localeCompare(String(b.name), 'ru');
+    });
+    list.forEach(function(s) {
+      if (s.id === sel) have = true;
+      var tail = (st.hub && s.id === st.hub.id) ? 'этот хаб' : s.id === origin ? 'флот здесь' : isMyPlanet(s.id) ? 'моя' : '';
+      h += '<option value="' + esc(s.id) + '"' + (s.id === sel ? ' selected' : '') + '>' + esc(s.name) +
+        (tail ? ' · ' + tail : '') + '</option>';
+    });
+    if (!have) h = '<option value="" disabled' + (sel ? '' : ' selected') + '>— выбери планету —</option>' + h;
+    return h;
+  }
+
+  function sendPickup(btn) {
+    var p = st.pick;
+    var c = pickCommanderRow();
+    var dest = pickDest();
+    if (!p || !c || !dest || p.sending) return;
+    p.sending = true;
+    if (btn) { btn.disabled = true; btn.textContent = 'Отправляю…'; }
+    call('dispatch_market_pickup', {
+      p_commander_id: c.commander_id,
+      p_order_id: p.orderId,
+      p_to_system: dest,
+      p_return_home: dest === c.system_id ? false : !!p.back
+    }).then(function(res) {
+      if (!st.pick) return;
+      st.pick.sending = false;
+      if (res.error) { toast(errText(res.error), true); render(); return; }
+      st.pick = null;
+      toast('Флот вылетел за покупкой — следи в «Рейсах», раздел «Конвои в пути»');
+      load(['orders', 'convoys'], function() { updateTabCounts(); if (st.tab === 'market') render(); });
+    });
+  }
+
+  // ---------- Мои лоты ----------
+
+  function myPlanetList() {
+    var seen = {}, out = [];
+    (st.planets || []).forEach(function(p) {
+      if (seen[p.system_id]) return;
+      seen[p.system_id] = 1;
+      out.push({ id: p.system_id, name: p.system_name });
+    });
+    return out;
+  }
+
+  // Торговать можно только с планеты, где достроен логистический хаб —
+  // так решает сервер. Спрашиваем постройки один раз на планету.
+  function checkHubs(list) {
+    list.forEach(function(p) {
+      if (st.hubs[p.id] !== undefined) return;
+      st.hubs[p.id] = 'loading';
+      call('get_system_buildings', { p_system_id: p.id }).then(function(res) {
+        if (res.error || !res.data) { st.hubs[p.id] = null; }
+        else {
+          var now = Date.now();
+          st.hubs[p.id] = res.data.some(function(b) {
+            // Трофейный хаб чужой стороны сервер не засчитает
+            return HUB_CODES[b.type_code] && (!b.completes_at || new Date(b.completes_at).getTime() <= now) &&
+              (!st.faction || !b.faction || b.faction === st.faction);
+          });
+        }
+        if (st.open && st.tab === 'market' && st.mkt === 'mine' && !isEditingMarket()) render();
+      });
+    });
+  }
+
+  function isEditingMarket() {
+    var a = document.activeElement;
+    return !!(a && a.closest && a.closest('#supply-screen .sup-form') && a.tagName === 'INPUT');
+  }
+
+  function lotForm() {
+    if (!st.lotForm) st.lotForm = { sys: null, res: null, amount: 10, price: 20, aud: 'faction', sending: false };
+    return st.lotForm;
+  }
+
+  function stockRows(sys) {
+    return (st.planets || []).filter(function(p) { return p.system_id === sys && num(p.stock) > 0; });
+  }
+
+  // Подбираем планету и ресурс так, чтобы форма сразу была рабочей
+  function settleLotForm(planets) {
+    var f = lotForm();
+    var ids = planets.map(function(p) { return p.id; });
+    if (!f.sys || ids.indexOf(f.sys) < 0) {
+      if (st.hub && ids.indexOf(st.hub.id) >= 0) f.sys = st.hub.id;
+      else {
+        var withHub = planets.filter(function(p) { return st.hubs[p.id] === true; });
+        f.sys = (withHub[0] || planets[0] || {}).id || null;
+      }
+    }
+    var rows = stockRows(f.sys);
+    if (!findBy(rows, 'resource', f.res)) f.res = rows.length ? rows[0].resource : null;
+    var row = findBy(rows, 'resource', f.res);
+    var max = row ? num(row.stock) : 0;
+    if (f.amount > max) f.amount = max;
+    if (f.amount < 1 && max > 0) f.amount = Math.min(10, max);
+    return { f: f, rows: rows, max: max };
+  }
+
+  function renderMine() {
+    var planets = myPlanetList();
+    checkHubs(planets);
+    var h = '<div class="sup-section">Выставить лот</div>';
+
+    if (!planets.length) {
+      h += '<div class="sup-note">Продают со склада своей планеты, где достроен логистический хаб. Своих планет пока нет.</div>';
+    } else {
+      var s = settleLotForm(planets);
+      var f = s.f;
+      var hubState = st.hubs[f.sys];
+      var noHub = hubState === false;
+
+      h += '<div class="sup-form">' +
+        '<div class="sup-field"><span class="sup-label">Склад планеты</span>' +
+          '<select class="sup-select" data-mk="lot-sys">' + planets.map(function(p) {
+            var tail = st.hubs[p.id] === false ? ' · нет хаба' : (st.hub && p.id === st.hub.id ? ' · этот хаб' : '');
+            return '<option value="' + esc(p.id) + '"' + (p.id === f.sys ? ' selected' : '') + '>' + esc(p.name) + tail + '</option>';
+          }).join('') + '</select></div>';
+
+      if (noHub) {
+        h += '<div class="sup-avail warn">На этой планете нет достроенного логистического хаба — продавать отсюда нельзя</div>';
+      }
+
+      if (!s.rows.length) {
+        h += '<div class="sup-note" style="margin:10px 2px 0">Склад планеты пуст — продавать нечего.</div></div>';
+      } else {
+        h += '<div class="sup-field"><span class="sup-label">Ресурс</span>' +
+          '<select class="sup-select" data-mk="lot-res">' + s.rows.map(function(r) {
+            return '<option value="' + esc(r.resource) + '"' + (r.resource === f.res ? ' selected' : '') + '>' +
+              esc(r.resource_name || resInfo(r.resource).name) + ' — на складе ' + num(r.stock) + '</option>';
+          }).join('') + '</select></div>' +
+          '<div class="sup-rule">' +
+            '<div class="sup-field"><span class="sup-label">Сколько <i>из ' + s.max + '</i></span><div class="sup-qty">' +
+              '<button type="button" data-act="lot-step" data-f="amount" data-d="-1" aria-label="меньше">−</button>' +
+              '<input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" data-mk="lot-amount" value="' + num(f.amount) + '">' +
+              '<button type="button" data-act="lot-step" data-f="amount" data-d="1" aria-label="больше">+</button></div></div>' +
+            '<div class="sup-field"><span class="sup-label">Цена за ед., кр</span><div class="sup-qty">' +
+              '<button type="button" data-act="lot-step" data-f="price" data-d="-1" aria-label="дешевле">−</button>' +
+              '<input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" data-mk="lot-price" value="' + num(f.price) + '">' +
+              '<button type="button" data-act="lot-step" data-f="price" data-d="1" aria-label="дороже">+</button></div></div>' +
+            '<div class="sup-field full"><span class="sup-label">Кому продавать</span><div class="sup-seg">' +
+              segBtn('lotaud', 'faction', 'Своей фракции', f.aud === 'faction') +
+              segBtn('lotaud', 'all', 'Всем, и противнику', f.aud === 'all', 'enemy') +
+            '</div></div>' +
+          '</div>' +
+          '<div class="sup-lot-cost" id="sup-lot-sum">' + lotSummary(f) + '</div>' +
+          '<button type="button" class="sup-go" data-act="lot-create"' + (lotFormError(f, s.max) || noHub || f.sending ? ' disabled' : '') + '>' +
+            (f.sending ? 'Выставляю…' : 'Выставить лот') + '</button>' +
+        '</div>';
+      }
+    }
+
+    var mine = st.mylots || [];
+    h += '<div class="sup-section">Мои лоты<span class="sup-count">' + mine.length + '</span></div>';
+    if (!mine.length) return h + '<div class="sup-note">Ты ничего не продаёшь.</div>';
+    return h + mine.map(renderMyLot).join('');
+  }
+
+  function lotFormError(f, max) {
+    if (!f.res) return 'Выбери ресурс';
+    if (!(num(f.amount) > 0)) return 'Укажи количество';
+    if (num(f.amount) > max) return 'На складе только ' + max;
+    if (!(num(f.price) > 0)) return 'Укажи цену';
+    return null;
+  }
+
+  function lotSummary(f) {
+    var row = findBy(stockRows(f.sys), 'resource', f.res);
+    var err = lotFormError(f, row ? num(row.stock) : 0);
+    if (err) return '<span class="r">' + esc(err) + '</span>';
+    return 'Со склада сразу спишется <b>' + num(f.amount) + '</b> · выручка до <b>' + money(num(f.amount) * num(f.price)) + ' кр</b>' +
+      (f.aud === 'all' ? '<br><span class="y">Лот увидит и купит противник</span>' : '');
+  }
+
+  function refreshLotFormLive() {
+    var f = lotForm();
+    var sum = document.getElementById('sup-lot-sum');
+    if (sum) sum.innerHTML = lotSummary(f);
+    var row = findBy(stockRows(f.sys), 'resource', f.res);
+    var go = document.querySelector('#sup-body [data-act="lot-create"]');
+    if (go) go.disabled = !!lotFormError(f, row ? num(row.stock) : 0) || st.hubs[f.sys] === false || f.sending;
+  }
+
+  function renderMyLot(l) {
+    var id = esc(l.lot_id);
+    var reserved = num(l.reserved);
+    return '<div class="sup-lot mine" style="border-left-color:' + esc(resInfo(l.resource).color) + '">' +
+      '<div class="sup-lot-top">' +
+        '<span class="sup-lot-res">' + esc(l.resource_name || resInfo(l.resource).name) + ' <b>' + num(l.amount_left) + '</b></span>' +
+        '<span class="sup-lot-price"><b>' + money(l.price_per_unit) + '</b> кр/ед</span>' +
+      '</div>' +
+      '<div class="sup-lot-sub">' + esc(l.system_name || '—') +
+        (l.open_to === 'all' ? ' <span class="sup-tag enemy">всем</span>' : ' <span class="sup-tag mine">своим</span>') +
+        (reserved ? ' · <span class="y">забронировано ' + reserved + '</span>' : '') + '</div>' +
+      '<div class="sup-actions">' +
+        (reserved
+          ? '<span class="sup-lot-lock">Есть брони — снять можно после вывоза или истечения</span>'
+          : '<button type="button" class="sup-btn danger" data-act="lot-cancel" data-id="' + id + '">Снять с продажи</button>') +
+      '</div>' +
+    '</div>';
+  }
+
+  function createLot(btn) {
+    var f = lotForm();
+    if (f.sending) return;
+    var row = findBy(stockRows(f.sys), 'resource', f.res);
+    if (lotFormError(f, row ? num(row.stock) : 0)) { refreshLotFormLive(); return; }
+    f.sending = true;
+    if (btn) { btn.disabled = true; btn.textContent = 'Выставляю…'; }
+    call('create_market_lot', {
+      p_system_id: f.sys, p_resource: f.res, p_amount: num(f.amount), p_price: num(f.price), p_open_to: f.aud
+    }).then(function(res) {
+      f.sending = false;
+      if (res.error) { toast(errText(res.error), true); if (st.tab === 'market') render(); return; }
+      toast('Лот выставлен: ' + resInfo(f.res).name.toLowerCase() + ' ' + num(f.amount) + ' по ' + money(f.price) + ' кр');
+      f.amount = 10;
+      load(['mylots', 'planets', 'lots'], function() { updateTabCounts(); if (st.tab === 'market') render(); });
+    });
+  }
+
+  function cancelLot(id, btn) {
+    if (!btn.classList.contains('confirm')) {
+      btn.classList.add('confirm');
+      btn.textContent = 'Точно снять?';
+      setTimeout(function() {
+        if (document.body.contains(btn) && btn.classList.contains('confirm')) { btn.classList.remove('confirm'); btn.textContent = 'Снять с продажи'; }
+      }, 3000);
+      return;
+    }
+    var l = findBy(st.mylots, 'lot_id', id);
+    btn.disabled = true;
+    call('cancel_market_lot', { p_lot_id: id }).then(function(res) {
+      if (res.error) { btn.disabled = false; toast(errText(res.error), true); return; }
+      var fit = num(res.data), left = l ? num(l.amount_left) : fit;
+      toast(fit < left ? 'Лот снят — на склад влезло ' + fit + ' из ' + left : 'Лот снят — остаток вернулся на склад');
+      load(['mylots', 'planets', 'lots'], function() { updateTabCounts(); if (st.tab === 'market') render(); });
+    });
+  }
+
+  function marketClick(act, b) {
+    var id = b.getAttribute('data-id');
+    if (act === 'buy-step' || act === 'buy-max') {
+      var l = findBy(st.lots, 'lot_id', id);
+      if (!l) return true;
+      var max = num(l.amount_left), cur = buyQty(l), next;
+      if (act === 'buy-max') next = max;
+      else {
+        var dir = num(b.getAttribute('data-d'));
+        next = dir > 0 ? (Math.floor(cur / STEP) + 1) * STEP : (Math.ceil(cur / STEP) - 1) * STEP;
+      }
+      next = Math.max(1, Math.min(max, next));
+      st.buyQty[l.lot_id] = next;
+      var inp = document.querySelector('#sup-body input[data-mk="buyq"][data-id="' + cssEsc(id) + '"]');
+      if (inp) inp.value = next;
+      refreshLotLive(id);
+      return true;
+    }
+    if (act === 'buy') { buyLot(id, b); return true; }
+    if (act === 'pick-open') { openPick(id); render(); return true; }
+    if (act === 'pick-close') { st.pick = null; render(); return true; }
+    if (act === 'pick-cmd') {
+      if (!st.pick) return true;
+      st.pick.commanderId = id;
+      render();
+      return true;
+    }
+    if (act === 'pick-all') { if (st.pick) { st.pick.showAll = true; render(); } return true; }
+    if (act === 'pick-back') { if (st.pick) { st.pick.back = !st.pick.back; render(); } return true; }
+    if (act === 'pick-go') { sendPickup(b); return true; }
+    if (act === 'lot-step') {
+      var f = lotForm(), fld = b.getAttribute('data-f'), d = num(b.getAttribute('data-d'));
+      var step = fld === 'price' ? 1 : STEP;
+      var v = num(f[fld]);
+      var nv = step === 1 ? v + d : (d > 0 ? (Math.floor(v / step) + 1) * step : (Math.ceil(v / step) - 1) * step);
+      if (fld === 'amount') {
+        var row = findBy(stockRows(f.sys), 'resource', f.res);
+        nv = Math.min(row ? num(row.stock) : 0, nv);
+      }
+      f[fld] = Math.max(1, nv);
+      var input = b.parentNode.querySelector('input');
+      if (input) input.value = f[fld];
+      refreshLotFormLive();
+      return true;
+    }
+    if (act === 'lot-create') { createLot(b); return true; }
+    if (act === 'lot-cancel') { cancelLot(id, b); return true; }
+    return false;
+  }
+
+  function marketInput(t) {
+    var mk = t.getAttribute('data-mk');
+    if (!mk) return false;
+    if (mk === 'pick-dest') {
+      if (st.pick) { st.pick.dest = t.value; st.pick.destTouched = true; render(); }
+      return true;
+    }
+    if (mk === 'lot-sys' || mk === 'lot-res') {
+      var f = lotForm();
+      if (mk === 'lot-sys') { f.sys = t.value; f.res = null; } else f.res = t.value;
+      f.amount = 10;
+      render();
+      return true;
+    }
+    var clean = String(t.value).replace(/[^0-9]/g, '');
+    if (clean !== t.value) t.value = clean;
+    if (mk === 'buyq') {
+      var id = t.getAttribute('data-id');
+      var l = findBy(st.lots, 'lot_id', id);
+      if (!l) return true;
+      var q = Math.min(num(l.amount_left), num(clean));
+      if (clean !== '' && q !== num(clean)) t.value = q;
+      st.buyQty[l.lot_id] = q;
+      refreshLotLive(id);
+      return true;
+    }
+    if (mk === 'lot-amount') { lotForm().amount = num(clean); refreshLotFormLive(); return true; }
+    if (mk === 'lot-price') { lotForm().price = num(clean); refreshLotFormLive(); return true; }
+    return true;
+  }
+
   // ── События ────────────────────────────────────────────────────────
 
   function onBodyClick(e) {
@@ -1078,17 +1888,17 @@
 
     if (act === 'retry') { refreshTab(); return; }
     if (act === 'tab') { switchTab(b.getAttribute('data-tab')); return; }
+    if (marketClick(act, b)) return;
 
-    if (act === 'focus') {
-      var sys = b.getAttribute('data-sys');
-      closeSupplyScreen();
-      if (typeof focusGalaxySystem === 'function') focusGalaxySystem(sys);
-      return;
-    }
+    if (act === 'focus') { focusSystem(b.getAttribute('data-sys')); return; }
 
     if (act === 'seg') {
       var group = b.getAttribute('data-group'), val = b.getAttribute('data-val');
       if (group === 'filter') { st.filter = val; render(); return; }
+      if (group === 'scope') { st.storeSys = (val === 'hub' && st.hub) ? st.hub.id : null; render(); return; }
+      if (group === 'mkt') { st.mkt = val; st.pick = null; screenEl().scrollTop = 0; render(); return; }
+      if (group === 'mktres') { st.mktRes = val; render(); return; }
+      if (group === 'lotaud') { lotForm().aud = val; render(); return; }
       if (group.indexOf('aud:') === 0) {
         var k = group.slice(4);
         var p = findPlanetRow(k.split('|')[0], k.split('|')[1]);
@@ -1101,7 +1911,7 @@
     }
 
     if (act === 'route-from') { openEditorFrom(b.getAttribute('data-sys'), b.getAttribute('data-mode')); return; }
-    if (act === 'route-new') { openEditor(null); return; }
+    if (act === 'route-new') { openNewRoute(); return; }
     if (act === 'route-edit') { openEditor(findRoute(b.getAttribute('data-id'))); return; }
 
     if (act === 'route-status') { setRouteStatus(b.getAttribute('data-id'), b.getAttribute('data-st'), b); return; }
@@ -1199,7 +2009,14 @@
 
   function onBodyInput(e) {
     var t = e.target;
-    if (!t.getAttribute || !t.getAttribute('data-rule-f')) return;
+    if (!t.getAttribute) return;
+    if (t.getAttribute('data-mk')) {
+      // Текстовые поля пересчитываем на ввод; списки — один раз, на выбор
+      if (t.tagName === 'SELECT' && e.type !== 'change') return;
+      marketInput(t);
+      return;
+    }
+    if (!t.getAttribute('data-rule-f')) return;
     var k = t.getAttribute('data-k'), f = t.getAttribute('data-rule-f');
     var p = findPlanetRow(k.split('|')[0], k.split('|')[1]);
     if (!p) return;
@@ -1210,6 +2027,22 @@
     else d[f] = num(clean);
     d.dirty = true;
     refreshRuleLive(k);
+  }
+
+  // ⌖ у планеты: на галактике — навести карту; на наземной карте другой
+  // планеты — перейти на её поверхность (у галактики нет адреса «покажи X»)
+  function focusSystem(sys) {
+    if (!sys) return;
+    if (typeof focusGalaxySystem === 'function') {
+      closeSupplyScreen();
+      focusGalaxySystem(sys);
+      return;
+    }
+    var here = null;
+    try { here = new URLSearchParams(window.location.search).get('system'); } catch (e) { here = null; }
+    closeSupplyScreen();
+    if (here === sys) return;
+    window.location.href = 'ground-battle.html?system=' + encodeURIComponent(sys);
   }
 
   function rerenderRoute(id) {
@@ -1255,13 +2088,16 @@
       : { op: 'load', resource: 'ore', mode: 'all', amount: 50 };
   }
 
-  function openEditor(route, presetStops) {
+  // opts: { loop, returnHome, commanderId } — подстановки для нового рейса
+  function openEditor(route, presetStops, opts) {
+    opts = opts || {};
     ed = {
       routeId: route ? route.id : null,
-      commanderId: route ? route.commander_id : null,
+      commanderId: route ? route.commander_id : (opts.commanderId || null),
       commanderName: route ? route.commander_name : null,
       name: route ? (route.name || '') : '',
-      loop: route ? !!route.loop : true,
+      loop: route ? !!route.loop : (opts.loop === undefined ? true : !!opts.loop),
+      returnHome: !!opts.returnHome,
       stops: route
         ? stopsOf(route).map(function(s) {
             return { system_id: s.system_id, actions: (s.actions || []).map(function(a) {
@@ -1274,7 +2110,37 @@
       sending: false
     };
     if (presetStops) ed.stops = presetStops;
+    // Разовый рейс «туда и обратно» хранится как лишняя последняя остановка
+    // на первой планете без действий — в конструкторе это переключатель
+    if (route && !ed.loop && ed.stops.length >= 3) {
+      var first = ed.stops[0], last = ed.stops[ed.stops.length - 1];
+      if (last.system_id && last.system_id === first.system_id && !last.actions.length) {
+        ed.stops.pop();
+        ed.returnHome = true;
+      }
+    }
     showEditor();
+  }
+
+  // «Новый рейс»: из хаба — первая остановка здесь, погрузку игрок выберет
+  // сам, флот — тот, что стоит у этой планеты; без хаба — пустой бланк
+  function openNewRoute() {
+    if (!st.hub) { openEditor(null); return; }
+    openEditor(null, [
+      { system_id: st.hub.id, actions: [] },
+      { system_id: '', actions: [newAction('unload')] }
+    ], { loop: false });
+  }
+
+  function maxStops() {
+    return (ed && !ed.loop && ed.returnHome) ? MAX_STOPS - 1 : MAX_STOPS;
+  }
+
+  // Остановка возвращения добавляется, только если рейс и так не кончается дома
+  function homeStopNeeded() {
+    if (!ed || ed.loop || !ed.returnHome || ed.stops.length < 2) return false;
+    var first = ed.stops[0].system_id, last = ed.stops[ed.stops.length - 1].system_id;
+    return !!first && last !== first;
   }
 
   // Из карточки сети: остановка уже выбрана, действия подставлены
@@ -1326,14 +2192,40 @@
     if (!ed.routeId) {
       call('get_supply_commanders').then(function(res) {
         if (!ed) return;
-        ed.commanders = res.error ? [] : (res.data || []);
+        ed.commanders = sortByHub(res.error ? [] : (res.data || []));
         ed.cmdError = res.error ? errText(res.error) : null;
-        // Единственный свободный — выбираем сразу
-        var free = ed.commanders.filter(function(c) { return !c.busy; });
-        if (!ed.commanderId && free.length === 1) ed.commanderId = free[0].commander_id;
+        if (!ed.commanderId) ed.commanderId = pickCommander(ed.commanders);
         if (left === 0) renderEditor();
       });
     }
+  }
+
+  // Из хаба первыми идут флоты, стоящие у этой планеты, свободные — раньше занятых
+  function sortByHub(list) {
+    var id = st.hub ? st.hub.id : null;
+    function rank(c) { return (id && c.system_id !== id ? 2 : 0) + (c.busy ? 1 : 0); }
+    return list.slice().sort(function(a, b) { return rank(a) - rank(b); });
+  }
+
+  // Из хаба показываем флоты у этой планеты (и выбранный), остальные — по кнопке
+  function hubCommanders(list, selId, all) {
+    if (!st.hub || all) return { shown: list, hidden: 0 };
+    var id = st.hub.id;
+    var shown = list.filter(function(c) { return c.system_id === id || c.commander_id === selId; });
+    if (!shown.length || shown.length === list.length) return { shown: list, hidden: 0 };
+    return { shown: shown, hidden: list.length - shown.length };
+  }
+
+  // Кого выбрать сразу: из хаба — готовый свободный флот у этой планеты
+  // (с самым просторным трюмом); иначе — единственный свободный
+  function pickCommander(list) {
+    var free = (list || []).filter(function(c) { return !c.busy; });
+    if (st.hub) {
+      var here = free.filter(function(c) { return c.system_id === st.hub.id && c.ready; })
+        .sort(function(a, b) { return num(b.free_cargo) - num(a.free_cargo); });
+      if (here.length) return here[0].commander_id;
+    }
+    return free.length === 1 ? free[0].commander_id : null;
   }
 
   function closeEditor() {
@@ -1419,6 +2311,25 @@
     var keep = body.scrollTop;
     var h = '';
 
+    // Режим: разовая доставка или кольцо — первое, что решает игрок
+    h += '<div class="sup-section">Режим</div>' +
+      '<div class="sup-seg sup-mode">' +
+        '<button type="button" class="' + (!ed.loop ? 'on' : '') + '" data-ed="mode-loop" data-v="0"><b>→</b>Разовая доставка</button>' +
+        '<button type="button" class="' + (ed.loop ? 'on' : '') + '" data-ed="mode-loop" data-v="1"><b>↻</b>По кругу</button>' +
+      '</div>' +
+      '<div class="sup-mode-note">' + (ed.loop
+        ? 'Флот проходит остановки и возвращается к первой — снова и снова, пока не остановишь.'
+        : 'Флот один раз проходит остановки по порядку, и рейс завершается.') + '</div>';
+    if (!ed.loop) {
+      var home = ed.stops[0] && ed.stops[0].system_id ? sysName(ed.stops[0].system_id) : 'первую остановку';
+      var tooMany = !ed.returnHome && ed.stops.length >= MAX_STOPS;
+      h += '<button type="button" class="sup-looprow' + (ed.returnHome ? ' on' : '') + '" data-ed="home"' + (tooMany ? ' disabled' : '') + '>' +
+        '<span>Вернуться домой<i>' + (tooMany ? 'нужна свободная остановка — убери одну из шести'
+          : ed.returnHome ? 'после последней остановки флот вернётся на ' + esc(home)
+          : 'флот останется там, где закончит рейс') + '</i></span>' +
+        '<span class="sup-toggle' + (ed.returnHome ? ' on' : '') + '"><i></i>' + (ed.returnHome ? 'да' : 'нет') + '</span></button>';
+    }
+
     // Командир
     h += '<div class="sup-section">Командир</div>';
     if (ed.routeId) {
@@ -1431,16 +2342,21 @@
       h += '<div class="sup-note">' + (ed.cmdError ? esc(ed.cmdError) :
         'Нет командиров с флотом. Назначь командиру корабли в разделе «Армия» — грузовую вместимость дают транспортные корабли.') + '</div>';
     } else {
-      h += ed.commanders.map(function(c) {
+      var cv = hubCommanders(ed.commanders, ed.commanderId, ed.showAllCmds);
+      h += cv.shown.map(function(c) {
         var s = cmdState(c);
         var on = c.commander_id === ed.commanderId;
         return '<button type="button" class="sup-cmd' + (on ? ' on' : '') + '" data-ed="cmd" data-id="' + esc(c.commander_id) + '"' +
           (c.busy ? ' disabled' : '') + '><span class="sup-radio"></span><div class="sup-cmd-info">' +
           '<div class="sup-cmd-name">' + esc(c.name) + '</div>' +
-          '<div class="sup-cmd-sub">' + esc(c.system_name || '—') + ' · ' + num(c.ships) + ' ' + plural(num(c.ships), 'корабль', 'корабля', 'кораблей') +
+          '<div class="sup-cmd-sub">' + (st.hub && c.system_id === st.hub.id ? '<span class="sup-here">у хаба</span> ' : '') +
+            esc(c.system_name || '—') + ' · ' + num(c.ships) + ' ' + plural(num(c.ships), 'корабль', 'корабля', 'кораблей') +
             ' · трюм ' + num(c.free_cargo) + '</div></div>' +
           '<span class="sup-cmd-state ' + s.cls + '">' + s.text + '</span></button>';
       }).join('');
+      if (cv.hidden) {
+        h += '<button type="button" class="sup-more" data-ed="all-cmds">флоты на других планетах · ' + cv.hidden + ' ▾</button>';
+      }
     }
 
     // Название
@@ -1448,21 +2364,24 @@
       '<input type="text" class="sup-input" data-ed="name" maxlength="40" value="' + esc(ed.name) + '" placeholder="' + esc(autoName() || 'например: Руда на Кристофсис') + '">';
 
     // Остановки
-    h += '<div class="sup-section">Остановки<span class="sup-count">' + ed.stops.length + ' из ' + MAX_STOPS + '</span></div>';
+    var homeStop = homeStopNeeded();
+    h += '<div class="sup-section">Остановки<span class="sup-count">' + (ed.stops.length + (homeStop ? 1 : 0)) + ' из ' + MAX_STOPS + '</span></div>';
     ed.stops.forEach(function(s, i) {
       if (i > 0) h += '<div class="sup-stop-link">↓<span>' + 'перелёт' + '</span></div>';
       h += renderStop(s, i);
     });
     if (ed.loop && ed.stops.length > 1) h += '<div class="sup-stop-link loop">↻<span>обратно к остановке 1</span></div>';
+    if (homeStop) {
+      h += '<div class="sup-stop-link">↓<span>перелёт</span></div>' +
+        '<div class="sup-stop home"><div class="sup-stop-head"><span class="sup-stop-n">↩</span>' +
+        '<div class="sup-home-name">' + esc(sysName(ed.stops[0].system_id)) + '<i>возвращение домой · без погрузки</i></div></div></div>';
+    }
 
-    h += '<button type="button" class="sup-add-stop" data-ed="add-stop"' + (ed.stops.length >= MAX_STOPS ? ' disabled' : '') + '>+ Остановка</button>';
-
-    h += '<button type="button" class="sup-looprow' + (ed.loop ? ' on' : '') + '" data-ed="loop">' +
-      '<span>По кругу<i>' + (ed.loop ? 'после последней остановки флот вернётся к первой и повторит' : 'один проход — после последней остановки рейс завершится') + '</i></span>' +
-      '<span class="sup-toggle' + (ed.loop ? ' on' : '') + '"><i></i>' + (ed.loop ? 'да' : 'нет') + '</span></button>';
+    h += '<button type="button" class="sup-add-stop" data-ed="add-stop"' + (ed.stops.length >= maxStops() ? ' disabled' : '') + '>+ Остановка</button>';
 
     h += '<div class="sup-note" style="margin-top:12px">Перелёт идёт через планеты своей фракции, прыжок за прыжком. ' +
-      'Если флот перехватят или путь закроется, рейс встанет и придёт уведомление. Если за круг ничего не перевезено — флот подождёт 10 минут и попробует снова.</div>';
+      'Если флот перехватят или путь закроется, рейс встанет и придёт уведомление.' +
+      (ed.loop ? ' Если за круг ничего не перевезено — флот подождёт 10 минут и попробует снова.' : '') + '</div>';
 
     body.innerHTML = h;
     body.scrollTop = keep;
@@ -1489,7 +2408,7 @@
         '<div class="sup-act-row"><div class="sup-seg op">' +
           '<button type="button" class="load' + (load ? ' on' : '') + '" data-ed="op" data-v="load" ' + at + '>Погрузить</button>' +
           '<button type="button" class="unload' + (!load ? ' on' : '') + '" data-ed="op" data-v="unload" ' + at + '>Выгрузить</button>' +
-        '</div><button type="button" class="sup-icon del" data-ed="del-act" ' + at + (s.actions.length <= 1 ? ' disabled' : '') + ' aria-label="убрать действие">✕</button></div>' +
+        '</div><button type="button" class="sup-icon del" data-ed="del-act" ' + at + ' aria-label="убрать действие">✕</button></div>' +
         '<div class="sup-act-row wrap"><select class="sup-select" data-ed="res" ' + at + '>' + resOptions(a.resource, !load, load ? s.system_id : null) + '</select>' +
         '<div class="sup-seg">' + modes.map(function(m) {
           return '<button type="button" class="' + (a.mode === m[0] ? 'on' : '') + '" data-ed="mode" data-v="' + m[0] + '" ' + at + '>' + m[1] + '</button>';
@@ -1506,8 +2425,37 @@
       h += '</div>';
     });
 
+    // Быстрая погрузка: что здесь можно взять — одним касанием в план
+    var quick = quickLoads(s);
+    if (quick.length) {
+      h += '<div class="sup-quick"><span class="sup-label">' + (s.actions.length ? 'Ещё погрузить' : 'Погрузить отсюда') + '</span>' +
+        '<div class="sup-chips">' + quick.map(function(q) {
+          return '<button type="button" class="sup-chip take sup-qbtn" data-ed="quick" data-i="' + i + '" data-res="' + esc(q.id) + '">' +
+            '<i style="background:' + esc(q.color) + '"></i>+ ' + esc(q.name) + ' <b>' + q.n + '</b></button>';
+        }).join('') + '</div></div>';
+    } else if (!s.actions.length && s.system_id) {
+      h += '<div class="sup-avail warn">Здесь сейчас нечего взять — добавь действие вручную или выбери другую планету</div>';
+    }
+
     h += '<button type="button" class="sup-add-act" data-ed="add-act" data-i="' + i + '">+ действие</button></div>';
     return h;
+  }
+
+  // Ресурсы, которые на этой остановке можно погрузить и которых ещё нет в плане
+  function quickLoads(s) {
+    if (!s.system_id) return [];
+    // Остановка только с выгрузкой — это пункт назначения, не загромождаем
+    var loads = s.actions.filter(function(a) { return a.op === 'load'; }).length;
+    if (s.actions.length && !loads) return [];
+    var have = {};
+    s.actions.forEach(function(a) { if (a.op === 'load') have[a.resource] = 1; });
+    var out = [];
+    st.resources.forEach(function(r) {
+      if (have[r.id]) return;
+      var a = availInfo(s.system_id, r.id);
+      if (a && a.n > 0) out.push({ id: r.id, name: r.name, color: r.color, n: a.n });
+    });
+    return out;
   }
 
   function autoName() {
@@ -1526,7 +2474,10 @@
     ed.stops.forEach(function(s, i) {
       var n = i + 1;
       if (!s.system_id) errs.push('Остановка ' + n + ': выбери планету');
-      if (!s.actions.length) warns.push('Остановка ' + n + ' без действий — флот просто пролетит через неё');
+      if (!s.actions.length) {
+        warns.push(i === 0 ? 'Остановка 1: выбери, что погрузить — иначе флот полетит пустым'
+                           : 'Остановка ' + n + ' без действий — флот просто пролетит через неё');
+      }
       var nx = ed.stops[i + 1] || (ed.loop && ed.stops.length > 2 ? ed.stops[0] : null);
       if (s.system_id && nx && nx.system_id === s.system_id) {
         errs.push('Остановки ' + n + ' и ' + (i + 1 < ed.stops.length ? n + 1 : 1) + ' — одна и та же планета');
@@ -1544,7 +2495,8 @@
     var total = 0;
     ed.stops.forEach(function(s) { total += s.actions.length; });
     if (ed.stops.length >= 2 && !total) errs.push('Добавь хотя бы одно действие: погрузить или выгрузить');
-    if (ed.stops.length >= 2 && total && !anyLoad) warns.push('В рейсе нет погрузки — повезёт только то, что уже в трюме');
+    // Пустая первая остановка уже подсказана выше — не повторяемся
+    if (ed.stops.length >= 2 && total && !anyLoad && ed.stops[0].actions.length) warns.push('В рейсе нет погрузки — повезёт только то, что уже в трюме');
     var c = selectedCommander();
     if (c) {
       if (!c.ready) warns.push('Флот не в зоне прыжка — рейс встанет на первом перелёте');
@@ -1561,7 +2513,11 @@
     var list = v.errs.slice(0, 2).map(function(t) { return '<div class="sup-hint">' + esc(t) + '</div>'; })
       .concat(v.warns.slice(0, 2).map(function(t) { return '<div class="sup-hint warn">' + esc(t) + '</div>'; }));
     if (ed.routeId && !v.errs.length) list.push('<div class="sup-hint warn">После сохранения рейс начнётся заново — с остановки 1</div>');
-    if (!list.length) list.push('<div class="sup-hint ok">' + (ed.loop ? 'Рейс готов: будет ходить по кругу, пока не остановишь' : 'Рейс готов: один проход по остановкам') + '</div>');
+    if (!list.length) {
+      list.push('<div class="sup-hint ok">' + (ed.loop ? 'Рейс готов: будет ходить по кругу, пока не остановишь'
+        : homeStopNeeded() ? 'Рейс готов: один проход, потом флот вернётся на ' + esc(sysName(ed.stops[0].system_id))
+        : 'Рейс готов: один проход по остановкам') + '</div>');
+    }
     box.innerHTML = list.join('');
     go.disabled = !!v.errs.length || ed.sending;
     go.textContent = ed.sending ? 'Отправляю…' : (ed.routeId ? 'Сохранить рейс' : 'Запустить рейс');
@@ -1582,10 +2538,31 @@
     if (act === 'close') { closeEditor(); return; }
     if (act === 'go') { submitEditor(); return; }
     if (act === 'cmd') { ed.commanderId = b.getAttribute('data-id'); renderEditor(); return; }
-    if (act === 'loop') { ed.loop = !ed.loop; renderEditor(); return; }
+    if (act === 'mode-loop') {
+      ed.loop = b.getAttribute('data-v') === '1';
+      // «Вернуться домой» занимает место последней остановки: если их уже
+      // максимум, при возврате в разовый режим возврат домой не включаем
+      if (!ed.loop && ed.returnHome && ed.stops.length >= MAX_STOPS) ed.returnHome = false;
+      renderEditor();
+      return;
+    }
+    if (act === 'all-cmds') { ed.showAllCmds = true; renderEditor(); return; }
+    if (act === 'home') {
+      if (!ed.returnHome && ed.stops.length >= MAX_STOPS) return;
+      ed.returnHome = !ed.returnHome;
+      renderEditor();
+      return;
+    }
+    if (act === 'quick') {
+      var qs = ed.stops[i];
+      if (!qs) return;
+      qs.actions.push({ op: 'load', resource: b.getAttribute('data-res'), mode: 'all', amount: 50 });
+      renderEditor();
+      return;
+    }
 
     if (act === 'add-stop') {
-      if (ed.stops.length >= MAX_STOPS) return;
+      if (ed.stops.length >= maxStops()) return;
       ed.stops.push({ system_id: '', actions: [newAction('unload')] });
       renderEditor();
       var body = document.getElementById('sup-ed-body');
@@ -1607,7 +2584,7 @@
 
     var x = edAction(b);
     if (!x.action) return;
-    if (act === 'del-act') { if (x.stop.actions.length > 1) { x.stop.actions.splice(x.j, 1); renderEditor(); } return; }
+    if (act === 'del-act') { x.stop.actions.splice(x.j, 1); renderEditor(); return; }
     if (act === 'op') {
       var op = b.getAttribute('data-v');
       if (x.action.op === op) return;
@@ -1658,7 +2635,7 @@
   }
 
   function stopsPayload() {
-    return ed.stops.map(function(s) {
+    var out = ed.stops.map(function(s) {
       return {
         system_id: s.system_id,
         actions: s.actions.map(function(a) {
@@ -1668,6 +2645,9 @@
         })
       };
     });
+    // «Вернуться домой»: последняя остановка — первая планета, без действий
+    if (homeStopNeeded()) out.push({ system_id: ed.stops[0].system_id, actions: [] });
+    return out;
   }
 
   function submitEditor() {
@@ -1704,7 +2684,9 @@
     var btn = document.getElementById('panel-item-supply');
     if (btn) btn.addEventListener('click', function() { openSupplyScreen(); });
 
-    // Значок: при загрузке и раз в минуту — запросы доступа и вставшие рейсы
+    // Значок: при загрузке и раз в минуту — запросы доступа и вставшие рейсы.
+    // На страницах без нижней панели (наземная карта) значка нет — и опроса тоже
+    if (!document.getElementById('supply-badge')) return;
     setTimeout(refreshNavBadge, 1500);
     if (badgeTimer) clearInterval(badgeTimer);
     badgeTimer = setInterval(refreshNavBadge, 60000);

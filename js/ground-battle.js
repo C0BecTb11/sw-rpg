@@ -166,8 +166,9 @@ var SETTLEMENT_TASKS = {
   guard:     { title: 'Охрана поселения', hint: 'пехоты в зоне' },
   patrol:    { title: 'Патруль', hint: 'техники в зоне' },
   orbit:     { title: 'Прикрытие с орбиты', hint: 'корабль в площадке сброса' },
-  // Банда — 2–3 налётчика: число не клеится к «налётчика», текст свой
-  marauder:  { title: 'Мародёры', hint: '', sub: function(n) {
+  // Дневной налёт: строку рисует stlMarauderState по этапу из payload;
+  // sub — запасной текст для старых задач без времени налёта
+  marauder:  { title: 'Налёт мародёров', hint: '', sub: function(n) {
     return n > 1 ? 'Уничтожить налётчиков: ' + n : 'Уничтожить налётчика';
   } },
   donation:  { title: 'Пожертвование', hint: 'кредитов' },
@@ -525,7 +526,7 @@ function renderSettlementPanel() {
       if (d.is_controller && built < (d.slots || 0)) cls = 'go';
     } else if (key === 'tasks' && tasks.length) {
       txt = doneCount + '/' + tasks.length;
-      cls = doneCount === tasks.length ? 'ok' : 'bad';
+      cls = doneCount === tasks.length ? 'ok' : stlOnlyRaidLeft(tasks) ? 'go' : 'bad';
     }
     mark.textContent = txt;
     mark.className = cls;
@@ -930,6 +931,70 @@ function stlPickerHtml(d, bySlot) {
   return html;
 }
 
+// Задача «Налёт мародёров»: утром разведка называет время, днём банда
+// приходит на marauder_raid_hours и уходит с добычей, если её не перебить.
+// Сервер кладёт этап в payload (stage, raid_at, raid_ends, alive/total).
+// Старые задачи без времени налёта — null, строка рисуется как раньше.
+function stlMarauderState(t) {
+  var p = t.payload || {};
+  var stage = p.stage;
+  if (!stage) return null;
+
+  var now = svNow();
+  var at = p.raid_at ? new Date(p.raid_at).getTime() : 0;
+  var end = p.raid_ends ? new Date(p.raid_ends).getTime() : 0;
+  var clock = function(ms) {
+    return svDayWord(ms) + 'в ' + svFormatTime(ms) + ' ' + svClock.label;
+  };
+  var line = function(cls, main, note) {
+    return '<div class="stl-task-sub stl-raid ' + cls + '"><b>' + main + '</b>' +
+      (note ? '<span>' + note + '</span>' : '') + '</div>';
+  };
+
+  if ((stage === 'scouted' || stage === 'warned') && at) {
+    if (now < at) {
+      return { cls: 'wait', mark: '◷',
+        html: line('wait', 'Налёт ожидается ' + clock(at) + ' · через ' + svLeftText((at - now) / 1000),
+                   'Пробудет до ' + svFormatTime(end) + ' — перебить всю банду') };
+    }
+    return { cls: 'raid', mark: '!', html: line('raid', 'Банда вот-вот появится у поселения', '') };
+  }
+
+  if (stage === 'raid') {
+    var total = p.total || t.target || 0;
+    var alive = typeof p.alive === 'number' ? p.alive : total;
+    // Всех перебили, а сервер ещё не перевёл этап (тик раз в 15 с) — уже отбит
+    if (alive === 0 && total > 0) {
+      return { cls: 'ok', html: line('ok', 'Налёт отбит', 'Банда разбита — условие выполнено') };
+    }
+    var span = Math.max(1, Math.round((end - at) / 1000));
+    return { cls: 'raid', mark: '!',
+      html: line('raid', 'Налёт идёт · банда уйдёт ' + clock(end) +
+                 ' · осталось ' + alive + ' из ' + total, '') +
+        '<div class="stl-raid-bar"><i data-stl-end="' + stlLocalMs(p.raid_ends) +
+          '" data-stl-total="' + span + '" style="width:' +
+          Math.max(0, Math.min(100, (now - at) / (end - at) * 100)).toFixed(2) + '%"></i></div>' };
+  }
+
+  if (stage === 'defeated') return { cls: 'ok', html: line('ok', 'Налёт отбит', 'Банда разбита — условие выполнено') };
+  if (stage === 'escaped') {
+    return { cls: 'fail', mark: '✕',
+      html: line('fail', 'Банда ушла с добычей', 'Ушло: ' + (p.left || 0) + ' · условие провалено') };
+  }
+  if (stage === 'cancelled') return { cls: 'ok', html: line('ok', 'Налёт отменён', 'Условие засчитано') };
+  if (stage === 'calm') return { cls: 'ok', html: line('ok', 'Налёта не было', 'Условие засчитано') };
+  return null;
+}
+
+// Не выполнен только налёт, который ещё впереди или идёт: это не провал, а дело на день
+function stlOnlyRaidLeft(tasks) {
+  var open = tasks.filter(function(t) { return !t.done_now; });
+  return open.length > 0 && open.every(function(t) {
+    var ms = t.kind === 'marauder' ? stlMarauderState(t) : null;
+    return !!ms && (ms.cls === 'wait' || ms.cls === 'raid');
+  });
+}
+
 // Вкладка «Условия» — прежний список суточных задач с кнопками оплаты
 function renderSettlementTasks(pane, st, tasks, hasDev) {
   var doneCount = tasks.filter(function(t) { return t.done_now; }).length;
@@ -951,10 +1016,14 @@ function renderSettlementTasks(pane, st, tasks, hasDev) {
     ' · до итогов ' + formatSettlementLeft(st.seconds_left) +
     '</div>';
 
-  // Итог дня заранее: понятно, растёт довольство или упадёт
-  html += '<div class="stl-verdict ' + (allDone ? 'good' : 'bad') + '">' +
+  // Итог дня заранее: понятно, растёт довольство или упадёт.
+  // Налёт, который ещё впереди, — не провал, а дело на вечер
+  var onlyRaid = !allDone && stlOnlyRaidLeft(tasks);
+  html += '<div class="stl-verdict ' + (allDone ? 'good' : onlyRaid ? 'wait' : 'bad') + '">' +
     (tasks.length === 0 ? 'Задач на эти сутки нет'
       : allDone ? 'Все требования выполнены — довольство вырастет'
+      : onlyRaid ? 'Выполнено ' + doneCount + ' из ' + tasks.length +
+                   ' — осталось отбить налёт мародёров'
                 : 'Выполнено ' + doneCount + ' из ' + tasks.length +
                   ' — при таком раскладе довольство упадёт') +
     '</div>';
@@ -965,16 +1034,19 @@ function renderSettlementTasks(pane, st, tasks, hasDev) {
     var meta = SETTLEMENT_TASKS[t.kind] || { title: t.kind, hint: '' };
 
     var row = document.createElement('div');
-    row.className = 'stl-task' + (t.done_now ? ' done' : '');
+    // Налёт мародёров: этап (ждём / идёт / отбит / ушли) решает вид строки
+    var ms = t.kind === 'marauder' ? stlMarauderState(t) : null;
+    row.className = 'stl-task' + (t.done_now ? ' done' : '') + (ms ? ' mar-' + ms.cls : '');
 
     var payable = (t.kind === 'donation' || t.kind === 'festival');
 
     row.innerHTML =
       '<div class="stl-task-head">' +
         '<span class="stl-task-title">' + meta.title + '</span>' +
-        '<span class="stl-task-mark">' + (t.done_now ? '✓' : '·') + '</span>' +
+        '<span class="stl-task-mark">' + (ms && ms.mark ? ms.mark : t.done_now ? '✓' : '·') + '</span>' +
       '</div>' +
-      '<div class="stl-task-sub">' + (meta.sub ? meta.sub(t.target) : t.target + ' ' + meta.hint) + '</div>';
+      (ms ? ms.html
+          : '<div class="stl-task-sub">' + (meta.sub ? meta.sub(t.target) : t.target + ' ' + meta.hint) + '</div>');
 
     // Платные задачи закрываются кнопкой, остальные — делом
     if (payable && !t.done_now && st.is_controller) {
@@ -2184,6 +2256,9 @@ function onSlotTapped(slotIndex) {
     // со сносом остаётся в режиме стройки.
     if (!buildMode && mine && ready) {
       if (isLab) openResearchPanel(existing);
+      // Хаб — вход в общий экран «Снабжение» (рейсы, склады, рынок) от
+      // этой планеты; старая панель узла — только если экран не подключён
+      else if (isHub && typeof openSupplyScreen === 'function') openSupplyScreen('routes', { hub: existing.system_id || systemId });
       else if (isHub) openLogisticsPanel(existing);
       else if (isTrade) openTradePanel(existing);
       else if (isEconomy) openEconomyPanel(existing);
@@ -8231,7 +8306,8 @@ function gbDeepLink() {
     unit: q.get('unit'),
     slot: q.get('slot') !== null ? parseInt(q.get('slot'), 10) : null,
     bid: q.get('bid'),
-    open: q.get('open')
+    open: q.get('open'),
+    tab: q.get('tab')
   };
   if (link.x === null && !link.unit && link.slot === null && !link.open) return;
 
@@ -8273,6 +8349,8 @@ function gbApplyLink(link) {
   if (link.open === 'settlement' && settlement) {
     gbLinkZoom(); focusCell(settlement.x + settlement.size / 2 - 0.5, settlement.y + settlement.size / 2 - 0.5);
     gbPing(settlement.x, settlement.y, settlement.size, settlement.size);
+    // События налёта и условий открывают сразу вкладку «Условия»
+    if (link.tab === 'tasks' || link.tab === 'districts' || link.tab === 'dev') stlTab = link.tab;
     openSettlementPanel();
     return;
   }

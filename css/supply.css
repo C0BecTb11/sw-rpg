@@ -492,6 +492,7 @@
 }
 
 .sup-node.done .sup-node-dot { border-color: #2a3644; color: #8fa8c4; }
+.sup-node.home .sup-node-dot { border-style: dashed; color: #d9a940; font-size: 11px; }
 .sup-node.here .sup-node-dot { border-color: #5fd968; background: rgba(95,217,104,0.15); color: #5fd968; }
 .sup-node.here .sup-node-name { color: #cfd8dc; }
 .sup-node.target .sup-node-dot { border-color: #4a90d9; color: #4a90d9; }
@@ -1227,8 +1228,311 @@
 .sup-looprow.on .sup-toggle i { background: #1f3a5c; }
 .sup-looprow.on .sup-toggle i::after { left: 15px; background: #4a90d9; }
 
+/* ── Шапка: подпись хаба ───────────────────────────────────────── */
+.sup-title-box { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+
+.sup-sub {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #8fa8c4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sup-sub b { font-weight: normal; color: #d9a940; }
+.sup-sub i {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: #d9a940;
+  transform: rotate(45deg);
+  box-shadow: 0 0 6px rgba(217,169,64,0.6);
+}
+
+.sup-new em {
+  font-style: normal;
+  font-weight: normal;
+  font-size: 10px;
+  letter-spacing: 0;
+  opacity: 0.7;
+}
+
+/* ── Склады: своя планета / все ────────────────────────────────── */
+.sup-scope { margin-bottom: 12px; }
+.sup-scope button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.sup-scope button.dim { color: #3a4654; }
+.sup-scope button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sup-scope .sup-dot { flex: none; }
+.sup-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 1px;
+  background: #d9a940;
+  transform: rotate(45deg);
+}
+
+/* ── Конвои старого образца ────────────────────────────────────── */
+.sup-convoy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 7px;
+  padding: 9px 11px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-left: 3px solid #4a90d9;
+  border-radius: 9px;
+}
+
+.sup-convoy.bad {
+  border-color: rgba(217,74,74,0.4);
+  border-left-color: #d94a4a;
+  background: linear-gradient(90deg, rgba(217,74,74,0.08), #10151e 60%);
+}
+
+.sup-convoy-info { flex: 1; min-width: 0; }
+.sup-convoy-cargo { font-size: 11px; line-height: 1.4; color: #cfd8dc; overflow-wrap: anywhere; }
+.sup-convoy-path { margin-top: 3px; font-size: 10px; color: #8fa8c4; overflow-wrap: anywhere; }
+.sup-convoy-path span { color: #55606c; }
+.sup-convoy-state { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+.sup-convoy-state .sup-left { font-size: 10px; }
+
+.sup-tag.buy { background: rgba(217,169,64,0.14); color: #d9a940; }
+.sup-tag.enemy { background: rgba(217,74,74,0.14); color: #d94a4a; }
+.sup-tag.open { background: rgba(74,144,217,0.14); color: #4a90d9; }
+
+/* ── Конструктор: режим, дом, быстрая погрузка ─────────────────── */
+.sup-mode button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  font-size: 11px;
+}
+
+.sup-mode button b { font-weight: normal; font-size: 13px; color: #55606c; }
+.sup-mode button.on { background: rgba(217,169,64,0.14); color: #d9a940; box-shadow: inset 0 0 0 1px rgba(217,169,64,0.45); }
+.sup-mode button.on b { color: #d9a940; }
+
+.sup-mode-note { margin: 7px 2px 0; font-size: 10px; line-height: 1.5; color: #55606c; }
+.sup-mode-note + .sup-looprow { margin-top: 10px; }
+
+.sup-looprow:disabled { opacity: 0.5; }
+
+.sup-stop.home {
+  padding: 9px 11px;
+  background: #0d1219;
+  border-style: dashed;
+  border-color: #2a3644;
+}
+
+.sup-stop.home .sup-stop-n { border-color: #d9a940; color: #d9a940; font-size: 12px; }
+.sup-home-name { flex: 1; min-width: 0; font-size: 12px; color: #cfd8dc; }
+.sup-home-name i { display: block; margin-top: 2px; font-style: normal; font-size: 9px; color: #55606c; letter-spacing: 0.5px; }
+
+.sup-quick { margin-top: 9px; }
+.sup-quick .sup-label { margin-bottom: 6px; }
+.sup-qbtn { min-height: 30px; padding: 4px 10px 4px 8px; font-family: 'Courier New', monospace; }
+.sup-qbtn:active { background: rgba(95,217,104,0.18); }
+
+.sup-here {
+  display: inline-block;
+  padding: 0 5px;
+  border-radius: 6px;
+  background: rgba(217,169,64,0.14);
+  color: #d9a940;
+  letter-spacing: 0.5px;
+}
+
+/* ── Рынок ─────────────────────────────────────────────────────── */
+.sup-mkt { margin-bottom: 12px; }
+.sup-mkt button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 36px; }
+
+.sup-seg-n {
+  min-width: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #d9a940;
+  color: #0a0d14;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: bold;
+  line-height: 15px;
+  text-align: center;
+}
+
+.sup-seg button.enemy.on { background: rgba(217,74,74,0.14); color: #d94a4a; }
+
+/* Фильтр лотов по ресурсу: лента, листается пальцем */
+.sup-fchips {
+  display: flex;
+  gap: 6px;
+  margin: 0 -14px 10px;
+  padding: 0 14px 2px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.sup-fchips::-webkit-scrollbar { display: none; }
+
+.sup-fchip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 10px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 15px;
+  color: #55606c;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.sup-fchip i { width: 7px; height: 7px; border-radius: 50%; }
+.sup-fchip.on { border-color: #4a90d9; color: #cfd8dc; background: #121a26; }
+
+.sup-lot,
+.sup-order {
+  margin-bottom: 8px;
+  padding: 10px 12px 11px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-left: 3px solid #2a3644;
+  border-radius: 9px;
+}
+
+.sup-lot.foreign { background: linear-gradient(90deg, rgba(217,74,74,0.06), #10151e 55%); }
+.sup-order.sent { opacity: 0.75; }
+.sup-order.open { border-color: rgba(217,169,64,0.45); }
+
+.sup-lot-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sup-lot-res { min-width: 0; font-size: 13px; letter-spacing: 0.5px; color: #cfd8dc; }
+.sup-lot-res b { font-weight: normal; color: #d9a940; }
+.sup-lot-price { flex: none; font-size: 10px; color: #55606c; }
+.sup-lot-price b { font-weight: normal; font-size: 14px; color: #d9a940; }
+
+.sup-lot-sub {
+  margin-top: 4px;
+  font-size: 10px;
+  line-height: 1.6;
+  color: #55606c;
+  overflow-wrap: anywhere;
+}
+
+.sup-lot-sub b { font-weight: normal; color: #8fa8c4; }
+.sup-lot-sub .y { color: #d9a940; }
+
+.sup-lot-buy {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.sup-lot-buy .sup-qty { flex: 1 1 auto; min-width: 0; }
+.sup-lot-buy .sup-mini { min-height: 36px; padding: 5px 9px; }
+.sup-lot-buy .sup-btn { flex: none; min-width: 84px; }
+.sup-btn.buy { background: rgba(217,169,64,0.12); border-color: rgba(217,169,64,0.55); color: #d9a940; }
+.sup-btn.buy:disabled { background: none; border-color: #2a3644; color: #55606c; }
+.sup-btn.buy.confirm { background: #d9a940; border-color: #d9a940; color: #0a0d14; font-weight: bold; box-shadow: 0 0 0 2px rgba(217,169,64,0.3); }
+
+.sup-lot-cost {
+  margin-top: 7px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: #55606c;
+}
+
+.sup-lot-cost b { font-weight: normal; color: #cfd8dc; }
+.sup-lot-cost .y { color: #d9a940; }
+.sup-lot-cost .y b { color: #d9a940; }
+.sup-lot-cost .r { color: #d94a4a; }
+
+.sup-lot-lock { flex: 1; font-size: 10px; line-height: 1.45; color: #55606c; }
+.sup-lot.mine .sup-actions { margin-top: 9px; }
+
+.sup-order-left { margin: 6px 0 9px; font-size: 10px; line-height: 1.5; color: #8fa8c4; }
+.sup-order-left span { color: #cfd8dc; }
+.sup-order-left.soon, .sup-order-left.soon span { color: #d9a940; }
+.sup-order-left.gone { color: #d94a4a; }
+.sup-order.sent .sup-order-left { margin-bottom: 0; color: #55606c; }
+
+/* Форма вывоза покупки — раскрывается внутри карточки брони */
+.sup-pick {
+  margin: 0 -3px;
+  padding: 10px 10px 11px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 8px;
+}
+
+.sup-pick .sup-label { display: block; }
+.sup-pick .sup-cmd { background: #0d1219; }
+.sup-pick .sup-cmd.on { background: linear-gradient(90deg, rgba(217,169,64,0.08), #0d1219 60%); }
+.sup-pick .sup-looprow { margin-top: 8px; background: #0d1219; }
+
+.sup-pick-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px dashed #2a3644;
+  border-radius: 8px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: #8fa8c4;
+}
+
+.sup-pick-path b { font-weight: normal; color: #cfd8dc; }
+.sup-pick-path em { font-style: normal; color: #5fd968; font-size: 9px; }
+.sup-pick-path > span { white-space: nowrap; }
+.sup-pick-path > i { font-style: normal; color: #4a90d9; }
+
+.sup-pick-fit { margin: 8px 2px 4px; font-size: 10px; color: #55606c; }
+.sup-pick-fit b { font-weight: normal; color: #cfd8dc; }
+.sup-pick-fit.over b { color: #d94a4a; }
+
+.sup-pick-btns { display: flex; gap: 6px; margin-top: 8px; }
+.sup-pick-btns .sup-btn.ghost { flex: none; }
+.sup-pick-btns .sup-btn.gold { flex: 1; min-width: 0; }
+.sup-pick-btns .sup-btn:disabled.gold { background: #2a3644; border-color: #2a3644; color: #55606c; opacity: 1; }
+
+/* Новый лот */
+.sup-form {
+  padding: 11px 12px 12px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-left: 3px solid #d9a940;
+  border-radius: 9px;
+}
+
+.sup-form > .sup-field + .sup-field { margin-top: 10px; }
+.sup-form .sup-rule { padding-top: 10px; }
+.sup-form .sup-avail { margin: 6px 2px 0; }
+.sup-form .sup-lot-cost { margin: 10px 2px 10px; }
+
 @media (max-width: 370px) {
   .sup-tab { font-size: 9px; letter-spacing: 0; }
+  .sup-tabs { gap: 4px; padding: 0 10px 12px; }
+  .sup-mkt button { font-size: 9px; padding: 6px 2px; }
+  .sup-lot-buy .sup-btn { min-width: 72px; }
   .sup-rule { gap: 9px 8px; }
   .sup-qty button { width: 32px; }
   .sup-sum-cell { padding: 9px 8px; }

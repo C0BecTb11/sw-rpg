@@ -10,6 +10,11 @@
 //                    тап по полю, сброс при смене корабля;
 //   space-battle.js: тап по кораблю / слоту станции в режиме выбора,
 //                    отметка кораблей флота, обновление после loadShips.
+//
+// Бережём устройство: нить видна только у выбранного корабля с его флотом
+// и в предпросмотре. Остальных идущих выдаёт неподвижный значок ⇉ на
+// корабле (класс am-going). Пунктир неподвижный; живёт одна анимация —
+// пульс финиша, на HTML-рамке (только transform и opacity).
 
 var AM_MAX_GROUP = 12;     // столько же проверяет сервер
 var AM_NEAR = 12;          // «Все рядом» — радиус от ведущего, клеток
@@ -26,7 +31,10 @@ var amLoadTimer = null;
 var amSubscribed = false;
 var amRpcBroken = false;
 var amSvg = null;
+var amPulseEl = null;      // пульс финиша — один на карте
 var amTagEls = [];
+var amPollTimer = null;
+var amPosMemo = {};        // где стояли идущие: сдвинулся — значит, был шаг
 var amRenderSig = '';
 var amBoxSig = '';
 var amStatusSig = '';
@@ -368,13 +376,32 @@ function amFieldEvent(e) {
   return true;
 }
 
-// Отметка кораблей на карте (из renderShips)
+// Отметка кораблей на карте (из renderShips): в выборе флота — кольца,
+// иначе свои идущие корабли получают значок ⇉
 function amShipMark(ship) {
-  if (!am || scMode !== 'auto') return '';
-  if (ship.id === am.leaderId) return 'am-lead';
-  if (am.ids.indexOf(ship.id) >= 0) return 'am-pick';
-  if (am.picking && amMine(ship) && amOnMap(ship)) return 'am-can';
-  return '';
+  if (am && scMode === 'auto') {
+    if (ship.id === am.leaderId) return 'am-lead';
+    if (am.ids.indexOf(ship.id) >= 0) return 'am-pick';
+    if (am.picking && amMine(ship) && amOnMap(ship)) return 'am-can';
+  }
+  return amGoingMark(ship) ? 'am-going' : '';
+}
+
+function amGoingMark(ship) {
+  return amMine(ship) && amOnMap(ship) && !!amActiveRow(ship.id);
+}
+
+// Пришли новые автоходы — значки на уже нарисованных кораблях, без
+// пересборки всего поля
+function amSyncMarks() {
+  if (typeof grid === 'undefined' || !grid) return;
+  var els = grid.querySelectorAll('.ship-sprite');
+  for (var i = 0; i < els.length; i++) {
+    var c = els[i].classList;
+    var s = sxShipById(els[i].getAttribute('data-ship-id'));
+    var on = !!s && amGoingMark(s) && !c.contains('am-lead') && !c.contains('am-pick') && !c.contains('am-can');
+    if (c.contains('am-going') !== on) c.toggle('am-going', on);
+  }
 }
 
 function amGo(btn) {
@@ -744,9 +771,6 @@ function amThreadSvg(ship, box, path, cls, ghost) {
     }
   }
   s += '<rect class="am-fin" x="' + (fx + 2) + '" y="' + (fy + 2) + '" width="' + (fw - 4) + '" height="' + (fh - 4) + '" rx="4"/>';
-  if (hot) {
-    s += '<rect class="am-pulse" x="' + (fx + 2) + '" y="' + (fy + 2) + '" width="' + (fw - 4) + '" height="' + (fh - 4) + '" rx="4"/>';
-  }
   // Прицел в центре финиша
   s += '<path class="am-cross" d="M' + amF(c[0] - r) + ' ' + amF(c[1]) + 'H' + amF(c[0] + r) +
        'M' + amF(c[0]) + ' ' + amF(c[1] - r) + 'V' + amF(c[1] + r) + '"/>';
@@ -769,17 +793,21 @@ function amRender() {
   var plan = amPlan();
   var parts = [];
   var tags = [];
+  var pulse = null;
   var sigParts = [hotKey];
 
-  // Живые автоходы: тонко у всех, ярко у выбранного корабля и его флота
+  // Живые автоходы: нить только у выбранного корабля и его флота. В выборе
+  // цели прежний путь кораблей флота виден тускло, пока точка не выбрана
   amMoves.forEach(function(r) {
     if (r.status !== 'active' || !r.path || !r.path.length) return;
+    var key = r.group_id || r.id;
+    var hot = !!hotKey && key === hotKey;
+    var picked = !!am && am.ids.indexOf(r.ship_id) >= 0;
+    // В предпросмотре нового маршрута старая нить этих кораблей только мешает
+    if (picked && plan) return;
+    if (!hot && !picked) return;
     var s = sxShipById(r.ship_id);
     if (!amOnMap(s)) return;
-    // В предпросмотре нового маршрута старая нить этих кораблей только мешает
-    if (am && am.ids.indexOf(s.id) >= 0 && plan) return;
-    var key = r.group_id || r.id;
-    var hot = hotKey && key === hotKey;
     var box = amBoxOf(s);
     parts.push({ hot: hot, svg: amThreadSvg(s, box, r.path, hot ? 'live' : 'live dim', false) });
     sigParts.push(r.id + ':' + s.x + ':' + s.y + ':' + s.facing + ':' + JSON.stringify(r.path) + ':' + (hot ? 1 : 0));
@@ -789,6 +817,7 @@ function amRender() {
       var eta = 0;
       group.forEach(function(g) { eta = Math.max(eta, amEtaSec(sxShipById(g.ship_id), (g.path || []).length)); });
       tags.push([fin[0], fin[1], box, 'осталось ' + amSteps(r.path.length) + ' · ' + amEtaText(eta), '']);
+      if (!plan) pulse = [fin[0], fin[1], box, ''];
     }
   });
 
@@ -801,24 +830,47 @@ function amRender() {
       sigParts.push('p' + it.ship.id + ':' + it.ship.x + ':' + it.ship.y + ':' + it.tx + ':' + it.ty + ':' + it.path.length);
       if (lead) {
         tags.push([it.tx, it.ty, it.box, amSteps(plan.steps) + ' · ' + amEtaText(plan.eta), 'plan']);
+        pulse = [it.tx, it.ty, it.box, 'plan'];
       }
       if (it.block) tags.push([it.tx, it.ty + it.box.h, it.box, 'встанет рядом', 'warn below']);
     });
   }
 
   tags.forEach(function(t) { sigParts.push(t.join(':')); });
+  if (pulse) sigParts.push('pulse:' + pulse[0] + ':' + pulse[1] + ':' + pulse[2].w + ':' + pulse[2].h + ':' + pulse[3]);
   var sig = sigParts.join('|');
   var svg = amEnsureSvg();
   if (sig === amRenderSig && svg.parentNode) return;
   amRenderSig = sig;
 
-  // Яркие поверх тусклых
+  // Яркие поверх тусклых. Пустой слой прячем целиком
   parts.sort(function(a, b) { return (a.hot ? 1 : 0) - (b.hot ? 1 : 0); });
   svg.innerHTML = parts.map(function(p) { return p.svg; }).join('');
+  svg.style.display = parts.length ? '' : 'none';
 
+  amRenderPulse(pulse);
   amClearTags();
   tags.forEach(function(t) { amTag(t[0], t[1], t[2], t[3], t[4]); });
   amFitTags();
+}
+
+// Пульс финиша: HTML-рамка под кораблями. Анимация только transform и
+// opacity — её ведёт видеокарта, нить при этом не перерисовывается
+function amRenderPulse(p) {
+  if (!p) {
+    if (amPulseEl && amPulseEl.parentNode) amPulseEl.parentNode.removeChild(amPulseEl);
+    amPulseEl = null;
+    return;
+  }
+  if (!amPulseEl) {
+    amPulseEl = document.createElement('div');
+  }
+  if (amPulseEl.parentNode !== grid) grid.insertBefore(amPulseEl, amSvg ? amSvg.nextSibling : grid.firstChild);
+  amPulseEl.className = 'am-pulse-box' + (p[3] ? ' ' + p[3] : '');
+  amPulseEl.style.left = (p[0] * CELL_PX + 2) + 'px';
+  amPulseEl.style.top = (p[1] * CELL_PX + 2) + 'px';
+  amPulseEl.style.width = (p[2].w * CELL_PX - 4) + 'px';
+  amPulseEl.style.height = (p[2].h * CELL_PX - 4) + 'px';
 }
 
 // ===== загрузка и итоги =====
@@ -843,9 +895,40 @@ function amLoad() {
     amCheckFinished(rows);
     amMoves = rows;
     amMovesAt = Date.now();
+    amMovedSince();
     amRender();
+    amSyncMarks();
     if (scShip) { scRenderTiles(); amRenderStatus(); }
+    amArmPoll();
   });
+}
+
+// Подстраховка на случай пропущенного события: пока кто-то из своих идёт —
+// перечитываем раз в 20 с. Никто не идёт — таймера нет
+function amArmPoll() {
+  if (amPollTimer) { clearTimeout(amPollTimer); amPollTimer = null; }
+  var any = amMoves.some(function(r) { return r.status === 'active'; });
+  if (!any) return;
+  amPollTimer = setTimeout(function() {
+    amPollTimer = null;
+    if (document.hidden) { amArmPoll(); return; }
+    amLoad();
+  }, 20000);
+}
+
+// Сдвинулся ли кто-то из идущих с прошлого раза. Заодно запоминаем,
+// где стоят сейчас
+function amMovedSince() {
+  var moved = false, next = {};
+  amMoves.forEach(function(r) {
+    if (r.status !== 'active') return;
+    var s = sxShipById(r.ship_id);
+    var at = amOnMap(s) ? s.x + ':' + s.y + ':' + (s.facing || 0) : '-';
+    next[r.ship_id] = at;
+    if (amPosMemo[r.ship_id] !== undefined && amPosMemo[r.ship_id] !== at) moved = true;
+  });
+  amPosMemo = next;
+  return moved;
 }
 
 function amSubscribe() {
@@ -854,16 +937,10 @@ function amSubscribe() {
   try {
     supabase
       .channel('automove-space-' + systemId)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'auto_moves', filter: 'system_id=eq.' + systemId }, amLoadSoon)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'auto_moves', filter: 'system_id=eq.' + systemId },
+          function() { amLoadSoon(); })
       .subscribe();
   } catch (e) {}
-
-  // Подстраховка на случай пропущенного события: пока кто-то идёт —
-  // изредка перечитываем сами
-  setInterval(function() {
-    var any = amMoves.some(function(r) { return r.status === 'active'; });
-    if (any && !document.hidden) amLoad();
-  }, 20000);
 }
 
 // После каждой загрузки кораблей (из loadShips)
@@ -891,10 +968,10 @@ function amAfterShips(prev) {
   amSubscribe();
   amRender();
   if (am) amRenderBox();
-  // Перечитываем автоходы, только когда есть что обновлять: первая загрузка,
-  // кто-то идёт или открыт выбор цели. Новые автоходы приносит realtime.
-  var active = amMoves.some(function(r) { return r.status === 'active'; });
-  if (amSeen === null || active || am) amLoadSoon();
+  // Перечитываем автоходы, только когда есть что обновлять: первая загрузка
+  // или кто-то из идущих шагнул (путь на сервере стал короче). Остальное
+  // приносит realtime, а пропущенное — редкий опрос
+  if (amSeen === null || amMovedSince()) amLoadSoon();
 }
 
 // Итог показываем один раз на отряд и только при переходе, увиденном
