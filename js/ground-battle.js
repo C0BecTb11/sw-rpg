@@ -174,8 +174,18 @@ var SETTLEMENT_TASKS = {
   donation:  { title: 'Пожертвование', hint: 'кредитов' },
   festival:  { title: 'Праздник', hint: 'кредитов' },
   factories: { title: 'Слишком много заводов', hint: 'оставить не больше' },
-  medical:   { title: 'Нужна лечебница', hint: 'построить' }
+  // Здание у сторон своё: у Республики «Центр медицины», у КНС «Ремонтный
+  // цех». Раньше задача звала его «лечебницей», и игроки искали в стройке
+  // то, чего там нет. Имя берём из справочника построек, как в панели стройки.
+  medical:   { title: function() { return 'Нужен ' + stlMedicalName(); },
+               hint: '', sub: function() { return 'Здание из панели стройки · квартал «Госпиталь» не в счёт'; } }
 };
+
+function stlMedicalName() {
+  var code = myFaction === 'cis' ? 'cis_repair' : 'rep_medical';
+  var bt = (buildingTypes || []).filter(function(b) { return b.code === code; })[0];
+  return bt ? '«' + bt.name + '»' : (myFaction === 'cis' ? '«Ремонтный цех»' : '«Центр медицины»');
+}
 
 var settlementTimer = null;
 
@@ -1042,7 +1052,8 @@ function renderSettlementTasks(pane, st, tasks, hasDev) {
 
     row.innerHTML =
       '<div class="stl-task-head">' +
-        '<span class="stl-task-title">' + meta.title + '</span>' +
+        '<span class="stl-task-title">' +
+          (typeof meta.title === 'function' ? meta.title() : meta.title) + '</span>' +
         '<span class="stl-task-mark">' + (ms && ms.mark ? ms.mark : t.done_now ? '✓' : '·') + '</span>' +
       '</div>' +
       (ms ? ms.html
