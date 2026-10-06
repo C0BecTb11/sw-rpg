@@ -481,6 +481,9 @@
           { sel: '#pr-send:not([disabled])', tip: 'Отправить запрос' },
           { sel: '#pr-body .pr-planet:not(.locked)', tip: 'Выбери планету' },
           { sel: '#pr-open-btn', tip: 'Запросить планету' },
+          // Лидер выдаёт планету себе сам — через панель управления
+          { sel: '#faction-control-screen .faction-control-select', tip: 'Выбери себя' },
+          { sel: '#faction-control-open-btn', tip: 'Панель управления фракции' },
           { sel: '#panel-item-faction', tip: 'Фракция' },
           { sel: '#bottom-panel-toggle', tip: 'Открой панель' }
         ]);
@@ -575,6 +578,8 @@
 
       case 'planet':
         return galaxy([
+          { sel: '#faction-control-screen .faction-control-select', tip: 'Выбери себя' },
+          { sel: '#faction-screen #faction-control-open-btn', tip: 'Панель управления фракции' },
           { sel: '#faction-screen #pr-open-btn:not([disabled])', tip: 'Запросить ещё' },
           { sel: '#feed-bell', tip: 'Ответ лидера придёт сюда' }
         ]);

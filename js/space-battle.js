@@ -875,7 +875,17 @@ function openShipyard() {
   supabase.rpc('get_my_profile').then(function(pr) {
     var faction = (!pr.error && pr.data && pr.data.length) ? pr.data[0].faction : null;
 
-    supabase.from('ship_types').select('*').eq('is_fighter', false).eq('faction', faction).then(function(res) {
+    Promise.all([
+      supabase.from('ship_types').select('*').eq('is_fighter', false).eq('faction', faction),
+      // Корабли, временно закрытые настройкой (например, на время теста)
+      supabase.from('game_settings').select('value').eq('key', 'locked_for_test').maybeSingle()
+    ]).then(function(rr) {
+      var res = rr[0];
+      var locked = (rr[1] && !rr[1].error && rr[1].data && rr[1].data.value)
+        ? String(rr[1].data.value).split(',').map(function(x) { return x.trim(); }) : [];
+      if (!res.error && res.data) {
+        res.data = res.data.filter(function(t) { return locked.indexOf(t.id) === -1; });
+      }
       if (res.error || !res.data || res.data.length === 0) {
         list.innerHTML = '<div class="shipyard-empty">Нет доступных кораблей</div>';
         return;
