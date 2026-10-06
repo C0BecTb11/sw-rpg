@@ -1784,15 +1784,45 @@ var TERRAIN_COLORS = {
   lake:    '#2a5a78'
 };
 
+// Разрешение холста. Поле 144×144 клеток по 32 px — это холст 4608×4608,
+// около 85 МБ памяти. Слабый телефон его не держит: изображение то
+// пропадает в чёрное, то появляется снова, и до карты дело не доходит.
+// На таких устройствах рисуем в половинном разрешении (≈21 МБ): размер
+// на экране и все координаты те же, меняется только плотность пикселей.
+// Если браузер всё же потерял холст, переходим на половинное сами.
+var GB_RES = gbPickRes();
+
+function gbPickRes() {
+  var touch = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
+  var mem = navigator.deviceMemory;
+  // У iPhone deviceMemory нет, а предел холста там 16,7 млн пикселей — тоже меньше нужного
+  if (touch && (!mem || mem <= 4)) return 0.5;
+  return 1;
+}
+
+function gbLowerRes() {
+  if (GB_RES <= 0.5) return;
+  GB_RES = 0.5;
+  // Новый размер выставит drawScene; старый буфер освобождаем сразу
+  if (canvas) { canvas.width = 1; canvas.height = 1; }
+}
+
 function drawScene(grid) {
   // Присвоение canvas.width заново выделяет буфер: при 3840x3840 это
   // около 60 МБ на каждую отрисовку. Отсюда и было мигание с кусками —
   // телефон не успевал. Размер ставим один раз.
   var need = GRID_SIZE * CELL_PX;
-  if (canvas.width !== need || canvas.height !== need) {
-    canvas.width = need;
-    canvas.height = need;
+  var px = Math.round(need * GB_RES);
+  if (canvas.width !== px || canvas.height !== px) {
+    canvas.width = px;
+    canvas.height = px;
+    // Размер на экране не зависит от плотности: от него считаются
+    // сдвиг, масштаб, тапы и слой всплывающих цифр
+    canvas.style.width = need + 'px';
+    canvas.style.height = need + 'px';
   }
+  // Рисуем в тех же координатах, что и раньше; уменьшение делает холст
+  ctx.setTransform(GB_RES, 0, 0, GB_RES, 0, 0);
 
   for (var y = 0; y < GRID_SIZE; y++) {
     for (var x = 0; x < GRID_SIZE; x++) {
@@ -2932,6 +2962,17 @@ function initGroundBattle() {
   ctx = canvas ? canvas.getContext('2d') : null;
 
   if (!canvas) showFatal('В разметке нет <canvas id="ground-canvas">');
+
+  // Браузер сбросил холст из-за нехватки памяти — рисуем заново в половинном разрешении
+  if (canvas) {
+    canvas.addEventListener('contextlost', function(e) {
+      if (e && e.preventDefault) e.preventDefault();
+      gbLowerRes();
+    });
+    canvas.addEventListener('contextrestored', function() {
+      if (typeof redrawScene === 'function') redrawScene();
+    });
+  }
 
   // Клиент Supabase создаётся в supabase-client.js поверх библиотеки с CDN.
   // Если что-то из этого не загрузилось, в глобальной переменной остаётся
