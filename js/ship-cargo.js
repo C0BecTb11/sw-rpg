@@ -155,6 +155,7 @@ function renderMarketPickup(list) {
           act.disabled = false;
           if (r2.error) { alert(r2.error.message); return; }
           setCargoTab(cargoTab);
+          if (typeof loadArmyData === 'function') loadArmyData();
         });
       });
 
@@ -293,6 +294,9 @@ function makeResourceCargoRow(resourceId, label, available, actionLabel) {
       act.disabled = false;
       if (res.error) { alert(res.error.message); return; }
       setCargoTab(cargoTab);
+      // Груз занимает те же слоты, что и десант: список флота под панелью
+      // должен сразу показать новую загрузку
+      if (typeof loadArmyData === 'function') loadArmyData();
     });
   });
   controls.appendChild(act);

@@ -1491,3 +1491,31 @@
 @media (prefers-reduced-motion: reduce) {
   .am-pulse-box { animation: none; opacity: 0.6; }
 }
+
+/* Груз в трюме: ресурсы делят место с десантом. Полоса слева — цвет
+   ресурса, как на складе планеты */
+.sc-cargo-full { color: #d94a4a; }
+.sc-hangar-head.sc-cargo-sub { margin-top: 10px; }
+.sc-cargo-err {
+  margin-bottom: 7px;
+  padding: 7px 10px;
+  background: #10151e;
+  border: 1px solid rgba(217,74,74,0.45);
+  border-left: 3px solid #d94a4a;
+  border-radius: 8px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: #d94a4a;
+}
+.sc-cargo-goods {
+  border-left-color: #8fa8c4;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px 7px 11px;
+}
+.sc-goods-txt { flex: 1; min-width: 0; }
+.sc-goods-txt span { display: block; font-size: 11px; color: #cfd8dc; }
+.sc-goods-txt em { font-style: normal; font-size: 10px; color: #55606c; }
+.sc-cargo-goods .sc-hangar-acts { flex: none; margin-top: 0; }
+.sc-cargo-goods .sc-hangar-btn { flex: none; min-width: 46px; padding: 7px 9px; }

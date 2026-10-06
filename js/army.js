@@ -33,13 +33,38 @@ function loadCommanders(userId) {
       .eq('owner_user_id', userId).is('carrier_ship_id', null),
     // Трюм — это не только пехота из ship_cargo: техника лежит строками
     // в unit_positions, и без неё загруженная канонерка пропадала из виду
-    supabase.rpc('get_ship_holds')
+    supabase.rpc('get_ship_holds'),
+    // Ресурсы лежат в том же трюме, что и десант. Без них гружёный
+    // корабль числился здесь пустым, а панель трюма говорила «полон»
+    supabase.from('ship_resource_cargo').select('ship_id, resource, amount'),
+    supabase.from('resources').select('id, name, color, sort_order'),
+    supabase.from('game_settings').select('value').eq('key', 'cargo_units_per_slot').maybeSingle()
   ]).then(function(results) {
     var commandersRes = results[0];
     var systemsRes = results[1];
     var shipsRes = results[2];
     var cargoRes = results[3];
     if (commandersRes.error || !commandersRes.data) return;
+
+    var perSlot = (!results[6].error && results[6].data)
+      ? Math.max(1, parseInt(results[6].data.value, 10) || 2) : 2;
+    var resById = {};
+    (results[5].data || []).forEach(function(r) { resById[r.id] = r; });
+    var goodsByShip = {};
+    (results[4].data || []).forEach(function(g) {
+      if (!(g.amount > 0)) return;
+      var r = resById[g.resource] || {};
+      if (!goodsByShip[g.ship_id]) goodsByShip[g.ship_id] = [];
+      goodsByShip[g.ship_id].push({
+        resource: g.resource, name: r.name || g.resource, color: r.color,
+        sort: r.sort_order || 0, amount: g.amount,
+        // Тот же счёт, что у сервера: ceil(количество / единиц на слот)
+        slots: Math.ceil(g.amount / perSlot)
+      });
+    });
+    Object.keys(goodsByShip).forEach(function(k) {
+      goodsByShip[k].sort(function(a, b) { return a.sort - b.sort; });
+    });
 
     var ships = shipsRes.error ? [] : (shipsRes.data || []);
     var cargoByShip = {};
@@ -100,7 +125,7 @@ function loadCommanders(userId) {
         // Флот командира: список кораблей, каждый раскрывается и показывает,
         // кто внутри. Так вся цепочка «командир → корабль → войска» видна
         // в одном месте, без отдельных разделов.
-        row.appendChild(makeFleetSection(shipsByCommander[c.id] || [], cargoByShip, systemNames));
+        row.appendChild(makeFleetSection(shipsByCommander[c.id] || [], cargoByShip, systemNames, goodsByShip));
 
       }
 
@@ -153,7 +178,7 @@ function loadCommanders(userId) {
           '</div>';
         block.appendChild(head);
 
-        var section = makeFleetSection(group, cargoByShip, systemNames);
+        var section = makeFleetSection(group, cargoByShip, systemNames, goodsByShip);
         // Заголовок «Флот» внутри лишний: система уже названа сверху
         var inner = section.querySelector('.inventory-title');
         if (inner) inner.parentNode.removeChild(inner);
@@ -174,7 +199,7 @@ function loadCommanders(userId) {
 }
 
 // Раскрывающийся список кораблей: внутри каждого — его трюм.
-function makeFleetSection(ships, cargoByShip, systemNames) {
+function makeFleetSection(ships, cargoByShip, systemNames, goodsByShip) {
   var wrap = document.createElement('div');
   wrap.className = 'fleet-section';
 
@@ -194,9 +219,12 @@ function makeFleetSection(ships, cargoByShip, systemNames) {
   ships.forEach(function(ship) {
     var type = ship.ship_types || {};
     var cargo = cargoByShip[ship.id] || [];
+    var goods = (goodsByShip && goodsByShip[ship.id]) || [];
     // Место считаем слотами, а не головами: техника занимает больше,
-    // а гружёная канонерка — ещё и за свой десант
-    var used = cargo.reduce(function(a, c) { return a + (c.slots || c.quantity); }, 0);
+    // а гружёная канонерка — ещё и за свой десант. Груз — тоже слоты.
+    var used = cargo.reduce(function(a, c) { return a + (c.slots || c.quantity); }, 0) +
+               goods.reduce(function(a, g) { return a + g.slots; }, 0);
+    var cap = type.capacity || 0;
 
     var block = document.createElement('div');
     block.className = 'ship-block';
@@ -213,8 +241,11 @@ function makeFleetSection(ships, cargoByShip, systemNames) {
             : (systemNames[ship.system_id] || ship.system_id)) + '</em></span>' +
       // У истребителя трюма нет, и «0/0» рядом с ним только сбивает
       '<span class="ship-capacity">' +
-        (type.is_fighter ? 'истребитель' : used + '/' + (type.capacity || 0)) +
+        (type.is_fighter ? 'истребитель' : used + '/' + cap) +
       '</span>';
+    if (!type.is_fighter && cap > 0 && used >= cap) {
+      header.querySelector('.ship-capacity').classList.add('full');
+    }
     block.appendChild(header);
 
     var body = document.createElement('div');
@@ -249,12 +280,12 @@ function makeFleetSection(ships, cargoByShip, systemNames) {
 
     if (type.is_fighter) {
       // Истребителю нечего показывать: ни трюма, ни ангара
-    } else if (cargo.length === 0) {
+    } else if (cargo.length === 0 && goods.length === 0) {
       var e = document.createElement('div');
       e.className = 'inventory-empty';
       e.textContent = 'трюм пуст';
       body.appendChild(e);
-    } else {
+    } else if (cargo.length) {
       var grid = document.createElement('div');
       grid.className = 'inventory-grid';
       cargo.forEach(function(c) {
@@ -269,6 +300,8 @@ function makeFleetSection(ships, cargoByShip, systemNames) {
       });
       body.appendChild(grid);
     }
+
+    if (!type.is_fighter && goods.length) body.appendChild(makeGoodsGrid(goods));
     block.appendChild(body);
 
     header.addEventListener('click', function() {
@@ -355,6 +388,44 @@ function loadGarrisons(userId) {
       listEl.appendChild(block);
     });
   });
+}
+
+// Груз корабля: те же фишки, что у бойцов, только вместо портрета —
+// метка цвета ресурса, как на складе планеты
+function makeGoodsGrid(goods) {
+  var wrap = document.createElement('div');
+  wrap.className = 'goods-block';
+
+  var head = document.createElement('div');
+  head.className = 'goods-head';
+  head.textContent = 'Груз';
+  wrap.appendChild(head);
+
+  var grid = document.createElement('div');
+  grid.className = 'inventory-grid';
+  goods.forEach(function(g) {
+    var chip = document.createElement('div');
+    chip.className = 'unit-chip goods-chip';
+
+    var dot = document.createElement('i');
+    dot.className = 'goods-dot';
+    if (g.color) dot.style.background = g.color;
+    chip.appendChild(dot);
+
+    var label = document.createElement('div');
+    label.className = 'unit-chip-label';
+    label.textContent = g.name;
+    chip.appendChild(label);
+
+    var count = document.createElement('div');
+    count.className = 'unit-chip-count';
+    count.textContent = g.amount;
+    chip.appendChild(count);
+
+    grid.appendChild(chip);
+  });
+  wrap.appendChild(grid);
+  return wrap;
 }
 
 function makeUnitChip(type, quantity) {

@@ -300,21 +300,29 @@ function scRenderCargo() {
 
   Promise.all([
     supabase.rpc('get_ship_holds'),
-    supabase.rpc('get_carried_units', { p_carrier_unit_id: null, p_ship_id: forShip })
+    supabase.rpc('get_carried_units', { p_carrier_unit_id: null, p_ship_id: forShip }),
+    // Ресурсы делят тот же трюм: без них полный грузом корабль
+    // показывался здесь пустым, а в «Армии» — забитым
+    supabase.rpc('get_ship_resource_cargo', { p_ship_id: forShip }),
+    scResourceColors()
   ]).then(function(r) {
     if (!scShip || scShip.id !== forShip || scTab !== 'cargo') return;
 
     var holds = (!r[0].error && r[0].data) ? r[0].data : [];
     var mine = holds.filter(function(h) { return h.ship_id === forShip && !h.is_vehicle; });
     var vehicles = (!r[1].error && r[1].data) ? r[1].data : [];
+    var goods = (!r[2].error && r[2].data) ? r[2].data : [];
 
     var used = 0;
     holds.forEach(function(h) { if (h.ship_id === forShip) used += (h.slots || 0); });
+    goods.forEach(function(g) { used += (g.slots || 0); });
 
+    var cap = scType.capacity || 0;
     box.innerHTML = '<div class="sc-hangar-head">Трюм · ' +
-      used + ' из ' + (scType.capacity || 0) + '</div>';
+      '<span class="' + (cap && used >= cap ? 'sc-cargo-full' : '') + '">' +
+      used + ' из ' + cap + '</span></div>';
 
-    if (!mine.length && !vehicles.length) {
+    if (!mine.length && !vehicles.length && !goods.length) {
       var empty = document.createElement('div');
       empty.className = 'sc-hangar-empty';
       empty.textContent = 'Пусто';
@@ -375,11 +383,92 @@ function scRenderCargo() {
       box.appendChild(row);
     });
 
-    var note = document.createElement('div');
-    note.className = 'sc-hangar-empty';
-    note.textContent = 'На чужой планете высадка идёт поштучно с наземной карты';
-    box.appendChild(note);
+    if (mine.length || vehicles.length) {
+      var note = document.createElement('div');
+      note.className = 'sc-hangar-empty';
+      note.textContent = 'На чужой планете высадка идёт поштучно с наземной карты';
+      box.appendChild(note);
+    }
+
+    if (goods.length) scRenderCargoGoods(box, forShip, goods, r[3] || {});
   });
+}
+
+// Цвета ресурсов нужны только для полоски у строки груза — спрашиваем
+// один раз за страницу
+var scResColors = null;
+function scResourceColors() {
+  if (scResColors) return Promise.resolve(scResColors);
+  return supabase.from('resources').select('id, color').then(function(res) {
+    var map = {};
+    (res.data || []).forEach(function(x) { map[x.id] = x.color; });
+    if (!res.error) scResColors = map;
+    return map;
+  });
+}
+
+// Груз выгружается на склад планеты, над которой стоит корабль. Правила
+// (своя сторона, место на складе) проверяет сервер — его ответ показываем
+// прямо в трюме, а не в подсказке над плитками, которой тут не видно.
+function scRenderCargoGoods(box, forShip, goods, colors) {
+  var head = document.createElement('div');
+  head.className = 'sc-hangar-head sc-cargo-sub';
+  head.textContent = 'Груз · выгрузить на склад';
+  box.appendChild(head);
+
+  var err = document.createElement('div');
+  err.className = 'sc-cargo-err';
+  err.style.display = 'none';
+  box.appendChild(err);
+
+  // Строка груза короткая: название и объём слева, кнопки справа.
+  // Семь ресурсов в полный рост растягивали панель на два экрана.
+  goods.forEach(function(g) {
+    var row = document.createElement('div');
+    row.className = 'sc-hangar-row sc-cargo-goods';
+    if (colors[g.resource]) row.style.borderLeftColor = colors[g.resource];
+
+    var txt = document.createElement('div');
+    txt.className = 'sc-goods-txt';
+    var nm = document.createElement('span');
+    nm.textContent = g.name;
+    var meta = document.createElement('em');
+    meta.textContent = g.amount + ' ед. · ' + g.slots + ' сл.';
+    txt.appendChild(nm);
+    txt.appendChild(meta);
+    row.appendChild(txt);
+
+    var acts = document.createElement('div');
+    acts.className = 'sc-hangar-acts';
+    var steps = g.amount > 10 ? [10, g.amount] : [g.amount];
+    steps.forEach(function(n) {
+      var b = document.createElement('button');
+      b.className = 'sc-hangar-btn';
+      b.textContent = n === g.amount ? 'Всё' : String(n);
+      b.addEventListener('click', function() {
+        b.disabled = true;
+        supabase.rpc('unload_resource_from_ship', {
+          p_ship_id: forShip, p_resource: g.resource, p_amount: n
+        }).then(function(res) {
+          if (res.error) {
+            b.disabled = false;
+            err.textContent = res.error.message;
+            err.style.display = 'block';
+            return;
+          }
+          scRenderCargo();
+        });
+      });
+      acts.appendChild(b);
+    });
+    row.appendChild(acts);
+    box.appendChild(row);
+  });
+
+  var note = document.createElement('div');
+  note.className = 'sc-hangar-empty';
+  note.textContent = 'Выгрузка — только на планете своей стороны, пока на складе есть место';
+  box.appendChild(note);
 }
 
 function scRenderTiles() {

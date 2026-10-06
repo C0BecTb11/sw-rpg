@@ -1537,3 +1537,27 @@ body {
 }
 
 .mv-note.warn { color: #d9a940; }
+
+/* Трюм в списке флота: полный подсвечен, груз — фишками с цветом ресурса */
+.ship-capacity.full { color: #d94a4a; }
+
+.goods-block { margin-top: 10px; }
+
+.goods-head {
+  margin-bottom: 6px;
+  font-family: 'Courier New', monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #55606c;
+}
+
+.unit-chip.goods-chip { padding: 6px 9px; }
+
+.goods-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #8fa8c4;
+  flex-shrink: 0;
+}
