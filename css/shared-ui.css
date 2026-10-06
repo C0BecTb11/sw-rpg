@@ -157,3 +157,136 @@ html {
 #sv-clock-info p { margin: 0 0 6px; font-size: 10px; line-height: 1.5; color: #8fa8c4; }
 #sv-clock-info p:last-child { margin-bottom: 0; }
 #sv-clock-info em { font-style: normal; color: #d9a940; }
+
+/* ===== Экран перехода на поверхность и на орбиту =====
+   Стоит в разметке страницы и закрывает карту, пока она собирается по
+   частям: на слабом телефоне каждая часть перерисовывает всё поле, и без
+   заслонки игрок видит чёрные вспышки. Цвет кольца — сторона планеты. */
+#scene-loader {
+  --sl-accent: #d9a940;
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  background:
+    radial-gradient(ellipse at 50% 42%, rgba(30, 40, 58, 0.55) 0%, rgba(5, 6, 10, 0) 60%),
+    #05060a;
+  font-family: 'Courier New', monospace;
+  opacity: 1;
+  transition: opacity 0.36s ease;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#scene-loader.sl-republic { --sl-accent: #4a90d9; }
+#scene-loader.sl-cis      { --sl-accent: #d94a4a; }
+#scene-loader.sl-out      { opacity: 0; pointer-events: none; }
+
+#scene-loader .sl-globe {
+  position: relative;
+  width: 128px;
+  height: 128px;
+  border-radius: 50%;
+  background-color: #10151e;
+  background-repeat: repeat-x;
+  background-size: auto 100%;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 0 26px -4px var(--sl-accent),
+    0 0 70px -20px var(--sl-accent);
+  overflow: hidden;
+}
+
+#scene-loader .sl-globe.sl-has-tex {
+  animation: sl-spin 22s linear infinite;
+}
+
+/* Тень ночной стороны и блик — шар, а не плоская картинка */
+#scene-loader .sl-globe::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 34% 30%, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0) 38%),
+    radial-gradient(circle at 70% 64%, rgba(0, 0, 0, 0) 30%, rgba(0, 0, 0, 0.72) 78%);
+}
+
+/* Орбита вокруг шара: тонкое кольцо с бегущей искрой */
+#scene-loader .sl-orbit {
+  position: absolute;
+  width: 164px;
+  height: 164px;
+  margin: -18px 0 0 -18px;
+  border-radius: 50%;
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+  animation: sl-orbit 2.4s linear infinite;
+}
+
+#scene-loader .sl-orbit::before {
+  content: '';
+  position: absolute;
+  top: -3px;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: 50%;
+  background: var(--sl-accent);
+  box-shadow: 0 0 10px var(--sl-accent);
+}
+
+#scene-loader .sl-globe-wrap { position: relative; width: 128px; height: 128px; }
+
+#scene-loader .sl-kicker {
+  font-size: 10px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: #55606c;
+}
+
+#scene-loader .sl-name {
+  margin-top: -10px;
+  font-size: 22px;
+  letter-spacing: 2px;
+  color: #e8d9a8;
+  text-shadow: 0 0 18px rgba(217, 169, 64, 0.25);
+  min-height: 26px;
+}
+
+#scene-loader .sl-bar {
+  width: 190px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+#scene-loader .sl-bar i {
+  display: block;
+  width: 8%;
+  height: 100%;
+  background: var(--sl-accent);
+  box-shadow: 0 0 8px var(--sl-accent);
+  transition: width 0.35s ease;
+}
+
+#scene-loader .sl-step {
+  margin-top: -8px;
+  min-height: 14px;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #8fa8c4;
+}
+
+@keyframes sl-spin  { from { background-position: 0 0; } to { background-position: -256px 0; } }
+@keyframes sl-orbit { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  #scene-loader .sl-globe.sl-has-tex,
+  #scene-loader .sl-orbit { animation: none; }
+}

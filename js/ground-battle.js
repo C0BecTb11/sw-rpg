@@ -45,6 +45,7 @@ function loadSettlement() {
     if (!r[1].error && r[1].data && r[1].data.length) settlementZone = r[1].data[0];
     if (!r[2].error && r[2].data) captureGoal = parseInt(r[2].data.value, 10) || 60;
     redrawScene();
+    if (window.sceneLoader) sceneLoader.mark('settlement');
   });
 }
 
@@ -1784,48 +1785,15 @@ var TERRAIN_COLORS = {
   lake:    '#2a5a78'
 };
 
-// Разрешение холста. Поле 144×144 клеток по 32 px — это холст 4608×4608,
-// около 85 МБ памяти. Телефон его не держит: изображение то
-// пропадает в чёрное, то появляется снова, и до карты дело не доходит.
-// На телефонах рисуем в половинном разрешении (≈21 МБ): размер
-// на экране и все координаты те же, меняется только плотность пикселей.
-// Если браузер всё же потерял холст, переходим на половинное сами.
-var GB_RES = gbPickRes();
-
-function gbPickRes() {
-  // Все телефоны и планшеты. Отбирать «слабые» по deviceMemory ненадёжно:
-  // браузер округляет его (6 ГБ показываются как 8), а мигание зависит от
-  // видеопамяти, которую страница делит с предыдущей, ещё живущей в кэше
-  // браузера. У iPhone предел холста 16,7 млн пикселей — меньше полного поля.
-  var touch = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
-  var coarse = false;
-  try { coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches; } catch (e) {}
-  return (touch || coarse) ? 0.5 : 1;
-}
-
-function gbLowerRes() {
-  if (GB_RES <= 0.5) return;
-  GB_RES = 0.5;
-  // Новый размер выставит drawScene; старый буфер освобождаем сразу
-  if (canvas) { canvas.width = 1; canvas.height = 1; }
-}
-
 function drawScene(grid) {
   // Присвоение canvas.width заново выделяет буфер: при 3840x3840 это
   // около 60 МБ на каждую отрисовку. Отсюда и было мигание с кусками —
   // телефон не успевал. Размер ставим один раз.
   var need = GRID_SIZE * CELL_PX;
-  var px = Math.round(need * GB_RES);
-  if (canvas.width !== px || canvas.height !== px) {
-    canvas.width = px;
-    canvas.height = px;
-    // Размер на экране не зависит от плотности: от него считаются
-    // сдвиг, масштаб, тапы и слой всплывающих цифр
-    canvas.style.width = need + 'px';
-    canvas.style.height = need + 'px';
+  if (canvas.width !== need || canvas.height !== need) {
+    canvas.width = need;
+    canvas.height = need;
   }
-  // Рисуем в тех же координатах, что и раньше; уменьшение делает холст
-  ctx.setTransform(GB_RES, 0, 0, GB_RES, 0, 0);
 
   for (var y = 0; y < GRID_SIZE; y++) {
     for (var x = 0; x < GRID_SIZE; x++) {
@@ -2833,6 +2801,7 @@ function loadBuildings() {
     buildingsLoaded = true;
     redrawScene();
     updateRedrawTimer();
+    if (window.sceneLoader) sceneLoader.mark('buildings');
   });
 }
 
@@ -2853,16 +2822,27 @@ function scheduleRedraw() {
   redrawQueued = true;
   setTimeout(function() {
     redrawQueued = false;
-    redrawScene();
+    redrawSceneNow();
   }, 0);
 }
 
+// Все просьбы перерисовать карту за один проход кода сливаются в одну
+// (тем же setTimeout, что и для картинок). При входе на планету их
+// приходит десяток подряд — рельеф, поселение, здания, укрепления,
+// войска, захват, — и каждая заново красила всё поле 144×144. На
+// телефоне эти серии и давали чёрные вспышки.
 function redrawScene() {
+  if (!ctx) return;
+  scheduleRedraw();
+}
+
+function redrawSceneNow() {
   if (!ctx) return;
   if (!terrainCache) {
     terrainCache = generateTerrain(hashStringToSeed(systemId));
   }
   drawScene(terrainCache);
+  if (window.sceneLoader) sceneLoader.mark('terrain');
   if (typeof amOnRedraw === 'function') amOnRedraw();
 }
 
@@ -2966,17 +2946,6 @@ function initGroundBattle() {
 
   if (!canvas) showFatal('В разметке нет <canvas id="ground-canvas">');
 
-  // Браузер сбросил холст из-за нехватки памяти — рисуем заново в половинном разрешении
-  if (canvas) {
-    canvas.addEventListener('contextlost', function(e) {
-      if (e && e.preventDefault) e.preventDefault();
-      gbLowerRes();
-    });
-    canvas.addEventListener('contextrestored', function() {
-      if (typeof redrawScene === 'function') redrawScene();
-    });
-  }
-
   // Клиент Supabase создаётся в supabase-client.js поверх библиотеки с CDN.
   // Если что-то из этого не загрузилось, в глобальной переменной остаётся
   // библиотека без .auth — и падает всё, что ходит в базу.
@@ -3010,10 +2979,16 @@ function initGroundBattle() {
     if (!systemId) {
       // Карта строится от сида системы: без ?system= в адресе строить
       // нечего. Раньше код молча выходил и оставлял чёрный экран.
+      if (window.sceneLoader) sceneLoader.hide();
       showFatal('В адресе нет ?system=\n\n' +
         'Эту страницу открывают тапом по планете с карты галактики, ' +
         'а не напрямую. Сейчас адрес: ' + window.location.search);
       return;
+    }
+
+    if (window.sceneLoader) {
+      sceneLoader.expect([['terrain', 'Местность'], ['settlement', 'Поселение'], ['buildings', 'Постройки'],
+                          ['structures', 'Укрепления'], ['units', 'Войска']]);
     }
 
     var slotSeed = hashStringToSeed(systemId);
@@ -3729,6 +3704,7 @@ function loadUnits() {
     // рисуем: иначе рамки дальности отстают на одно обновление
     cbRefreshIntel();
     redrawScene();
+    if (window.sceneLoader) sceneLoader.mark('units');
     cbDiffUnits(prevUnits, unitsOnMap, requestedAt);
     cbReconcileHp(requestedAt);
     if (typeof amAfterUnits === 'function') amAfterUnits();
@@ -7010,6 +6986,7 @@ function loadStructures() {
 
     updateStructTimer();
     redrawScene();
+    if (window.sceneLoader) sceneLoader.mark('structures');
   });
 }
 

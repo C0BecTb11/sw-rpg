@@ -12,6 +12,15 @@
 </head>
 <body>
 
+<!-- Экран перехода: закрывает карту, пока она собирается (js/scene-loader.js) -->
+<div id="scene-loader" aria-live="polite">
+  <div class="sl-globe-wrap"><div class="sl-orbit"></div><div class="sl-globe"></div></div>
+  <div class="sl-kicker">Высадка на поверхность</div>
+  <div class="sl-name">…</div>
+  <div class="sl-bar"><i></i></div>
+  <div class="sl-step"></div>
+</div>
+
 <button id="ground-back-btn">← Галактика</button>
 
 <div id="ground-viewport">
@@ -121,6 +130,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../js/supabase-client.js"></script>
+<script src="../js/scene-loader.js"></script>
 <script src="../js/credits-bar.js"></script>
 <script src="../js/ground-battle.js"></script>
 <script src="../js/automove-ground.js"></script>

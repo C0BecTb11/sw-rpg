@@ -218,6 +218,7 @@ function loadStation() {
     stationRecord = (!res.error && res.data) ? res.data : null;
     stationLoaded = true;
     renderStationSlot();
+    if (window.sceneLoader) sceneLoader.mark('station');
   });
 }
 
@@ -614,7 +615,8 @@ function initSpaceBattle() {
       window.location.href = '../auth.html';
       return;
     }
-    if (!systemId) return;
+    if (!systemId) { if (window.sceneLoader) sceneLoader.hide(); return; }
+    if (window.sceneLoader) sceneLoader.expect([['station', 'Станция'], ['ships', 'Флот']]);
 
     Promise.all([loadStationSlot(), checkStationRights(), loadHyperspaceZone()]).then(function() {
       loadStation();
@@ -667,6 +669,7 @@ function loadShips() {
       r[1].data.forEach(function(t) { shipTypeById[t.id] = t; });
     }
     renderShips();
+    if (window.sceneLoader) sceneLoader.mark('ships');
     loadShipOrders();
     if (typeof onShipsReloaded === 'function') onShipsReloaded();
     if (typeof sxAfterShips === 'function') sxAfterShips(prevShips, req);
