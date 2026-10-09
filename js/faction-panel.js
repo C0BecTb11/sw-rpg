@@ -22,6 +22,12 @@ var FACTION_FULL_NAMES_PANEL = {
 
 var currentPlayerFaction = null;
 var currentPlayerIsLeader = false;
+// Полномочия по должности в штабе: у лидера — все (см. faction-staff.js)
+var currentPlayerPowers = [];
+
+function fsHasPower(p) {
+  return currentPlayerIsLeader || currentPlayerPowers.indexOf(p) >= 0;
+}
 
 var FS_REFRESH_MS = 30000;
 var FS_ONLINE_MS = 5 * 60000;
@@ -171,8 +177,14 @@ function fsSetLive(state) {
 function fsPaintActions() {
   var supply = document.getElementById('fs-supply-btn');
   if (supply) supply.style.display = (typeof openSupplyScreen === 'function') ? 'flex' : 'none';
+  // Панель управления — лидеру и тем, кому поручены управляющие планет
   var controlBtn = document.getElementById('faction-control-open-btn');
-  if (controlBtn) controlBtn.style.display = currentPlayerIsLeader ? 'flex' : 'none';
+  if (controlBtn) controlBtn.style.display = fsHasPower('planet_controllers') ? 'flex' : 'none';
+  // Должности видны всем: кто за что отвечает, должен знать каждый
+  var staffBtn = document.getElementById('fs-staff-btn');
+  if (staffBtn) staffBtn.style.display = (currentPlayerFaction && typeof openHqRoles === 'function') ? 'flex' : 'none';
+  var ecoBtn = document.getElementById('fs-economy-btn');
+  if (ecoBtn) ecoBtn.style.display = (fsHasPower('economy') && typeof openHqEconomy === 'function') ? 'flex' : 'none';
 }
 
 // ── Тело экрана ────────────────────────────────────────────────────
@@ -330,7 +342,7 @@ function fsRenderFront(d) {
   dist.forEach(function(p) {
     html += '<button type="button" class="fs-row fs-dist" data-sys="' + fsEsc(p.id) + '" data-info="1">' +
       '<span class="fs-row-ico">✦</span>' +
-      '<span class="fs-row-body"><b>' + fsEsc(p.name) + '</b><i>взята — ждёт распределения лидером</i></span>' +
+      '<span class="fs-row-body"><b>' + fsEsc(p.name) + '</b><i>взята — ждёт распределения штабом</i></span>' +
       '<span class="fs-chev">›</span></button>';
   });
 
@@ -361,13 +373,15 @@ function fsRenderMembers(d) {
   list.forEach(function(m) {
     var on = fsIsOnline(m);
     var seen = on ? 'в сети' : (m.last_seen_at ? 'был ' + fsAgo(m.last_seen_at) : 'давно не заходил');
+    // Должность в штабе — перед отметкой «в сети»
+    var role = m.role ? '<span class="fs-role">' + fsEsc(m.role) + '</span> · ' : '';
     var nick = m.nickname || 'без ника';
     html += '<div class="fs-member' + (m.is_me ? ' me' : '') + (m.is_leader ? ' leader' : '') + '">' +
       '<span class="fs-ava">' + fsEsc(nick.charAt(0).toUpperCase()) + '<i class="fs-dot' + (on ? ' on' : '') + '"></i></span>' +
       '<span class="fs-member-body">' +
         '<b>' + (m.is_leader ? '<span class="fs-crown">♛</span>' : '') + fsEsc(nick) +
           (m.is_me ? ' <em class="fs-you">ты</em>' : '') + '</b>' +
-        '<i class="' + (on ? 'on' : '') + '">' + seen + '</i>' +
+        '<i class="' + (on ? 'on' : '') + '">' + role + seen + '</i>' +
       '</span>' +
       '<span class="fs-member-pl' + (m.planets ? '' : ' zero') + '"><b>' + fsNum(m.planets) + '</b>' +
         fsPlural(m.planets || 0, 'планета', 'планеты', 'планет') + '</span>' +
@@ -493,6 +507,7 @@ function fsRender(animate) {
   var keep = box ? box.scrollTop : 0;
   body.classList.toggle('fs-anim', !!animate);
   body.innerHTML =
+    (typeof fsRenderHQ === 'function' ? fsRenderHQ() : '') +
     fsRenderBalance(d) +
     fsRenderFront(d) +
     fsRenderMembers(d) +
@@ -574,7 +589,9 @@ function fsLoad(first) {
 
   Promise.all([
     supabase.rpc('get_faction_overview'),
-    supabase.rpc('get_faction_feed', { p_limit: 30 })
+    supabase.rpc('get_faction_feed', { p_limit: 30 }),
+    // Штаб: приказ дня, цели и должности. Сбой штаба не ломает сводку.
+    typeof hqFetch === 'function' ? hqFetch() : Promise.resolve(null)
   ]).then(function(res) {
     if (my !== fsState.req) return;
     fsState.busy = false;
@@ -610,8 +627,12 @@ function fsLoad(first) {
     currentPlayerFaction = d.faction;
     var isLeader = d.my_role === 'leader';
     var hasLeader = !!d.leader;
-    var changed = isLeader !== currentPlayerIsLeader || hasLeader !== fsState.leader;
+    var powers = d.my_powers || [];
+    var powersKey = powers.slice().sort().join(',');
+    var changed = isLeader !== currentPlayerIsLeader || hasLeader !== fsState.leader ||
+                  powersKey !== currentPlayerPowers.slice().sort().join(',');
     currentPlayerIsLeader = isLeader;
+    currentPlayerPowers = powers;
     fsState.leader = hasLeader;
 
     fsSetFaction(d.faction);
@@ -624,8 +645,10 @@ function fsLoad(first) {
     if (box) box.classList.add('fs-ready');
     if (!fsState.ready || changed) {
       fsState.ready = true;
-      if (typeof onFactionScreenReady === 'function') onFactionScreenReady(isLeader, hasLeader);
-    } else if (isLeader && typeof refreshPlanetRequestBadge === 'function') {
+      if (typeof onFactionScreenReady === 'function') {
+        onFactionScreenReady(isLeader, hasLeader, fsHasPower('planet_requests'));
+      }
+    } else if (fsHasPower('planet_requests') && typeof refreshPlanetRequestBadge === 'function') {
       refreshPlanetRequestBadge();
     }
   }, function() {
@@ -665,7 +688,9 @@ function fsLegacyBasics() {
         if (!fsState.ready) {
           fsState.ready = true;
           fsState.leader = !!leaderId;
-          if (typeof onFactionScreenReady === 'function') onFactionScreenReady(currentPlayerIsLeader, !!leaderId);
+          if (typeof onFactionScreenReady === 'function') {
+            onFactionScreenReady(currentPlayerIsLeader, !!leaderId, currentPlayerIsLeader);
+          }
         }
         if (!leaderId) { leaderEl.textContent = 'не назначен'; return; }
         supabase.from('profiles').select('nickname').eq('id', leaderId).maybeSingle().then(function(lp) {
@@ -686,6 +711,10 @@ function openFactionScreen() {
   document.getElementById('faction-screen-leader').textContent = '...';
   document.getElementById('fs-hero-chips').innerHTML = '';
   document.getElementById('faction-control-open-btn').style.display = 'none';
+  ['fs-staff-btn', 'fs-economy-btn'].forEach(function(id) {
+    var b = document.getElementById(id);
+    if (b) b.style.display = 'none';
+  });
   // Запрос планеты и список запросов появятся, когда станет ясно, лидер ли игрок
   var prSection = document.getElementById('pr-section');
   var prReview = document.getElementById('pr-review-btn');
@@ -785,6 +814,8 @@ document.addEventListener('DOMContentLoaded', function() {
       if (act === 'feed') { fsState.feedAll = !fsState.feedAll; fsRender(false); return; }
       if (act === 'planets') { fsState.planetsAll = !fsState.planetsAll; fsRender(false); return; }
       if (act === 'retry') { fsSkeleton(); fsLoad(true); return; }
+      if (act === 'hq-dir' && typeof openHqDirective === 'function') { openHqDirective(); return; }
+      if (act === 'hq-targets' && typeof openHqTargets === 'function') { openHqTargets(); return; }
       var sys = t.getAttribute('data-sys');
       if (sys) fsGoTo(sys, t.getAttribute('data-info') === '1');
     });

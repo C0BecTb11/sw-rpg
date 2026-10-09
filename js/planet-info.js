@@ -40,7 +40,8 @@ function openPlanetInfo(systemId) {
       supabase.rpc('get_system_buildings', { p_system_id: systemId }),
       supabase.from('space_stations').select('id').eq('system_id', systemId).maybeSingle(),
       supabase.rpc('get_my_profile'),
-      supabase.rpc('get_system_resources', { p_system_id: systemId })
+      supabase.rpc('get_system_resources', { p_system_id: systemId }),
+      supabase.rpc('get_building_slots', { p_system_id: systemId })
     ]).then(function(r) {
       var sys = r[0].data;
       if (r[0].error || !sys) {
@@ -53,6 +54,9 @@ function openPlanetInfo(systemId) {
       var station = r[3].error ? null : r[3].data;
       var myFaction = (!r[4].error && r[4].data && r[4].data.length) ? r[4].data[0].faction : null;
       var sysResources = r[5].error ? [] : (r[5].data || []);
+      // Открытых участков столько, сколько позволяет уровень поселения
+      var slotRows = r[6].error ? [] : (r[6].data || []);
+      var slotCap = slotRows.filter(function(s) { return s.unlocked; }).length || 7;
 
       var accent = FACTION_COLORS_INFO[sys.faction] || '#8fa8c4';
 
@@ -134,8 +138,18 @@ function openPlanetInfo(systemId) {
         stats.appendChild(makePiStat('Сырьё', 'нет залежей'));
       }
 
+      // Метка штаба на этой планете: что фракции здесь велено делать
+      var tgt = (typeof factionTargets !== 'undefined' && factionTargets) ? factionTargets[systemId] : null;
+      if (tgt && typeof TARGET_LABELS !== 'undefined') {
+        var orderRow = makePiStat('Приказ штаба',
+          (TARGET_ICONS[tgt.kind] || '') + ' ' + (TARGET_LABELS[tgt.kind] || '') +
+          (tgt.note ? ' · ' + escapeMove(tgt.note) : ''));
+        orderRow.className += ' pi-order k-' + tgt.kind;
+        stats.appendChild(orderRow);
+      }
+
       if (sameFaction) {
-        stats.appendChild(makePiStat('Постройки', buildings.length + ' / 7'));
+        stats.appendChild(makePiStat('Постройки', buildings.length + ' / ' + slotCap));
         stats.appendChild(makePiStat('Орбитальная станция', station ? 'есть' : 'нет'));
       }
 

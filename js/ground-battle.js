@@ -327,8 +327,11 @@ function applySettlementDev(dev, seq) {
     return d ? [d.level, d.level_name, d.upgrade_until, d.upgrade_to].join('|') : '';
   };
   var changed = sig(dev) !== sig(settlementDev);
+  // Поселение выросло — открылись новые участки под здания
+  var grew = settlementDev && dev && dev.level !== settlementDev.level;
   var now = Date.now();
   settlementDev = dev;
+  if (grew && typeof loadBuildings === 'function') loadBuildings();
   settlementDevAt = now;
   // Во время расширения отсчёт на карте идёт по минутам — чаще
   // перерисовывать поле незачем, даже если панель обновляется каждые 15 с
@@ -608,7 +611,8 @@ function stlDevHtml(L) {
     '<div class="stl-lvl-info">' +
       '<div class="stl-lvl-name">' + escHtml(d.level_name) + '</div>' +
       '<div class="stl-lvl-sub">уровень ' + d.level + ' из ' + max + ' · ' +
-        (d.slots || 0) + ' ' + stlPlural(d.slots || 0, 'участок', 'участка', 'участков') + '</div>' +
+        (d.slots || 0) + ' ' + stlPlural(d.slots || 0, 'участок', 'участка', 'участков') +
+        (d.build_slots ? ' · зданий ' + (d.build_used || 0) + '/' + d.build_slots : '') + '</div>' +
     '</div>' +
     stlPips(d.level, max, upTo) +
   '</div>';
@@ -712,12 +716,14 @@ function stlNextHtml(d) {
   var lvl = stlLevelRow(nx.level);
   var gains = [];
   if (nx.slots) gains.push([nx.slots, stlPlural(nx.slots, 'участок', 'участка', 'участков')]);
+  // Новые места под здания — главная выгода роста для производства
+  if (nx.build_slots) gains.push(['+' + nx.build_slots, 'под здания']);
   if (nx.income_mult) gains.push([stlMult(nx.income_mult), 'доход']);
   if (lvl && lvl.militia_base) gains.push([lvl.militia_base, 'ополчение']);
   if (nx.food_per_day) gains.push([nx.food_per_day, 'провизии/сут']);
   if (gains.length) {
     html += '<div class="stl-gains-cap">' + escHtml(nx.name) + ' даст</div>' +
-      '<div class="stl-gains" style="grid-template-columns:repeat(' + gains.length + ',minmax(0,1fr))">' +
+      '<div class="stl-gains" style="grid-template-columns:repeat(' + (gains.length > 4 ? 3 : gains.length) + ',minmax(0,1fr))">' +
       gains.map(function(g) {
         return '<div><b>' + g[0] + '</b><span>' + g[1] + '</span></div>';
       }).join('') + '</div>';
@@ -1908,6 +1914,13 @@ function drawBuildSlots() {
       // должны быть видны только реально существующие здания.
       if (!buildMode) continue;
 
+      // Участок ещё закрыт: его откроет рост поселения. Рисуем приглушённо,
+      // с номером нужного уровня — видно, ради чего расширять поселение.
+      if (slot.locked) {
+        drawLockedSlot(slot, px, py, size);
+        continue;
+      }
+
       ctx.fillStyle = 'rgba(120,170,220,0.15)';
       ctx.fillRect(px, py, size, size);
       ctx.strokeStyle = 'rgba(120,170,220,0.6)';
@@ -1946,6 +1959,32 @@ function drawBuildSlots() {
       drawConstructionProgress(building, px, py, size, now);
     }
   }
+}
+
+function drawLockedSlot(slot, px, py, size) {
+  ctx.fillStyle = 'rgba(10,13,20,0.42)';
+  ctx.fillRect(px, py, size, size);
+  ctx.strokeStyle = 'rgba(143,168,196,0.38)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([3, 6]);
+  ctx.strokeRect(px, py, size, size);
+  ctx.setLineDash([]);
+
+  // Замок: дужка и корпус, без шрифтовых значков — они на телефонах разные
+  var cx = px + size / 2, cy = py + size * 0.42, u = size * 0.07;
+  ctx.strokeStyle = 'rgba(217,169,64,0.75)';
+  ctx.lineWidth = Math.max(2, u * 0.55);
+  ctx.beginPath();
+  ctx.arc(cx, cy - u * 0.4, u * 1.15, Math.PI, 0);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(217,169,64,0.75)';
+  ctx.fillRect(cx - u * 1.7, cy - u * 0.4, u * 3.4, u * 2.6);
+
+  ctx.fillStyle = 'rgba(207,216,220,0.8)';
+  ctx.font = Math.round(size * 0.13) + 'px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText('уровень ' + (STL_ROMAN[slot.need_level] || slot.need_level || '?'), cx, py + size * 0.68);
 }
 
 // Полоса прогресса и обратный отсчёт на строящемся здании.
@@ -2320,6 +2359,14 @@ function onSlotTapped(slotIndex) {
 
   if (!isController) {
     alert('У тебя нет прав на строительство на этой планете');
+    return;
+  }
+
+  var slot = buildSlots[slotIndex - 1];
+  if (slot && slot.locked) {
+    alert('Участок откроется, когда поселение станет «' + (slot.need_name || 'больше') + '»' +
+          ' (уровень ' + (STL_ROMAN[slot.need_level] || slot.need_level) + ').\n\n' +
+          'Расширяет поселение управляющий — в окне поселения.');
     return;
   }
 
@@ -2894,10 +2941,53 @@ function constructBuilding(slotIndex, buildingTypeId) {
 
 var buildingsLoaded = false;   // первый ответ пришёл: переход из ленты ждёт здания
 
+// На чужой планете здания видны только в обзоре своих бойцов. Обзор
+// меняется, когда бойцы ходят, — тогда и переспрашиваем, не чаще раза
+// в 4 секунды. Своим это не нужно: им здания видны всегда.
+var enemyBldAt = 0;
+var enemyBldTimer = null;
+
+function refreshEnemyBuildingsInSight() {
+  if (!myFaction || !sysFaction || myFaction === sysFaction) return;
+  if (enemyBldTimer) return;
+  var wait = Math.max(0, 4000 - (Date.now() - enemyBldAt));
+  enemyBldTimer = setTimeout(function() {
+    enemyBldTimer = null;
+    enemyBldAt = Date.now();
+    loadBuildings();
+  }, wait);
+}
+
+// Участки приходят из базы: их там проверяет сервер, а число открытых
+// растёт с уровнем поселения (7 + 1 / 2 / 4 / 7). Пока ответа нет,
+// карта рисует первые семь по старому генератору — они совпадают с базой.
+function applyBuildSlots(rows) {
+  if (!rows || !rows.length) return;
+  var list = [];
+  rows.forEach(function(r) {
+    list[r.slot_index - 1] = {
+      x: r.x, y: r.y, index: r.slot_index,
+      need_level: r.need_level, need_name: r.need_name,
+      locked: r.unlocked === false
+    };
+  });
+  // Дыр в нумерации быть не должно, но на всякий случай берём только подряд
+  var out = [];
+  for (var i = 0; i < list.length && list[i]; i++) out.push(list[i]);
+  buildSlots = out;
+}
+
 function loadBuildings() {
-  // Через функцию, а не прямым запросом: чужим она отдаёт completes_at пустым,
-  // поэтому враг не видит, что и когда у тебя достраивается.
-  supabase.rpc('get_system_buildings', { p_system_id: systemId }).then(function(res) {
+  // Участки и здания одним заходом: здание на участке 8–14 без координат
+  // участка не нарисовать, а переход из ленты ждёт обоих.
+  // Здания — через функцию, а не прямым запросом: чужим она отдаёт
+  // completes_at пустым, и враг видит только то, что в обзоре его бойцов.
+  Promise.all([
+    supabase.rpc('get_building_slots', { p_system_id: systemId }),
+    supabase.rpc('get_system_buildings', { p_system_id: systemId })
+  ]).then(function(r) {
+    if (!r[0].error && r[0].data) applyBuildSlots(r[0].data);
+    var res = r[1];
     buildingsBySlot = {};
     if (!res.error && res.data) {
       res.data.forEach(function(b) {
@@ -3867,6 +3957,7 @@ function loadUnits() {
     // рисуем: иначе рамки дальности отстают на одно обновление
     cbRefreshIntel();
     redrawScene();
+    refreshEnemyBuildingsInSight();
     if (window.sceneLoader) sceneLoader.mark('units');
     cbDiffUnits(prevUnits, unitsOnMap, requestedAt);
     cbReconcileHp(requestedAt);

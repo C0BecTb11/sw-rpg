@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="../css/galaxy.css">
 <link rel="stylesheet" href="../css/shared-ui.css">
 <link rel="stylesheet" href="../css/faction.css">
+<link rel="stylesheet" href="../css/staff.css">
 <link rel="stylesheet" href="../css/transfer.css">
 <link rel="stylesheet" href="../css/quest.css">
 <link rel="stylesheet" href="../css/supply.css">
@@ -225,7 +226,7 @@
         <div class="faction-section-title">Управление планетой</div>
         <button id="pr-open-btn" class="pr-open">
           <span class="pr-open-ico">◉</span>
-          <span class="pr-open-text"><b>Запросить планету у лидера</b><i id="pr-open-sub">выбери планету — лидер получит уведомление</i></span>
+          <span class="pr-open-text"><b>Запросить планету у штаба</b><i id="pr-open-sub">выбери планету — штаб получит уведомление</i></span>
           <span class="pr-open-arrow">›</span>
         </button>
       </div>
@@ -239,6 +240,18 @@
       <button id="faction-control-open-btn" class="pr-open" style="display:none;">
         <span class="pr-open-ico">♛</span>
         <span class="pr-open-text"><b>Панель управления фракции</b><i>кому какую планету отдать</i></span>
+        <span class="pr-open-arrow">›</span>
+      </button>
+
+      <button id="fs-staff-btn" class="pr-open" style="display:none;">
+        <span class="pr-open-ico">✦</span>
+        <span class="pr-open-text"><b>Должности штаба</b><i>кто за что отвечает и с какими полномочиями</i></span>
+        <span class="pr-open-arrow">›</span>
+      </button>
+
+      <button id="fs-economy-btn" class="pr-open" style="display:none;">
+        <span class="pr-open-ico">◈</span>
+        <span class="pr-open-text"><b>Хозяйство фракции</b><i>склады, добыча и постройки всех планет</i></span>
         <span class="pr-open-arrow">›</span>
       </button>
 
@@ -327,6 +340,7 @@
 <script src="../js/faction-panel.js"></script>
 <script src="../js/faction-control.js"></script>
 <script src="../js/planet-request.js"></script>
+<script src="../js/faction-staff.js"></script>
 <script src="../js/planets.js"></script>
 <script src="../js/events-feed.js"></script>
 <script src="../js/quest.js"></script>

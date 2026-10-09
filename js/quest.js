@@ -730,7 +730,8 @@
     var busy = window.buildingsBySlot || {};
     var size = window.SLOT_SIZE || 6;
     for (var i = 0; i < slots.length; i++) {
-      if (!busy[i + 1]) return { x: slots[i].x, y: slots[i].y, w: size, h: size };
+      // Закрытый участок (его откроет рост поселения) новичку не предлагаем
+      if (!busy[i + 1] && !slots[i].locked) return { x: slots[i].x, y: slots[i].y, w: size, h: size };
     }
     return null;
   }

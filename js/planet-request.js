@@ -11,21 +11,23 @@ var prPlanets = [];
 var prChosen = null;
 var prBusy = false;
 
-// Окно фракции сообщает, лидер ли игрок — от этого зависит, что показать
-function onFactionScreenReady(isLeader, hasLeader) {
+// Окно фракции сообщает, лидер ли игрок и поручены ли ему заявки
+// (должность с полномочием «Заявки») — от этого зависит, что показать
+function onFactionScreenReady(isLeader, hasLeader, canReview) {
   var ask = document.getElementById('pr-section');
   var review = document.getElementById('pr-review-btn');
   if (!ask || !review) return;
+  if (canReview === undefined) canReview = isLeader;
 
   ask.style.display = isLeader ? 'none' : 'block';
-  review.style.display = isLeader ? 'flex' : 'none';
+  review.style.display = canReview ? 'flex' : 'none';
 
   var sub = document.getElementById('pr-open-sub');
   var btn = document.getElementById('pr-open-btn');
   if (!isLeader) {
     btn.disabled = !hasLeader;
     sub.textContent = hasLeader
-      ? 'выбери планету — лидер получит уведомление'
+      ? 'выбери планету — штаб получит уведомление'
       : 'у фракции пока нет лидера';
   }
 
@@ -62,7 +64,7 @@ function openPlanetRequestPanel(mode) {
   document.getElementById('pr-title').textContent =
     mode === 'review' ? 'Запросы игроков' : 'Запрос планеты';
   document.getElementById('pr-subtitle').textContent =
-    mode === 'review' ? 'кто просит управление планетами' : 'управление выдаёт лидер фракции';
+    mode === 'review' ? 'кто просит управление планетами' : 'управление выдаёт штаб фракции';
   document.getElementById('pr-foot').style.display = mode === 'ask' ? 'block' : 'none';
 
   if (mode === 'review') loadPlanetRequests();
@@ -169,7 +171,7 @@ function makePlanetRow(p) {
 
   var who;
   if (p.mine) who = '<span class="pr-who mine">под твоим управлением</span>';
-  else if (p.requested) who = '<span class="pr-who wait">запрос уже у лидера</span>';
+  else if (p.requested) who = '<span class="pr-who wait">запрос уже в штабе</span>';
   else if (p.fresh) who = '<span class="pr-who fresh">новая — ждёт распределения</span>';
   else if (!p.controller_name) who = '<span class="pr-who free">свободна</span>';
   else who = '<span class="pr-who">управляет ' + escapePr(p.controller_name) + '</span>';
@@ -219,7 +221,7 @@ function paintPrFoot() {
   var hint = document.getElementById('pr-hint');
   if (chosen && chosen.controller_name) {
     hint.textContent = 'Сейчас планетой управляет ' + chosen.controller_name +
-      '. Если лидер согласится, управление перейдёт к тебе.';
+      '. Если штаб согласится, управление перейдёт к тебе.';
   } else {
     hint.textContent = 'Постройки, войска и заказы на планете останутся у своих хозяев — меняется только право строить и нанимать.';
   }
@@ -247,7 +249,7 @@ function sendPlanetRequest() {
     }
     note.value = '';
     prChosen = null;
-    prToast('Запрос отправлен — лидер получил уведомление');
+    prToast('Запрос отправлен — штаб получил уведомление');
     loadRequestablePlanets();
   });
 }

@@ -277,6 +277,8 @@ function initPlanets() {
       lastCommanders = commanders;
       renderCommanderMarkers(commanders);
       loadScoutedEnemies();
+      loadFactionTargets();
+      subscribeToTargetChanges();
       syncServerTime(function() {
         renderFlights(commanders);
       });
@@ -381,6 +383,57 @@ function loadScoutedEnemies() {
       renderCommanderMarkers(lastCommanders);
     }
   });
+}
+
+// ===== Цели штаба =====
+// Штаб фракции отмечает планеты: наступать, оборонять, сбор сил, снабжать.
+// Метки видит только своя фракция (политика в БД), приходят живьём.
+
+var factionTargets = {};
+var TARGET_ICONS = { attack: '⚔', defend: '⛨', gather: '⚑', supply: '⇄' };
+var TARGET_LABELS = { attack: 'Наступать', defend: 'Оборонять', gather: 'Сбор сил', supply: 'Снабжать' };
+
+function loadFactionTargets() {
+  if (!currentUserFaction) return;
+  supabase.rpc('get_faction_orders').then(function(res) {
+    if (res.error) return;
+    factionTargets = {};
+    ((res.data && res.data.targets) || []).forEach(function(t) { factionTargets[t.system_id] = t; });
+    renderTargetBadges();
+  });
+}
+
+function renderTargetBadges() {
+  Object.keys(planetElements).forEach(function(systemId) {
+    var els = planetElements[systemId];
+    var t = factionTargets[systemId];
+    if (!t) {
+      if (els.targetEl) els.targetEl.style.display = 'none';
+      return;
+    }
+    if (!els.targetEl) {
+      els.targetEl = document.createElement('div');
+      els.wrapperEl.appendChild(els.targetEl);
+    }
+    els.targetEl.className = 'planet-target k-' + t.kind;
+    els.targetEl.textContent = TARGET_ICONS[t.kind] || '⚑';
+    els.targetEl.title = (TARGET_LABELS[t.kind] || 'Цель') + (t.note ? ': ' + t.note : '');
+    els.targetEl.style.display = 'flex';
+  });
+}
+
+var targetsReloadTimer = null;
+
+function subscribeToTargetChanges() {
+  if (!currentUserFaction) return;
+  supabase
+    .channel('faction-targets')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'faction_targets' }, function() {
+      // Несколько меток за раз — одна перезагрузка
+      clearTimeout(targetsReloadTimer);
+      targetsReloadTimer = setTimeout(loadFactionTargets, 400);
+    })
+    .subscribe();
 }
 
 function makeCommanderMarker(count, color) {

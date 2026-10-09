@@ -1,0 +1,628 @@
+/* Штаб фракции: приказ дня, цели на карте, должности, хозяйство.
+   Тот же язык, что у окна фракции: тёмная подложка, моноширинный шрифт,
+   рамки #1c2530, акцент — цвет своей фракции (--fc). Цвета приказов:
+   наступать — красный, оборонять — синий, сбор — золото, снабжать — зелёный. */
+
+/* ---------- Раздел «Штаб» в окне фракции ---------- */
+
+.hq-dir {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+  padding: 11px 12px 10px;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(var(--fc-rgb), 0.12), transparent 70%),
+    #10151e;
+  border: 1px solid rgba(var(--fc-rgb), 0.35);
+  border-left: 3px solid var(--fc);
+  border-radius: 10px;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  text-align: left;
+}
+
+.hq-dir-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--fc);
+}
+
+.hq-dir-label i { font-style: normal; }
+
+.hq-dir-text {
+  display: block;
+  margin-top: 7px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #e3e9ec;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.hq-dir-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 9px;
+  color: #55606c;
+}
+
+.hq-dir-empty { border-style: dashed; cursor: pointer; }
+.hq-dir-empty .hq-dir-text { font-size: 11px; color: #8fa8c4; }
+.hq-dir-empty:active { background: #141b27; }
+
+.hq-link {
+  flex: none;
+  padding: 3px 0 3px 8px;
+  background: none;
+  border: none;
+  color: var(--fc, #4a90d9);
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+/* Значок приказа — круг цвета приказа */
+.hq-ico {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border: 1px solid #2a3644;
+  border-radius: 50%;
+  font-size: 12px;
+  color: #8fa8c4;
+}
+
+.hq-ico.k-attack { color: #d94a4a; border-color: rgba(217,74,74,0.6); background: rgba(217,74,74,0.08); }
+.hq-ico.k-defend { color: #4a90d9; border-color: rgba(74,144,217,0.6); background: rgba(74,144,217,0.08); }
+.hq-ico.k-gather { color: #d9a940; border-color: rgba(217,169,64,0.6); background: rgba(217,169,64,0.08); }
+.hq-ico.k-supply { color: #5fd968; border-color: rgba(95,217,104,0.55); background: rgba(95,217,104,0.07); }
+
+.fs-row.hq-target { border-left-width: 3px; }
+.fs-row.hq-target.k-attack { border-left-color: #d94a4a; }
+.fs-row.hq-target.k-defend { border-left-color: #4a90d9; }
+.fs-row.hq-target.k-gather { border-left-color: #d9a940; }
+.fs-row.hq-target.k-supply { border-left-color: #5fd968; }
+.fs-row.hq-target .fs-row-body i em { color: #cfd8dc; }
+
+.hq-more { margin-top: 2px; }
+
+.hq-roles-strip {
+  margin-top: 10px;
+  padding: 4px 12px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 10px;
+}
+
+.hq-role-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid #1c2530;
+  font-size: 11px;
+}
+
+.hq-role-line:last-child { border-bottom: none; }
+.hq-role-line b { flex: none; font-weight: normal; color: var(--fc); }
+.hq-role-line span { min-width: 0; color: #cfd8dc; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hq-role-line em { font-style: normal; color: #55606c; }
+
+/* Должность в составе фракции */
+.fs-role { color: #d9a940; }
+
+#fs-staff-btn .pr-open-ico { color: #d9a940; border-color: rgba(217,169,64,0.45); }
+#fs-economy-btn .pr-open-ico { color: #5fd968; border-color: rgba(95,217,104,0.4); }
+
+/* ---------- Шторка штаба ---------- */
+
+#hq-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 2450;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(5,8,13,0.78);
+  font-family: 'Courier New', monospace;
+}
+
+#hq-box {
+  --fc: #8fa8c4;
+  --fc-rgb: 143,168,196;
+  width: 100%;
+  max-width: 520px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  background: #0d1119;
+  border: 1px solid #1c2530;
+  border-bottom: none;
+  border-radius: 14px 14px 0 0;
+  color: #cfd8dc;
+  animation: faction-rise 0.2s ease-out;
+}
+
+#hq-box.fs-republic { --fc: #4a90d9; --fc-rgb: 74,144,217; }
+#hq-box.fs-cis      { --fc: #d94a4a; --fc-rgb: 217,74,74; }
+
+#hq-box button { font-family: 'Courier New', monospace; -webkit-tap-highlight-color: transparent; }
+
+#hq-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 13px 14px;
+  border-bottom: 1px solid #1c2530;
+}
+
+#hq-title { font-size: 12px; letter-spacing: 2px; text-transform: uppercase; color: var(--fc); }
+#hq-sub { margin-top: 4px; font-size: 10px; color: #55606c; }
+
+#hq-close {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  background: none;
+  border: 1px solid #2a3644;
+  border-radius: 7px;
+  color: #8fa8c4;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+#hq-close:active { border-color: var(--fc); color: #cfd8dc; }
+
+#hq-body {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 12px 14px 16px;
+}
+
+#hq-foot {
+  flex: none;
+  padding: 0 14px;
+  background: #0b0f16;
+}
+
+#hq-foot:not(:empty) {
+  padding: 10px 14px calc(14px + env(safe-area-inset-bottom));
+  border-top: 1px solid #1c2530;
+}
+
+.hq-empty {
+  padding: 14px 12px;
+  border: 1px dashed #1c2530;
+  border-radius: 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #55606c;
+  text-align: center;
+}
+
+.hq-note { margin-bottom: 8px; font-size: 10px; color: #55606c; }
+
+.hq-block {
+  margin: 16px 0 8px;
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #8fa8c4;
+}
+
+.hq-block:first-child { margin-top: 2px; }
+
+.hq-input, .hq-select, #hq-dir-text {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+  padding: 10px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 8px;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  outline: none;
+}
+
+#hq-dir-text { resize: vertical; min-height: 110px; line-height: 1.5; }
+
+.hq-input:focus, .hq-select:focus, #hq-dir-text:focus { border-color: var(--fc); }
+
+.hq-count { margin-top: -4px; font-size: 9px; color: #55606c; text-align: right; }
+
+.hq-actions { display: flex; gap: 8px; }
+.hq-actions .pr-btn { min-height: 42px; }
+
+.hq-go {
+  width: 100%;
+  min-height: 44px;
+  padding: 12px;
+  background: var(--fc);
+  border: none;
+  border-radius: 8px;
+  color: #0a0d14;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.hq-go:disabled { background: #1c2530; color: #55606c; cursor: default; }
+
+.hq-small {
+  flex: none;
+  min-height: 36px;
+  padding: 8px 12px;
+  background: none;
+  border: 1px solid rgba(var(--fc-rgb), 0.55);
+  border-radius: 7px;
+  color: var(--fc);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.hq-small.wide { display: block; width: 100%; margin-top: 8px; }
+.hq-small:disabled { opacity: 0.45; }
+
+.hq-x-btn {
+  flex: none;
+  min-height: 28px;
+  padding: 4px 9px;
+  background: none;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  color: #8fa8c4;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.hq-x-btn:active { border-color: #d94a4a; color: #d94a4a; }
+.hq-x-btn:disabled { opacity: 0.4; }
+
+.hq-danger {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 9px;
+  background: none;
+  border: 1px dashed rgba(217,74,74,0.5);
+  border-radius: 8px;
+  color: #d94a4a;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+/* Цели */
+.hq-trow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid #1c2530;
+}
+
+.hq-trow-body { flex: 1; min-width: 0; }
+.hq-trow-body b { display: block; font-size: 12px; font-weight: normal; color: #cfd8dc; }
+.hq-trow-body i { display: block; margin-top: 3px; font-size: 10px; font-style: normal; color: #8fa8c4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.hq-kinds {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.hq-kind {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  align-items: center;
+  gap: 2px 8px;
+  min-height: 52px;
+  padding: 8px 10px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 9px;
+  color: #cfd8dc;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hq-kind i { grid-row: span 2; font-size: 15px; font-style: normal; text-align: center; }
+.hq-kind b { font-size: 11px; font-weight: normal; }
+.hq-kind span { font-size: 8px; line-height: 1.35; color: #55606c; }
+.hq-kind:disabled { opacity: 0.32; cursor: default; }
+
+.hq-kind.k-attack i { color: #d94a4a; }
+.hq-kind.k-defend i { color: #4a90d9; }
+.hq-kind.k-gather i { color: #d9a940; }
+.hq-kind.k-supply i { color: #5fd968; }
+
+.hq-kind.on.k-attack { border-color: #d94a4a; background: rgba(217,74,74,0.1); }
+.hq-kind.on.k-defend { border-color: #4a90d9; background: rgba(74,144,217,0.1); }
+.hq-kind.on.k-gather { border-color: #d9a940; background: rgba(217,169,64,0.1); }
+.hq-kind.on.k-supply { border-color: #5fd968; background: rgba(95,217,104,0.08); }
+
+/* Должности */
+.hq-leader {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: rgba(217,169,64,0.06);
+  border: 1px solid rgba(217,169,64,0.35);
+  border-radius: 10px;
+  font-size: 11px;
+  color: #8fa8c4;
+}
+
+.hq-leader b { font-weight: normal; color: #d9a940; }
+.hq-leader em { margin-left: auto; font-size: 9px; font-style: normal; letter-spacing: 1px; text-transform: uppercase; color: #55606c; }
+
+.hq-role {
+  margin-bottom: 10px;
+  padding: 11px 12px 12px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-left: 3px solid var(--fc);
+  border-radius: 10px;
+}
+
+.hq-role.mine { box-shadow: inset 0 0 0 1px rgba(var(--fc-rgb), 0.35); }
+.hq-role.edit { border-left-color: #d9a940; }
+
+.hq-role-head { display: flex; align-items: baseline; gap: 8px; }
+.hq-role-head b { flex: 1; min-width: 0; font-size: 13px; font-weight: normal; letter-spacing: 1px; color: #e3e9ec; }
+
+.hq-powers { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+
+.hq-pw {
+  padding: 3px 7px;
+  border: 1px solid rgba(var(--fc-rgb), 0.45);
+  border-radius: 10px;
+  color: var(--fc);
+  font-size: 8px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.hq-pw.none { border-color: #2a3644; color: #55606c; }
+
+.hq-holders { margin-top: 9px; }
+
+.hq-holder {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 30px;
+  font-size: 12px;
+  color: #cfd8dc;
+}
+
+.hq-holder.vacant { font-size: 10px; color: #55606c; }
+
+.hq-assign { display: flex; gap: 6px; margin-top: 8px; }
+.hq-assign .hq-select { margin: 0; flex: 1; min-width: 0; padding: 8px; font-size: 11px; }
+
+.hq-pw-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+
+.hq-pw-opt {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 10px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.hq-pw-opt input { flex: none; width: 16px; height: 16px; margin: 1px 0 0; accent-color: #d9a940; }
+.hq-pw-opt span { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.hq-pw-opt b { font-size: 11px; font-weight: normal; color: #cfd8dc; }
+.hq-pw-opt i { font-size: 9px; font-style: normal; line-height: 1.35; color: #55606c; }
+.hq-pw-opt.off { opacity: 0.45; cursor: default; }
+
+.hq-free { display: flex; flex-wrap: wrap; gap: 5px; }
+
+.hq-free span {
+  padding: 4px 8px;
+  border: 1px solid #1c2530;
+  border-radius: 10px;
+  font-size: 10px;
+  color: #8fa8c4;
+}
+
+/* Хозяйство */
+.hq-eco-sum {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.hq-eco-sum > div {
+  padding: 9px 6px 8px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 9px;
+  text-align: center;
+}
+
+.hq-eco-sum b { display: block; font-size: 15px; font-weight: normal; color: #d9a940; }
+.hq-eco-sum span { display: block; margin-top: 3px; font-size: 8px; letter-spacing: 0.5px; text-transform: uppercase; color: #55606c; }
+
+.hq-eco {
+  margin-bottom: 8px;
+  padding: 0 12px 10px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 10px;
+}
+
+.hq-eco.open { border-color: #2a3644; }
+
+.hq-eco-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 0 8px;
+  background: none;
+  border: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hq-eco-name { flex: 1; min-width: 0; }
+.hq-eco-name b { display: block; font-size: 13px; font-weight: normal; color: #e3e9ec; }
+.hq-eco-name i { display: block; margin-top: 3px; font-size: 10px; font-style: normal; color: #8fa8c4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hq-eco-name i em { font-style: normal; color: #d9a940; }
+
+.hq-eco-inc { flex: none; font-size: 8px; text-transform: uppercase; color: #55606c; text-align: right; }
+.hq-eco-inc b { display: block; font-size: 13px; font-weight: normal; color: #5fd968; }
+.hq-eco-arrow { flex: none; width: 12px; color: #55606c; font-size: 11px; }
+
+.hq-eco-slots { display: flex; align-items: center; gap: 8px; font-size: 9px; color: #8fa8c4; }
+.hq-eco-slots span { flex: none; min-width: 92px; }
+
+.hq-bar { flex: 1; height: 4px; background: #0a0d14; border-radius: 2px; overflow: hidden; }
+.hq-bar i { display: block; height: 100%; background: linear-gradient(90deg, rgba(var(--fc-rgb), 0.45), var(--fc)); }
+
+.hq-res-row { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 8px; }
+.hq-res-row > em { font-size: 9px; font-style: normal; letter-spacing: 0.5px; color: #55606c; margin-right: 2px; }
+
+.hq-res {
+  padding: 2px 7px;
+  border: 1px solid #2a3644;
+  border-radius: 10px;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.hq-res b { font-weight: normal; color: #cfd8dc; }
+.hq-res.none { color: #55606c; }
+
+.hq-eco-more { margin-top: 10px; padding-top: 6px; border-top: 1px solid #1c2530; }
+
+.hq-eco-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 11px;
+  color: #cfd8dc;
+}
+
+.hq-eco-line em { flex: none; font-size: 9px; font-style: normal; color: #5fd968; }
+.hq-eco-line.build em { color: #4a90d9; }
+.hq-eco-line.trophy em { color: #d9a940; }
+.hq-eco-line.dim, .hq-eco-line.dim em { color: #55606c; }
+
+/* Всплывашка штаба — поверх шторки */
+#hq-toast {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  top: 14px;
+  z-index: 2500;
+  max-width: 488px;
+  margin: 0 auto;
+  padding: 11px 13px;
+  background: #10151e;
+  border: 1px solid #5fd968;
+  border-radius: 9px;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+#hq-toast.show { opacity: 1; transform: translateY(0); }
+#hq-toast.bad { border-color: #d94a4a; }
+
+/* ---------- Метки целей на карте галактики ---------- */
+
+.planet-target {
+  position: absolute;
+  top: -8px;
+  left: -10px;
+  z-index: 2;
+  width: 17px;
+  height: 17px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border: 1px solid #2a3644;
+  border-radius: 50%;
+  background: rgba(5,6,10,0.9);
+  font-family: 'Courier New', monospace;
+  font-size: 9px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.planet-target.k-attack { color: #d94a4a; border-color: #d94a4a; }
+.planet-target.k-defend { color: #4a90d9; border-color: #4a90d9; }
+.planet-target.k-gather { color: #d9a940; border-color: #d9a940; }
+.planet-target.k-supply { color: #5fd968; border-color: #5fd968; }
+
+/* Наступление пульсирует — его видно издалека */
+.planet-target.k-attack::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 1px solid #d94a4a;
+  animation: hq-ping 1.8s ease-out infinite;
+}
+
+@keyframes hq-ping {
+  from { transform: scale(1);   opacity: 0.85; }
+  to   { transform: scale(2.1); opacity: 0; }
+}
+
+/* Строка «Приказ штаба» в карточке планеты */
+.pi-stat.pi-order b { color: #cfd8dc; }
+.pi-stat.pi-order.k-attack b { color: #d94a4a; }
+.pi-stat.pi-order.k-defend b { color: #4a90d9; }
+.pi-stat.pi-order.k-gather b { color: #d9a940; }
+.pi-stat.pi-order.k-supply b { color: #5fd968; }
