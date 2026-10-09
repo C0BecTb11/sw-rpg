@@ -698,6 +698,12 @@ function renderShips() {
     var type = shipTypeById[ship.ship_type];
     if (!type) return;
 
+    // Истребитель в ангаре — та же строка ships, но без клетки: x и y пусты.
+    // Раньше он рисовался в левом верхнем углу (null * CELL_PX = 0), хотя
+    // сидит внутри носителя.
+    if (ship.carrier_ship_id || ship.x === null || ship.x === undefined ||
+        ship.y === null || ship.y === undefined) return;
+
     var facing = ship.facing || 0;
     var box = shipBoxCells(type, facing);
 

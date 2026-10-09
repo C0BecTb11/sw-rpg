@@ -1453,18 +1453,59 @@ function startApTicker(unit) {
       return;
     }
 
-    var st = unitApState(unit);
+    // Строку бойца берём свежую: после хода, урона или шага автохода
+    // в unitsOnMap лежит новая копия, а снимок панели устаревает
+    var st = unitApState(guLiveUnit(unit));
     if (!st) return;
 
     guPaintAp(st, null);
-
-    // Плитки, ставшие доступными, гасить перестаём
-    var tiles = document.querySelectorAll('.gu-tile');
-    for (var i = 0; i < tiles.length; i++) {
-      var need = parseInt(tiles[i].getAttribute('data-need') || '1', 10);
-      if (st.ap >= need) tiles[i].classList.remove('locked');
-    }
+    guRefreshTiles(st.ap);
   }, 1000);
+}
+
+// Свежая строка бойца с карты, а не снимок на момент открытия панели
+function guLiveUnit(unit) {
+  if (!unit) return unit;
+  for (var i = 0; i < unitsOnMap.length; i++) {
+    if (unitsOnMap[i].id === unit.id) return unitsOnMap[i];
+  }
+  return unit;
+}
+
+// Сколько действий у бойца прямо сейчас. Пока строка без очков (старые
+// данные), верим ответу сервера, полученному при открытии панели.
+function guApNow(unit, fallback) {
+  var st = unitApState(guLiveUnit(unit));
+  if (st) return st.ap;
+  return fallback ? fallback.ap : 0;
+}
+
+// Плитки сами снимают и ставят «заглушку»: по очкам действий и по откату.
+// Раньше доступность вычислялась один раз при открытии панели — действие
+// восстанавливалось, плитка светлела, а кнопка внутри оставалась
+// выключенной, пока панель не открыть заново.
+function guRefreshTiles(apNow) {
+  var now = Date.now();
+  var tiles = document.querySelectorAll('.gu-tile');
+  for (var i = 0; i < tiles.length; i++) {
+    var t = tiles[i];
+    var need = parseInt(t.getAttribute('data-need') || '1', 10);
+    var at = parseInt(t.getAttribute('data-ready-at') || '0', 10);
+    var ok = apNow >= need && now >= at;
+    var was = !t.classList.contains('locked');
+    t.classList.toggle('locked', !ok);
+    // Открытое описание перерисовываем, когда доступность сменилась,
+    // а у отката — каждую секунду, чтобы шёл счёт
+    if (t.classList.contains('active') && typeof t._guPick === 'function' &&
+        (was !== ok || (at && now < at + 1000))) {
+      t._guPick();
+    }
+  }
+}
+
+// Сколько осталось до готовности способности, по сохранённой отметке
+function guLeftSec(readyAt) {
+  return Math.max(0, Math.ceil((readyAt - Date.now()) / 1000));
 }
 
 function setBottomInset(px) {
@@ -1715,11 +1756,7 @@ function loadGroundSides() {
 
       // Сторона приходит отдельным запросом и может опоздать за грузом,
       // поэтому состояние кнопки пересчитываем и здесь
-      var btn = document.getElementById('drop-btn');
-      if (btn) {
-        btn.style.visibility =
-          (iAmAttacker && dropCargo.length > 0) ? 'visible' : 'hidden';
-      }
+      updateDropBtn();
       redrawScene();
     });
   });
@@ -2365,16 +2402,67 @@ function openResearchPanel(building) {
   document.getElementById('research-list').innerHTML =
     '<div class="rs-empty">Загрузка…</div>';
 
+  researchActiveId = null;
+  researchActiveKey = null;
   loadResearchPanel();
 
   if (researchTimer) clearInterval(researchTimer);
   researchTimer = setInterval(loadResearchPanel, 5000);
+  if (researchTickTimer) clearInterval(researchTickTimer);
+  researchTickTimer = setInterval(researchTick, 1000);
 }
 
 function closeResearchPanel() {
   var panel = document.getElementById('research-panel');
   if (panel) panel.style.display = 'none';
   if (researchTimer) { clearInterval(researchTimer); researchTimer = null; }
+  if (researchTickTimer) { clearInterval(researchTickTimer); researchTickTimer = null; }
+}
+
+// Готовое по времени сервер выдаёт на тике раз в 30 секунд. Чтобы таймер
+// не стоял на нуле всё это время, клиент сам просит выдать своё готовое.
+// Один запрос за раз и не чаще раза в три секунды. Промис отдаёт true,
+// если запрос действительно ушёл: только тогда есть смысл перечитывать —
+// иначе застрявший заказ (нет места в зоне высадки) крутил бы перечитку
+// без остановки.
+var claimInFlight = null;
+var claimLastAt = 0;
+
+function claimReadyNow() {
+  if (claimInFlight) return claimInFlight;
+  if (Date.now() - claimLastAt < 3000) return Promise.resolve(false);
+  claimLastAt = Date.now();
+  claimInFlight = supabase.rpc('claim_ready_now').then(
+    function() { claimInFlight = null; return true; },
+    function() { claimInFlight = null; return true; });
+  return claimInFlight;
+}
+
+// Секунды идут локально между опросами: раньше цифра менялась раз
+// в 5 секунд, а на нуле стояла до выдачи на сервере
+var researchTickTimer = null;
+var researchActiveId = null;    // открытое описание
+var researchActiveKey = null;   // его состояние: перерисовываем только при смене
+
+function researchTick() {
+  var now = Date.now();
+  var due = false;
+
+  var tiles = document.querySelectorAll('#research-list .rs-tile[data-until]');
+  for (var i = 0; i < tiles.length; i++) {
+    var left = Math.max(0, Math.ceil((parseInt(tiles[i].getAttribute('data-until'), 10) - now) / 1000));
+    var note = tiles[i].querySelector('.rs-note');
+    if (note) note.textContent = left > 0 ? formatResearchLeft(left) : 'готово';
+    if (left <= 0) due = true;
+  }
+
+  var infoLeft = document.getElementById('rs-info-left');
+  if (infoLeft && infoLeft.getAttribute('data-until')) {
+    var l2 = Math.max(0, Math.ceil((parseInt(infoLeft.getAttribute('data-until'), 10) - now) / 1000));
+    infoLeft.textContent = l2 > 0 ? 'Изучается: ' + formatResearchLeft(l2) : 'Готово, записываем…';
+  }
+
+  if (due) claimReadyNow().then(function(sent) { if (sent) loadResearchPanel(); });
 }
 
 function formatResearchLeft(sec) {
@@ -2510,7 +2598,23 @@ function loadResearchPanel() {
         });
       });
     });
+
+    // Открытое описание живёт дальше: подсветку возвращаем, а текст
+    // меняем, только если исследование сменило состояние — иначе опрос
+    // раз в 5 секунд выбивал бы кнопку «Изучить» из-под пальца
+    if (researchActiveId) {
+      var cur = byId[researchActiveId];
+      var tile = list.querySelector('.rs-tile[data-id="' + researchActiveId + '"]');
+      if (cur && tile) {
+        tile.classList.add('active');
+        if (researchStateKey(cur) !== researchActiveKey) showResearchInfo(cur, tile);
+      }
+    }
   });
+}
+
+function researchStateKey(r) {
+  return (r.done ? 'd' : '') + (r.in_progress ? 'p' : '') + (r.available ? 'a' : '');
 }
 
 function makeResearchTile(r) {
@@ -2519,13 +2623,15 @@ function makeResearchTile(r) {
     (r.done ? ' done' : '') +
     (r.in_progress ? ' busy' : '') +
     (!r.available && !r.done ? ' locked' : '');
+  tile.setAttribute('data-id', r.id);
+  if (r.in_progress) tile.setAttribute('data-until', String(Date.now() + (r.seconds_left || 0) * 1000));
 
   tile.innerHTML =
     '<img class="rs-icon" src="../' + r.icon_image + '" alt="">' +
     '<span class="rs-name">' + r.name + '</span>' +
     '<span class="rs-note">' +
       (r.done ? 'изучено'
-       : r.in_progress ? formatResearchLeft(r.seconds_left)
+       : r.in_progress ? (r.seconds_left > 0 ? formatResearchLeft(r.seconds_left) : 'готово')
        : !r.available ? 'закрыто'
        : r.cost + ' кр') +
     '</span>';
@@ -2541,6 +2647,8 @@ function showResearchInfo(r, tile) {
   var all = document.querySelectorAll('.rs-tile');
   for (var i = 0; i < all.length; i++) all[i].classList.remove('active');
   tile.classList.add('active');
+  researchActiveId = r.id;
+  researchActiveKey = researchStateKey(r);
 
   info.innerHTML =
     '<div class="rs-info-name">' + r.name + '</div>' +
@@ -2556,8 +2664,10 @@ function showResearchInfo(r, tile) {
   }
 
   if (r.in_progress) {
-    info.innerHTML += '<div class="rs-info-meta warn">Изучается: ' +
-      formatResearchLeft(r.seconds_left) + '</div>';
+    info.innerHTML += '<div class="rs-info-meta warn" id="rs-info-left" data-until="' +
+      (Date.now() + (r.seconds_left || 0) * 1000) + '">' +
+      (r.seconds_left > 0 ? 'Изучается: ' + formatResearchLeft(r.seconds_left) : 'Готово, записываем…') +
+      '</div>';
     return;
   }
 
@@ -3074,11 +3184,23 @@ var unitPanelTypes = [];
 // линии только из отказа после нажатия.
 var unitPanelTimer = null;
 
+// Номер отрисовки: ответ, пришедший после более нового вызова, ничего
+// не трогает — иначе таймер старой отрисовки мог потерять свой id и
+// дёргать базу без конца
+var unitPanelSeq = 0;
+// Готовые заказы, которые уже просили выдать: застрявший (нет места в зоне
+// высадки) дожидается тика сервера, а не повторных просьб
+var claimedOrderKeys = {};
+
 function renderProductionSlot(building, maxPerOrder) {
   var box = document.getElementById('unit-panel-slot');
   if (!box) return;
 
+  var seq = ++unitPanelSeq;
+  if (unitPanelTimer) { clearInterval(unitPanelTimer); unitPanelTimer = null; }
+
   supabase.rpc('get_building_queue', { p_building_id: building.id }).then(function(res) {
+    if (seq !== unitPanelSeq) return;
     var q = (!res.error && res.data && res.data.length) ? res.data[0] : null;
 
     if (!q) {
@@ -3106,19 +3228,48 @@ function renderProductionSlot(building, maxPerOrder) {
     };
 
     var left = q.seconds_left;
-    draw(left);
+    if (unitPanelTimer) { clearInterval(unitPanelTimer); unitPanelTimer = null; }
 
-    if (unitPanelTimer) clearInterval(unitPanelTimer);
-    unitPanelTimer = setInterval(function() {
+    // Время вышло, а заказ ещё не выдан: просим выдать сразу и смотрим
+    // снова через пару секунд. Раньше здесь висело «Готово через 0 с»
+    // до тика сервера, а клиент дёргал базу каждую секунду.
+    if (left <= 0) {
+      draw(0);
+      var sub = box.querySelector('.prod-slot-sub');
+      if (sub) sub.textContent = q.mine ? 'Готово, выводим на поле…' : 'Готово, ждёт выдачи';
+      var key = building.id + '|' + q.completes_at;
+      var first = q.mine && !claimedOrderKeys[key];
+      var again = function() {
+        if (seq !== unitPanelSeq) return;
+        if (unitPanelTimer) { clearInterval(unitPanelTimer); unitPanelTimer = null; }
+        unitPanelTimer = setTimeout(function() {
+          unitPanelTimer = null;
+          var up = document.getElementById('unit-panel');
+          if (seq === unitPanelSeq && up && up.style.display !== 'none' &&
+              unitPanelBuilding && unitPanelBuilding.id === building.id) {
+            renderProductionSlot(building, maxPerOrder);
+          }
+        }, first ? 2500 : 5000);
+      };
+      if (first) { claimedOrderKeys[key] = true; claimReadyNow().then(again); }
+      else again();
+      return;
+    }
+
+    draw(left);
+    var tick = setInterval(function() {
+      // Свой id держим при себе: общий unitPanelTimer мог уже смениться
+      if (seq !== unitPanelSeq) { clearInterval(tick); return; }
       left -= 1;
       if (left <= 0) {
-        clearInterval(unitPanelTimer);
-        unitPanelTimer = null;
+        clearInterval(tick);
+        if (unitPanelTimer === tick) unitPanelTimer = null;
         renderProductionSlot(building, maxPerOrder);
         return;
       }
       draw(left);
     }, 1000);
+    unitPanelTimer = tick;
   });
 }
 
@@ -3623,6 +3774,10 @@ function updateDeployCounter() {
 
 function closeUnitPanel() {
   document.getElementById('unit-panel').style.display = 'none';
+  // Отсчёт линии нужен только открытому окну: при следующем открытии
+  // renderProductionSlot запустит его заново
+  unitPanelSeq++;
+  if (unitPanelTimer) { clearInterval(unitPanelTimer); unitPanelTimer = null; }
 }
 
 // Полоса текущих заказов внизу экрана — своя очередь видна только владельцу,
@@ -3639,14 +3794,22 @@ function loadUnitOrders() {
       }
       bar.innerHTML = '';
       bar.style.display = 'flex';
+      var due = false;
       res.data.forEach(function(o) {
         var left = Math.max(0, Math.ceil((new Date(o.completes_at).getTime() - Date.now()) / 1000));
+        // Просим выдать один раз на заказ: если он застрял, ждёт тика
+        if (left <= 0 && !claimedOrderKeys['o|' + o.id]) {
+          claimedOrderKeys['o|' + o.id] = true;
+          due = true;
+        }
         var item = document.createElement('div');
         item.className = 'order-chip';
         item.textContent = (o.unit_types ? o.unit_types.name : o.unit_type) +
-                           ' ×' + o.quantity + ' · ' + left + 'с';
+                           ' ×' + o.quantity + ' · ' + (left > 0 ? left + 'с' : 'готово');
         bar.appendChild(item);
       });
+      // Срок вышел — просим выдать сразу, не дожидаясь тика сервера
+      if (due) claimReadyNow().then(function(sent) { if (sent) { loadUnitOrders(); loadUnits(); } });
     });
 }
 
@@ -4137,36 +4300,45 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
 
   var tiles = document.getElementById('gu-tiles');
   var info = document.getElementById('gu-abil-info');
-  var canAct = ap && ap.ap >= 1;
+  // Доступность считаем в момент нажатия, а не при открытии панели
+  var canAct = function(need) { return guApNow(unit, ap) >= (need || 1); };
 
-  var addTile = function(key, icon, label, ready, onPick, image) {
+  // readyAt — отметка конца отката (мс); тикер по ней сам снимет заглушку
+  var addTile = function(key, icon, label, ready, onPick, image, readyAt) {
     var b = document.createElement('button');
     b.className = 'gu-tile' + (guPickedAbility === key ? ' active' : '') +
                   (ready ? '' : ' locked');
     b.setAttribute('data-key', key);
+    if (readyAt) b.setAttribute('data-ready-at', String(readyAt));
     // У веток есть своя картинка, у базовых действий — знак
     b.innerHTML = (image
         ? '<img class="gu-tile-img" src="../' + image + '" alt="">'
         : '<span class="gu-tile-icon">' + icon + '</span>') +
       '<span class="gu-tile-label">' + label + '</span>';
-    b.addEventListener('click', function() {
+    b._guPick = function() {
+      if (!selectedUnit || selectedUnit.id !== unit.id) return;
       guPickedAbility = key;
       onPick();
+    };
+    b.addEventListener('click', function() {
+      var all = tiles.querySelectorAll('.gu-tile');
+      for (var i = 0; i < all.length; i++) all[i].classList.toggle('active', all[i] === b);
+      b._guPick();
     });
     tiles.appendChild(b);
     return b;
   };
 
   // Ход и атака — базовые действия, они есть у всех
-  addTile('move', '⇢', 'Идти', canAct, function() {
+  addTile('move', '⇢', 'Идти', canAct(), function() {
     info.innerHTML = '<div class="gu-abil-name">Перемещение</div>' +
       '<div class="gu-abil-text">До ' + unitMoveRange(unit) + ' клеток за одно действие.</div>';
-    guAbilityAction(info, 'Идти', canAct, function() { startGroundMove(unit); });
+    guAbilityAction(info, 'Идти', canAct(), function() { startGroundMove(guLiveUnit(unit)); });
   });
 
   // Разведчик уходит на соседнюю планету сам, без командира
   if (type.is_scout) {
-    addTile('scout', '➶', 'Разведка', canAct, function() {
+    addTile('scout', '➶', 'Разведка', canAct(), function() {
       info.innerHTML =
         '<div class="gu-abil-name">Перелёт на соседнюю планету</div>' +
         '<div class="gu-abil-text">Уходит по нити на связанную планету. ' +
@@ -4179,7 +4351,7 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
   // Инженер: полевые постройки. Каталог открывается отдельным окном —
   // в тесной панели десять карточек с ценами не разглядеть
   if (type.can_build) {
-    addTile('build', '⚒', 'Строить', canAct, function() {
+    addTile('build', '⚒', 'Строить', canAct(), function() {
       var ownPlanet = sysFaction && myFaction && sysFaction === myFaction;
       info.innerHTML = '<div class="gu-abil-name">Полевые постройки</div>' +
         '<div class="gu-abil-text">Окопы, бункеры, турели, радары, глушилки, добыча и кантина. ' +
@@ -4187,15 +4359,15 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
         'Всё, кроме окопа, сначала изучают в ' +
         (myFaction === 'cis' ? 'лаборатории' : 'научном центре') + '.</div>' +
         (ownPlanet ? '' : '<div class="gu-abil-meta warn">строить можно только на планетах своей фракции</div>');
-      guAbilityAction(info, 'Выбрать постройку', canAct && ownPlanet, function() { openStructureBuildPanel(unit); });
+      guAbilityAction(info, 'Выбрать постройку', canAct() && ownPlanet, function() { openStructureBuildPanel(guLiveUnit(unit)); });
     });
   }
 
   if (type.splash_size > 0) {
     // Артиллерия: только залп по площади, и на него уходят все действия
     var need = type.shot_ap || 2;
-    var canFire = ap && ap.ap >= need;
-    var salvo = addTile('salvo', '✹', 'Залп', canFire, function() {
+    var salvo = addTile('salvo', '✹', 'Залп', canAct(need), function() {
+      var canFire = canAct(need);
       info.innerHTML = '<div class="gu-abil-name">Залп</div>' +
         '<div class="gu-abil-text">Бьёт по площади ' + type.splash_size + '×' + type.splash_size +
         ' в любую точку карты, которую видят твои войска. Снаряд не разбирает своих и чужих, ' +
@@ -4203,15 +4375,26 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
         '<div class="gu-abil-meta">стоит ' + need + ' действия · действие восстанавливается ' +
         (type.action_seconds || gbApCd) + ' с</div>' +
         (canFire ? '' : '<div class="gu-abil-meta warn">нужно ' + need + ' действия</div>');
-      guAbilityAction(info, 'Выбрать точку', canFire, function() { startArtilleryStrike(unit); });
+      guAbilityAction(info, 'Выбрать точку', canFire, function() { startArtilleryStrike(guLiveUnit(unit)); });
     });
     salvo.setAttribute('data-need', need);
   } else {
-    addTile('attack', '◎', 'Атака', canAct, function() {
+    // Атака — это сразу выбор цели: нажал плитку, ткнул во врага.
+    // Промежуточная кнопка «Выбрать цель» остаётся только когда бить
+    // пока нечем — чтобы объяснить, почему.
+    var attackTile = addTile('attack', '◎', 'Атака', canAct(), function() {
       info.innerHTML = '<div class="gu-abil-name">Атака</div>' +
         '<div class="gu-abil-text">Урон зависит от класса цели: ' +
-        'пехота плохо берёт броню, техника плохо достаёт авиацию.</div>';
-      guAbilityAction(info, 'Выбрать цель', canAct, function() { startGroundAttack(unit); });
+        'пехота плохо берёт броню, техника плохо достаёт авиацию.</div>' +
+        (canAct() ? '' : '<div class="gu-abil-meta warn">нет действий — подожди восстановления</div>');
+      guAbilityAction(info, 'Выбрать цель', canAct(), function() { startGroundAttack(guLiveUnit(unit)); });
+    });
+    attackTile.addEventListener('click', function() {
+      if (!canAct()) return;
+      // Подсветку снимаем: тикер не должен вернуть «Атаку» выбранной
+      guPickedAbility = null;
+      attackTile.classList.remove('active');
+      startGroundAttack(guLiveUnit(unit));
     });
   }
 
@@ -4223,20 +4406,23 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
     if (!selectedUnit || selectedUnit.id !== unit.id || guTab !== 'abilities') return;
 
     (res.error ? [] : (res.data || [])).forEach(function(a) {
-      addTile(a.research_id, null, a.name, a.ready && canAct, function() {
+      var readyAt = a.ready ? 0 : Date.now() + (a.seconds_left || 0) * 1000;
+      addTile(a.research_id, null, a.name, a.ready && canAct(), function() {
+        var left = readyAt ? guLeftSec(readyAt) : 0;
         info.innerHTML =
           '<div class="gu-abil-name">' + a.name + '</div>' +
           '<div class="gu-abil-text">' + (a.description || '') + '</div>' +
           '<div class="gu-abil-meta">' + upgradeAbilityHint(a) + '</div>' +
-          (a.ready ? '' :
-            '<div class="gu-abil-meta warn">не готова: ' + formatLeft(a.seconds_left) + '</div>');
+          (left > 0 ?
+            '<div class="gu-abil-meta warn">не готова: ' + formatLeft(left) + '</div>' : '');
 
         guAbilityAction(info, isAreaAbility(a.kind) ? 'Выбрать клетку' : 'Выбрать цель',
-                        a.ready && canAct, function() {
-          startUpgradeAbility(unit, a);
+                        left <= 0 && canAct(), function() {
+          startUpgradeAbility(guLiveUnit(unit), a);
         });
-      }, a.icon_image);
+      }, a.icon_image, readyAt);
     });
+    guRefreshTiles(guApNow(unit, ap));
   });
 
   // Собственные способности приходят с сервера вместе с откатом
@@ -4246,20 +4432,22 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
     guAbilities = (!res.error && res.data) ? res.data : [];
 
     guAbilities.forEach(function(a) {
-      addTile(a.ability_id, a.icon, a.name, a.ready && canAct, function() {
+      var readyAt = a.ready ? 0 : Date.now() + (a.seconds_left || 0) * 1000;
+      addTile(a.ability_id, a.icon, a.name, a.ready && canAct(), function() {
+        var left = readyAt ? guLeftSec(readyAt) : 0;
         info.innerHTML =
           '<div class="gu-abil-name">' + a.name + '</div>' +
           '<div class="gu-abil-text">' + (a.description || '') + '</div>' +
           '<div class="gu-abil-meta">◷ откат ' + Math.round(a.cooldown_seconds / 60) + ' мин</div>' +
-          (a.ready ? '' :
-            '<div class="gu-abil-meta warn">не готова: ' +
-              formatLeft(a.seconds_left) + '</div>');
+          (left > 0 ?
+            '<div class="gu-abil-meta warn">не готова: ' + formatLeft(left) + '</div>' : '');
 
-        guAbilityAction(info, 'Выбрать цель', a.ready && canAct, function() {
-          startAbilityTargeting(unit, a);
+        guAbilityAction(info, 'Выбрать цель', left <= 0 && canAct(), function() {
+          startAbilityTargeting(guLiveUnit(unit), a);
         });
-      });
+      }, null, readyAt);
     });
+    guRefreshTiles(guApNow(unit, ap));
   });
 
   // Боевые способности из древа: приходят с сервера вместе с откатом
@@ -4268,9 +4456,11 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
       if (!selectedUnit || selectedUnit.id !== unit.id || guTab !== 'abilities') return;
 
       (res.error ? [] : (res.data || [])).forEach(function(a) {
-        var usable = a.implemented && a.ready && canAct;
+        var readyAt = a.ready ? 0 : Date.now() + (a.seconds_left || 0) * 1000;
 
-        addTile(a.ability_id, null, a.name, usable, function() {
+        var heroTile = addTile(a.ability_id, null, a.name, a.implemented && a.ready && canAct(), function() {
+          var left = readyAt ? guLeftSec(readyAt) : 0;
+          var usable = a.implemented && left <= 0 && canAct();
           info.innerHTML =
             '<div class="gu-abil-name">' + a.name + '</div>' +
             '<div class="gu-abil-text">' + (a.description || '') + '</div>' +
@@ -4282,16 +4472,18 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
               Math.round(a.cooldown_seconds / 60) + ' мин</div>' +
             (a.implemented ? '' :
               '<div class="gu-abil-meta warn">пока не действует в бою</div>') +
-            (a.ready || !a.implemented ? '' :
-              '<div class="gu-abil-meta warn">не готова: ' +
-                formatLeft(a.seconds_left) + '</div>');
+            (left <= 0 || !a.implemented ? '' :
+              '<div class="gu-abil-meta warn">не готова: ' + formatLeft(left) + '</div>');
 
           guAbilityAction(info,
             a.target_mode === 'self' ? 'Применить'
             : a.target_mode === 'area' ? 'Выбрать клетку' : 'Выбрать цель',
-            usable, function() { startHeroAbility(unit, a); });
-        }, a.icon);
+            usable, function() { startHeroAbility(guLiveUnit(unit), a); });
+        }, a.icon, readyAt);
+        // Ещё не действует в бою — заглушку не снимаем никогда
+        if (!a.implemented) heroTile.setAttribute('data-need', '99');
       });
+      guRefreshTiles(guApNow(unit, ap));
     });
   }
 
@@ -5015,20 +5207,45 @@ function loadDropCargo() {
       dropVehicles = (r[1].error || !r[1].data) ? [] : r[1].data;
       dropFighters = (r[2].error || !r[2].data) ? [] : r[2].data;
 
-      // Показываем через visibility, а не display: элемент остаётся
-      // в раскладке, и его появление не заставляет браузер заново
-      // растрировать лежащий под ним холст.
-      // Только на чужой планете: на своей высадка идёт пачкой через
-      // панель трюма, поштучная расстановка нужна при вторжении
-      var btn = document.getElementById('drop-btn');
-      // Истребители садятся и на своей планете тоже: ангар это не десант,
-      // а способ вернуть машину на грунт
-      var hasCargo = dropCargo.length > 0 || dropVehicles.length > 0;
-      // Только на чужой планете. Своя высадка идёт пачкой через панель
-      // трюма в космосе, поштучная расстановка нужна при вторжении.
-      var show = iAmAttacker === true && (hasCargo || dropFighters.length > 0);
-      if (btn) btn.style.visibility = show ? 'visible' : 'hidden';
+      updateDropBtn();
     });
+}
+
+// Кнопка высадки. Показываем через visibility, а не display: элемент
+// остаётся в раскладке, и его появление не заставляет браузер заново
+// растрировать лежащий под ним холст.
+// Десант и техника — только на чужой планете: своя высадка идёт пачкой
+// через панель трюма в космосе. Истребители садятся и на своей: ангар
+// это не десант, а способ вернуть машину на грунт. Раньше кнопка
+// пряталась на своей планете целиком, и «На грунт» вело в тупик.
+function dropListFor() {
+  var invading = iAmAttacker === true;
+  return {
+    fighters: dropFighters,
+    vehicles: invading ? dropVehicles : [],
+    cargo: invading ? dropCargo : []
+  };
+}
+
+function updateDropBtn() {
+  var btn = document.getElementById('drop-btn');
+  if (!btn) return;
+  var busy = droppingUnit || droppingVehicle || landingFighter;
+  var l = dropListFor();
+  var show = !busy && iAmAttacker !== null &&
+             (l.fighters.length + l.vehicles.length + l.cargo.length) > 0;
+  btn.style.visibility = show ? 'visible' : 'hidden';
+}
+
+// Куда можно сесть: при вторжении — полоса вторжения, на своей планете —
+// зоны высадки. Ровно те же правила проверяет land_fighter на сервере.
+function fighterLandCellAllowed(cx, cy) {
+  if (cx < 0 || cy < 0 || cx >= GRID_SIZE || cy >= GRID_SIZE) return false;
+  if (iAmAttacker) return cy >= GRID_SIZE - ATTACK_ZONE_H;
+  return deployZones.some(function(z) {
+    var size = z.size || DEPLOY_SIZE;
+    return cx >= z.x && cx < z.x + size && cy >= z.y && cy < z.y + size;
+  });
 }
 
 function openDropPanel() {
@@ -5036,8 +5253,10 @@ function openDropPanel() {
   var list = document.getElementById('drop-panel-list');
   list.innerHTML = '';
 
+  var l = dropListFor();
+
   // Истребители первыми: их положение важнее всего, они самые манёвренные
-  dropFighters.forEach(function(f) {
+  l.fighters.forEach(function(f) {
     var ready = f.zone !== null && f.zone !== undefined;
     var item = document.createElement('button');
     item.className = 'drop-item' + (ready ? '' : ' not-ready');
@@ -5053,13 +5272,13 @@ function openDropPanel() {
     list.appendChild(item);
   });
 
-  if (!dropCargo.length && !dropVehicles.length && !dropFighters.length) {
+  if (!l.cargo.length && !l.vehicles.length && !l.fighters.length) {
     list.innerHTML = '<div class="drop-empty">В трюмах пусто</div>';
   }
 
   // Техника идёт первой: она занимает несколько клеток, и её положение
   // важнее, чем то, куда встанет отдельный пехотинец
-  dropVehicles.forEach(function(v) {
+  l.vehicles.forEach(function(v) {
     var ready = v.zone !== null && v.zone !== undefined;
     var item = document.createElement('button');
     item.className = 'drop-item' + (ready ? '' : ' not-ready');
@@ -5077,7 +5296,7 @@ function openDropPanel() {
     list.appendChild(item);
   });
 
-  dropCargo.forEach(function(row) {
+  l.cargo.forEach(function(row) {
     var ready = row.zone !== null && row.zone !== undefined;
 
     var item = document.createElement('button');
@@ -5133,15 +5352,47 @@ function startFighterLanding(f) {
   redrawScene();
 }
 
+var landingBusy = false;
+var dropHintTimer = null;
+
+// Короткое пояснение прямо в строке подсказки режима: отдельное окно
+// здесь лишнее, а молчаливый тап выглядел как поломка
+function gbToast(text) {
+  var span = document.querySelector('#placement-hint span');
+  if (!span) return;
+  if (!span.dataset.base) span.dataset.base = span.textContent;
+  span.textContent = text;
+  clearTimeout(dropHintTimer);
+  dropHintTimer = setTimeout(function() {
+    if (span.dataset.base) span.textContent = span.dataset.base;
+    delete span.dataset.base;
+  }, 2200);
+}
+
 function handleFighterLandingTap(cellX, cellY) {
+  // Тап мимо разрешённой зоны не молчит: подсказываем, куда садиться
+  if (!fighterLandCellAllowed(cellX, cellY)) {
+    gbToast(iAmAttacker ? 'Садиться можно только в полосе вторжения'
+                        : 'Садиться можно только в зону высадки');
+    return;
+  }
+  if (!isBoxFree(buildOccupancy(), cellX, cellY, 1, 1)) {
+    gbToast('Клетка занята');
+    return;
+  }
+  if (landingBusy) return;
+  landingBusy = true;
+
+  var f = landingFighter;
   supabase.rpc('land_fighter', {
-    p_fighter_id: landingFighter.fighter_id, p_x: cellX, p_y: cellY
+    p_fighter_id: f.fighter_id, p_x: cellX, p_y: cellY
   }).then(function(r) {
+    landingBusy = false;
     if (r.error) { alert('Не удалось посадить: ' + r.error.message); return; }
     cancelDrop();
     loadUnits();
     loadDropCargo();
-  });
+  }, function() { landingBusy = false; });
 }
 
 function startVehicleDrop(v) {
@@ -5201,8 +5452,7 @@ function cancelDrop() {
   landingFighter = null;
   document.getElementById('placement-hint').style.display = 'none';
 
-  var btn = document.getElementById('drop-btn');
-  if (btn && iAmAttacker && dropCargo.length) btn.style.visibility = 'visible';
+  updateDropBtn();
 
   setBottomInset(0);
   redrawScene();
@@ -5216,6 +5466,23 @@ function drawDropCells() {
   var vh = droppingVehicle ? droppingVehicle.height_cells : 1;
 
   var occupied = buildOccupancy();
+
+  // Посадка истребителя на своей планете идёт в зоны высадки: красим
+  // их свободные клетки тем же зелёным, что и при найме
+  if (landingFighter && !iAmAttacker) {
+    deployZones.forEach(function(zone) {
+      var size = zone.size || DEPLOY_SIZE;
+      for (var dx = 0; dx < size; dx++) {
+        for (var dy = 0; dy < size; dy++) {
+          var zx = zone.x + dx, zy = zone.y + dy;
+          if (!isBoxFree(occupied, zx, zy, 1, 1)) continue;
+          ctx.fillStyle = 'rgba(95,217,104,0.25)';
+          ctx.fillRect(zx * CELL_PX + 3, zy * CELL_PX + 3, CELL_PX - 6, CELL_PX - 6);
+        }
+      }
+    });
+    return;
+  }
 
   var y0 = GRID_SIZE - ATTACK_ZONE_H;
   for (var cy = y0; cy < GRID_SIZE; cy++) {
@@ -8355,9 +8622,10 @@ function gbDeepLink() {
     slot: q.get('slot') !== null ? parseInt(q.get('slot'), 10) : null,
     bid: q.get('bid'),
     open: q.get('open'),
-    tab: q.get('tab')
+    tab: q.get('tab'),
+    land: q.get('land')
   };
-  if (link.x === null && !link.unit && link.slot === null && !link.open) return;
+  if (link.x === null && !link.unit && link.slot === null && !link.open && !link.land) return;
 
   try {
     var keep = '?system=' + encodeURIComponent(systemId) + (isBuildMode() ? '&mode=build' : '');
@@ -8371,13 +8639,30 @@ function gbDeepLink() {
     var unitsReady = loadUnitsApplied > 0;
     var slotsReady = link.slot === null || buildingsLoaded;
     var stlReady = link.open !== 'settlement' || !!settlement;
-    if (!(unitsReady && slotsReady && stlReady) && tries < 50) return;
+    // Посадке нужна сторона: от неё зависит, куда можно садиться
+    var sideReady = !link.land || iAmAttacker !== null;
+    if (!(unitsReady && slotsReady && stlReady && sideReady) && tries < 50) return;
     clearInterval(wait);
     gbApplyLink(link);
   }, 200);
 }
 
 function gbApplyLink(link) {
+
+  // «На грунт» из ангара: сразу открываем посадку этого истребителя.
+  // Список посадочных берём свежим — сторона и груз могли прийти позже.
+  if (link.land) {
+    loadDropCargo().then(function() {
+      var f = dropFighters.filter(function(x) { return x.fighter_id === link.land; })[0];
+      if (!f) { alert('Истребителя уже нет в ангаре над этой планетой'); return; }
+      if (f.zone === null || f.zone === undefined) {
+        alert('Носитель должен целиком стоять в площадке сброса');
+        return;
+      }
+      startFighterLanding(f);
+    });
+    return;
+  }
 
   if (link.unit) {
     var u = unitsOnMap.filter(function(x) { return x.id === link.unit; })[0];

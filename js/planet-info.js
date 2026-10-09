@@ -143,28 +143,21 @@ function openPlanetInfo(systemId) {
       // стоит на земле, и тех, кто сидит в трюмах твоих кораблей в этой
       // системе — иначе загруженная армия выглядела бы как ноль.
       if (myFaction && myFaction === sys.faction && viewerId) {
+        // Бойцы в трюме — такие же строки unit_positions, только с
+        // carrier_ship_id: так они сохраняют свои улучшения в перелёте.
         Promise.all([
           supabase.from('unit_positions').select('id', { count: 'exact', head: true })
-            .eq('system_id', systemId).eq('owner_user_id', viewerId),
-          supabase.from('ships').select('id').eq('system_id', systemId).eq('owner_user_id', viewerId)
+            .eq('system_id', systemId).eq('owner_user_id', viewerId).is('carrier_ship_id', null),
+          supabase.from('unit_positions').select('id', { count: 'exact', head: true })
+            .eq('system_id', systemId).eq('owner_user_id', viewerId).not('carrier_ship_id', 'is', null)
         ]).then(function(res) {
           var onGround = res[0].count || 0;
-          var shipIds = (res[1].data || []).map(function(sh) { return sh.id; });
-
-          if (shipIds.length === 0) {
-            stats.appendChild(makePiStat('Твои войска', onGround + ' ед.'));
-            return;
-          }
-
-          supabase.from('ship_cargo').select('quantity').in('ship_id', shipIds)
-            .then(function(cr) {
-              var inHold = (cr.data || []).reduce(function(a, c) { return a + c.quantity; }, 0);
-              var total = onGround + inHold;
-              var label = inHold > 0
-                ? (total + ' ед. · в трюмах ' + inHold)
-                : (total + ' ед.');
-              stats.appendChild(makePiStat('Твои войска', label));
-            });
+          var inHold = res[1].count || 0;
+          var total = onGround + inHold;
+          var label = inHold > 0
+            ? (total + ' ед. · в трюмах ' + inHold)
+            : (total + ' ед.');
+          stats.appendChild(makePiStat('Твои войска', label));
         });
       }
 

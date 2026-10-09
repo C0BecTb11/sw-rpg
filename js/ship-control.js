@@ -871,13 +871,25 @@ function scStartLaunch(f) {
   hint.textContent = 'Коснись клетки рядом с носителем';
 }
 
+// Посадка идёт на наземной карте: сразу переходим туда с этим
+// истребителем в режиме посадки. Раньше кнопка лишь просила открыть
+// карту самому, а там на своей планете не было даже кнопки высадки.
 function scStartLand(f) {
-  scHangarPick = f;
-  scHangarMode = 'land';
-  scSetMode(null);
+  scHangarPick = null;
+  scHangarMode = null;
 
-  var hint = document.getElementById('sc-hint');
-  hint.textContent = 'Посадка идёт на наземной карте — открой её и выбери клетку';
+  // Носитель не в площадке сброса — садиться неоткуда, на землю не ведём
+  supabase.rpc('get_landable_fighters', { p_system_id: systemId }).then(function(res) {
+    var row = (!res.error && res.data) ? res.data.filter(function(x) {
+      return x.fighter_id === f.fighter_id;
+    })[0] : null;
+    if (row && (row.zone === null || row.zone === undefined)) {
+      scFail('Сначала поставь носитель целиком в площадку сброса');
+      return;
+    }
+    window.location.href = 'ground-battle.html?system=' + encodeURIComponent(systemId) +
+      '&land=' + encodeURIComponent(f.fighter_id);
+  });
 }
 
 function scRenderAp() {
@@ -1095,7 +1107,10 @@ function onShipsReloaded() {
   for (var i = 0; i < shipsInSystem.length; i++) {
     if (shipsInSystem[i].id === scShip.id) { fresh = shipsInSystem[i]; break; }
   }
-  if (!fresh) { scDeselect(); return; }
+  // Ушёл в ангар носителя — на карте его больше нет, держать HUD незачем
+  if (!fresh || fresh.carrier_ship_id || fresh.x === null || fresh.x === undefined) {
+    scDeselect(); return;
+  }
   scShip = fresh;
   scRenderHud();
 }
@@ -1906,7 +1921,9 @@ function sxRefreshIntel() {
   if (!sxIntelId) return;
   var fresh = sxShipById(sxIntelId);
   var type = fresh ? shipTypeById[fresh.ship_type] : null;
-  if (!fresh || !type || fresh.owner_user_id === currentUserId) { sxCloseIntel(); return; }
+  if (!fresh || !type || fresh.owner_user_id === currentUserId || fresh.carrier_ship_id) {
+    sxCloseIntel(); return;
+  }
   sxShowIntel(fresh, type, true);
 }
 
