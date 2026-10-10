@@ -134,7 +134,37 @@ function renderStationSlot() {
   grid.appendChild(el);
 }
 
+// ===== Аренда верфи =====
+// Управляющий может сдать верфь станции союзнику на срок
+// (js/production-lease.js). Пока аренда идёт, строит и чинит в доке
+// только арендатор.
+var spLeaseMap = {};
+var spStationSeq = 0;
+
+function spLoadLeases() {
+  if (typeof plSystemLeases !== 'function') return Promise.resolve(spLeaseMap);
+  return plSystemLeases(systemId).then(function(map) {
+    spLeaseMap = map || {};
+    return spLeaseMap;
+  });
+}
+
+function spStationLease() {
+  return typeof plLeaseOf === 'function' ? plLeaseOf(spLeaseMap, null) : null;
+}
+
 function onStationSlotTapped() {
+  var my = ++spStationSeq;
+  spPaintStationPanel(spStationLease());
+  // Кэш мог устареть: свежий ответ перерисует кнопки и блок аренды
+  spLoadLeases().then(function() {
+    var panel = document.getElementById('station-panel');
+    if (my !== spStationSeq || !panel || panel.style.display === 'none') return;
+    spPaintStationPanel(spStationLease());
+  });
+}
+
+function spPaintStationPanel(lease) {
   if (typeof sxCloseIntel === 'function') sxCloseIntel();
   var panel = document.getElementById('station-panel');
   var titleEl = document.getElementById('station-panel-title');
@@ -168,21 +198,68 @@ function onStationSlotTapped() {
     buildBtn.style.display = 'none';
     demolishBtn.style.display = isController ? 'block' : 'none';
 
+    // Аренда: арендатор получает верфь, хозяин сданной — нет
+    var tenant = typeof plIsTenant === 'function' && plIsTenant(lease);
+    var lockedOwner = typeof plIsLockedOwner === 'function' && plIsLockedOwner(lease);
+    var held = !!lease && lease.role === 'lessor';
+    if (tenant && !building && !captured) {
+      textEl.textContent = 'Верфь в аренде у тебя — строй и чини корабли здесь';
+    } else if (lockedOwner && !building && !captured) {
+      textEl.textContent = 'Верфь сдана в аренду';
+    }
+    // Гасим только сами и только сами снимаем: пока окно «Точно?» ждёт
+    // цену, кнопку держит закрытой askStation
+    if (held) demolishBtn.disabled = true;
+    else if (demolishBtn._plHeld) demolishBtn.disabled = false;
+    demolishBtn._plHeld = held;
+    demolishBtn.title = held ? 'Сначала дождись конца аренды или отзови предложение' : '';
+
     if (shipyardBtn) shipyardBtn.style.display =
-      (isController && !building && !captured) ? 'block' : 'none';
+      (((isController && !lockedOwner) || tenant) && !building && !captured) ? 'block' : 'none';
+
+    spPaintStationLease(lease, isController && !building && !captured);
   } else {
     titleEl.textContent = 'Слот космической станции';
     textEl.textContent = isController ? 'Здесь можно построить станцию' : 'У тебя нет прав на строительство здесь';
     buildBtn.style.display = isController ? 'block' : 'none';
     demolishBtn.style.display = 'none';
     if (shipyardBtn) shipyardBtn.style.display = 'none';
+    spPaintStationLease(null, false);
   }
 
   panel.style.display = 'flex';
 }
 
+function spPaintStationLease(lease, canOffer) {
+  var host = document.getElementById('station-lease');
+  if (!host) return;
+  if (typeof plRenderBlock !== 'function') { host.style.display = 'none'; return; }
+  var fac = (stationRecord && stationRecord.faction) || sysFaction;
+  plRenderBlock(host, {
+    systemId: systemId,
+    buildingId: null,
+    name: 'Верфь',
+    image: (typeof STATION_IMAGES !== 'undefined' && STATION_IMAGES[fac]) || null,
+    planetName: plPlanetName(),
+    lease: lease,
+    canOffer: !!canOffer,
+    onOpen: function() { closeStationPanel(); openShipyard(); },
+    onChanged: function() {
+      var my = ++spStationSeq;
+      spLoadLeases().then(function() {
+        var panel = document.getElementById('station-panel');
+        if (my !== spStationSeq || !panel || panel.style.display === 'none') return;
+        spPaintStationPanel(spStationLease());
+      });
+    }
+  });
+}
+
 function closeStationPanel() {
   document.getElementById('station-panel').style.display = 'none';
+  spStationSeq++;
+  var host = document.getElementById('station-lease');
+  if (host && typeof plStopTick === 'function') plStopTick(host);
 }
 
 // Цена станции — из справочника построек по фракции (как считает сервер).
@@ -795,7 +872,7 @@ function initSpaceBattle() {
     if (!systemId) { if (window.sceneLoader) sceneLoader.hide(); return; }
     if (window.sceneLoader) sceneLoader.expect([['station', 'Станция'], ['ships', 'Флот']]);
 
-    Promise.all([loadStationSlot(), checkStationRights(), loadHyperspaceZone()]).then(function() {
+    Promise.all([loadStationSlot(), checkStationRights(), loadHyperspaceZone(), spLoadLeases()]).then(function() {
       loadStation();
       loadShips();
       centerGridInitially();
@@ -1099,6 +1176,9 @@ function openShipyard() {
       }
       list.innerHTML = '';
 
+      // Аренда: кому сейчас принадлежит верфь и сколько осталось
+      spPaintShipyardLease(list);
+
       // Док стоит над стапелем: чинить и дооснащать уже построенное
       // обычно нужнее, чем закладывать новый корпус.
       var dock = document.createElement('div');
@@ -1360,6 +1440,52 @@ function formatDockLeft(sec) {
 
 function closeShipyard() {
   document.getElementById('shipyard-panel').style.display = 'none';
+  var host = document.getElementById('shipyard-lease');
+  if (host && typeof plStopTick === 'function') plStopTick(host);
+}
+
+function spPaintShipyardLease(list) {
+  if (typeof plRenderBanner !== 'function') return;
+  var host = document.createElement('div');
+  host.id = 'shipyard-lease';
+  list.insertBefore(host, list.firstChild);
+
+  var fac = (stationRecord && stationRecord.faction) || sysFaction;
+  var ok = stationRecord && !(stationRecord.completes_at &&
+    new Date(stationRecord.completes_at).getTime() > Date.now()) &&
+    !(sysFaction && stationRecord.faction && stationRecord.faction !== sysFaction);
+
+  var paint = function(row) {
+    plRenderBanner(host, row, {
+      kind: 'station',
+      canOffer: isController && !!ok,
+      offer: { systemId: systemId, buildingId: null, name: 'Верфь',
+               image: (typeof STATION_IMAGES !== 'undefined' && STATION_IMAGES[fac]) || null,
+               planetName: plPlanetName() },
+      onEnd: function() {
+        // Срок вышел у арендатора: верфь вернулась хозяину — закрываем,
+        // чтобы не заказывать впустую. Хозяину просто перерисовываем
+        var panel = document.getElementById('shipyard-panel');
+        if (!panel || panel.style.display === 'none' || !document.body.contains(host)) return;
+        if (row && row.role === 'lessee') {
+          closeShipyard();
+          spLoadLeases();
+          if (typeof plToast === 'function') plToast('Аренда верфи закончилась');
+        } else {
+          spLoadLeases().then(function() { if (document.body.contains(host)) paint(spStationLease()); });
+        }
+      },
+      onChanged: function() {
+        spLoadLeases().then(function() { if (document.body.contains(host)) paint(spStationLease()); });
+      }
+    });
+  };
+
+  paint(spStationLease());
+  spLoadLeases().then(function() {
+    if (!document.body.contains(host)) return;
+    paint(spStationLease());
+  });
 }
 
 // Цены машин ангара берём из базы, чтобы карточка не врала после

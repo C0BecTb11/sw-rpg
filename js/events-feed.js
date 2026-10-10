@@ -151,6 +151,11 @@ function makeFeedRow(e) {
     }
   }
 
+  // Аренда производства: кто, что, на сколько и почём — своей строкой
+  if (e.type && e.type.indexOf('lease_') === 0 && typeof plFeedLine === 'function') {
+    line = plFeedLine(e);
+  }
+
   // Кто привёз: получатель должен видеть отправителя, а не только груз
   if (e.meta && e.meta.from_player) {
     line = e.meta.from_player + ' доставил: ' + line;
@@ -207,6 +212,18 @@ function makeFeedRow(e) {
       openTransferPanel(inbound ? 'inbox' : 'out');
     });
     row.appendChild(open);
+  }
+
+  // Аренда производства: ответить или посмотреть — в шторке аренды
+  if (e.meta && e.meta.lease_id && typeof openLeasePanel === 'function') {
+    var lease = document.createElement('button');
+    lease.className = 'feed-go';
+    lease.textContent = e.type === 'lease_offered' ? 'Ответить' : 'Открыть';
+    lease.addEventListener('click', function() {
+      closeEventsFeed();
+      openLeasePanel();
+    });
+    row.appendChild(lease);
   }
 
   // Вводный курс: из события прямо к наставнику

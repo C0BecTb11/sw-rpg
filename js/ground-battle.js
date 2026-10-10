@@ -2645,6 +2645,14 @@ function onSlotTapped(slotIndex) {
     var mine = existing.owner_user_id === currentUserId;
 
     var code = (existing.building_types || {}).code;
+
+    // Арендатор: тап по сданному ему зданию сразу открывает найм.
+    // Кэш мог устареть — карточка постройки перечитает аренду сама.
+    if (!buildMode && ready && !mine && typeof plIsTenant === 'function' &&
+        plIsTenant(plLeaseOf(gbLeaseMap, existing.id))) {
+      openUnitPanel(existing);
+      return;
+    }
     var isLab = code === 'rep_research' || code === 'cis_lab';
     var isHub = code === 'rep_logistics' || code === 'cis_logistics';
     var isTrade = code === 'rep_trade' || code === 'cis_trade';
@@ -2737,6 +2745,8 @@ function openBuildingInfo(building) {
 
   demolishBtn.style.display = isController ? 'block' : 'none';
   demolishBtn.disabled = buildingDemolishBusy;
+
+  gbPaintBuildingLease(building, seq, captured);
   demolishBtn.onclick = function() {
     if (demolishBtn.disabled || buildingDemolishBusy) return;
     askDemolishBuilding(building, captured && isController, function() {
@@ -3127,6 +3137,128 @@ function researchEffectText(r) {
 
 function closeBuildingInfo() {
   document.getElementById('building-info-panel').style.display = 'none';
+  var lease = document.getElementById('building-info-lease');
+  if (lease && typeof plStopTick === 'function') plStopTick(lease);
+}
+
+// ===== Аренда производства =====
+// Управляющий сдаёт казарму, завод техники или храм союзнику на срок.
+// Пока аренда идёт, нанимает только арендатор. Кто кому что сдал —
+// карта «здание → аренда» по этой планете (js/production-lease.js).
+
+var gbLeaseMap = {};
+var unitLeaseSeq = 0;
+
+function gbLoadLeases() {
+  if (typeof plSystemLeases !== 'function') return Promise.resolve(gbLeaseMap);
+  return plSystemLeases(systemId).then(function(map) {
+    gbLeaseMap = map || {};
+    return gbLeaseMap;
+  });
+}
+
+// Блок аренды в карточке постройки: сдать, отозвать, сколько осталось,
+// а арендатору — вход в найм
+function gbPaintBuildingLease(building, seq, captured) {
+  var host = document.getElementById('building-info-lease');
+  if (!host) return;
+  var type = building.building_types || {};
+  if (typeof plRenderBlock !== 'function' || !plLeasable(type.code)) {
+    if (typeof plStopTick === 'function') plStopTick(host);
+    host.style.display = 'none';
+    host.innerHTML = '';
+    return;
+  }
+
+  var ready = !building.completes_at || new Date(building.completes_at).getTime() <= Date.now();
+  var demolishBtn = document.getElementById('building-info-demolish');
+
+  var paint = function(row) {
+    plRenderBlock(host, {
+      systemId: systemId,
+      buildingId: building.id,
+      name: type.name || 'Постройка',
+      image: type.image || null,
+      planetName: plPlanetName(),
+      lease: row,
+      canOffer: isController && ready && !captured,
+      onOpen: function() { closeBuildingInfo(); openUnitPanel(building); },
+      onChanged: function() {
+        gbLoadLeases().then(function() {
+          if (seq === buildingInfoSeq && buildingInfoShown()) openBuildingInfo(building);
+        });
+      }
+    });
+    // Сданное или предложенное не сносится — сервер откажет, кнопку гасим заранее
+    if (demolishBtn && isController) {
+      var held = !!row && row.role === 'lessor';
+      demolishBtn.disabled = held || buildingDemolishBusy;
+      demolishBtn.title = held ? 'Сначала дождись конца аренды или отзови предложение' : '';
+    }
+  };
+
+  // Сразу — по кэшу, затем свежий ответ сервера
+  paint(plLeaseOf(gbLeaseMap, building.id));
+  gbLoadLeases().then(function(map) {
+    if (seq !== buildingInfoSeq || !buildingInfoShown()) return;
+    paint(plLeaseOf(map, building.id));
+  });
+}
+
+// Плашка аренды в окне найма и замок на кнопках у хозяина сданного
+function gbPaintUnitLease(building) {
+  var my = ++unitLeaseSeq;
+  var panel = document.getElementById('unit-panel');
+  var host = document.getElementById('unit-panel-lease');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'unit-panel-lease';
+    var slot = document.getElementById('unit-panel-slot');
+    if (slot && slot.parentNode) slot.parentNode.insertBefore(host, slot);
+  }
+
+  var type = building.building_types || {};
+  var leasable = typeof plLeasable === 'function' && plLeasable(type.code);
+  var ready = !building.completes_at || new Date(building.completes_at).getTime() <= Date.now();
+  var captured = sysFaction && building.faction && building.faction !== sysFaction;
+
+  var apply = function(row) {
+    if (!leasable) row = null;
+    unitPanelLeaseBlock = !!row && plIsLockedOwner(row);
+    if (panel) panel.classList.toggle('pl-locked', unitPanelLeaseBlock);
+    setUnitButtonsEnabled(unitSlotOn);
+
+    var again = function() {
+      if (my === unitLeaseSeq && unitPanelBuilding && unitPanelBuilding.id === building.id) {
+        gbPaintUnitLease(building);
+        if (typeof unitPanelMax !== 'undefined') renderProductionSlot(building, unitPanelMax);
+      }
+    };
+    // Хозяин видит здесь и вход в аренду — в карточку постройки он попадает
+    // только в режиме стройки
+    plRenderBanner(host, row, {
+      kind: 'building',
+      canOffer: leasable && isController && ready && !captured,
+      offer: { systemId: systemId, buildingId: building.id, name: type.name || 'Постройка',
+               image: type.image || null, planetName: plPlanetName() },
+      // Срок вышел: перечитываем, кто теперь хозяин линии
+      onEnd: again,
+      onChanged: again
+    });
+  };
+
+  if (typeof plSystemLeases !== 'function') {
+    unitPanelLeaseBlock = false;
+    if (panel) panel.classList.remove('pl-locked');
+    host.style.display = 'none';
+    return;
+  }
+
+  apply(plLeaseOf(gbLeaseMap, building.id));
+  gbLoadLeases().then(function(map) {
+    if (my !== unitLeaseSeq) return;
+    apply(plLeaseOf(map, building.id));
+  });
 }
 
 function openBuildPanel(slotIndex) {
@@ -3738,6 +3870,7 @@ function initGroundBattle() {
       setInterval(function() { if (!document.hidden) loadCaptureState(); }, 60000);
       setInterval(function() { if (captureState) renderCaptureBar(); }, 1000);
       loadDropCargo();
+      gbLoadLeases();
       gbDeepLink();
 
       var dropBtn = document.getElementById('drop-btn');
@@ -3906,14 +4039,19 @@ function formatLeft(sec) {
   return sec + ' с';
 }
 
+// Линия свободна (последний ответ очереди) и закрыт ли найм арендой
+var unitSlotOn = true;
+var unitPanelLeaseBlock = false;
+
 function setUnitButtonsEnabled(on) {
+  unitSlotOn = !!on;
   var panel = document.getElementById('unit-panel');
   if (!panel) return;
   var btns = panel.querySelectorAll('.unit-card-order, .unit-order-btn');
   for (var i = 0; i < btns.length; i++) {
     // Кнопку одарённого держит закрытой своя проверка, пока не ответит «можно»
     var gated = btns[i].getAttribute('data-gate');
-    btns[i].disabled = !on || (!!gated && gated !== 'ok');
+    btns[i].disabled = !on || unitPanelLeaseBlock || (!!gated && gated !== 'ok');
   }
 }
 
@@ -3942,6 +4080,9 @@ function openUnitPanel(building) {
   title.textContent = (building.building_types && building.building_types.name) || 'Производство';
   list.innerHTML = '<div class="unit-panel-empty">Загрузка...</div>';
   panel.style.display = 'flex';
+
+  // Аренда: плашка над линией и замок на найме у хозяина сданного
+  gbPaintUnitLease(building);
 
   var code = building.building_types && building.building_types.code;
 
@@ -4066,6 +4207,7 @@ function loadRepairList(building, box) {
       btn.className = 'rp-go';
       btn.innerHTML = 'Чинить<span>' + u.cost + '</span>';
       btn.addEventListener('click', function() {
+        if (unitPanelLeaseBlock) return;
         btn.disabled = true;
         supabase.rpc('start_repair', {
           p_building_id: building.id,
@@ -4295,6 +4437,7 @@ function buildUnitCard(unit) {
 
   var order = document.createElement('button');
   order.className = 'unit-order-btn';
+  if (unitPanelLeaseBlock) order.disabled = true;
   footer.appendChild(order);
 
   // Дополнения ставятся на каждого бойца и оплачиваются за каждого:
@@ -4379,7 +4522,8 @@ function buildUnitCard(unit) {
       heroGate.style.display = 'none';
       nameBox.style.display = '';
       order.setAttribute('data-gate', 'ok');
-      order.disabled = false;
+      // Храм сдан в аренду — у хозяина кнопка остаётся закрытой
+      order.disabled = unitPanelLeaseBlock;
       updatePrice();
     }
   }
@@ -4459,6 +4603,9 @@ function updateDeployCounter() {
 
 function closeUnitPanel() {
   document.getElementById('unit-panel').style.display = 'none';
+  unitLeaseSeq++;
+  var leaseHost = document.getElementById('unit-panel-lease');
+  if (leaseHost && typeof plStopTick === 'function') plStopTick(leaseHost);
   // Отсчёт линии нужен только открытому окну: при следующем открытии
   // renderProductionSlot запустит его заново
   unitPanelSeq++;
@@ -9938,7 +10085,7 @@ function gbDeepLink() {
   var wait = setInterval(function() {
     tries++;
     var unitsReady = loadUnitsApplied > 0;
-    var slotsReady = link.slot === null || buildingsLoaded;
+    var slotsReady = (link.slot === null && link.open !== 'lease') || buildingsLoaded;
     var stlReady = link.open !== 'settlement' || !!settlement;
     // Посадке нужна сторона: от неё зависит, куда можно садиться
     var sideReady = !link.land || iAmAttacker !== null;
@@ -9986,6 +10133,25 @@ function gbApplyLink(link) {
     // События налёта и условий открывают сразу вкладку «Условия»
     if (link.tab === 'tasks' || link.tab === 'districts' || link.tab === 'dev') stlTab = link.tab;
     openSettlementPanel();
+    return;
+  }
+
+  // Из шторки аренды: здание по id — показать и открыть его занятие
+  if (link.open === 'lease' && link.bid) {
+    var leaseSlot = null;
+    Object.keys(buildingsBySlot).forEach(function(k) {
+      if (buildingsBySlot[k] && buildingsBySlot[k].id === link.bid) leaseSlot = parseInt(k, 10);
+    });
+    var ls = leaseSlot !== null ? buildSlots[leaseSlot - 1] : null;
+    // Постройки так и не загрузились — молчим, а не пугаем «её нет»
+    if (!buildingsLoaded) return;
+    if (!ls) { alert('Этой постройки на планете уже нет'); return; }
+    gbLinkZoom(); focusCell(ls.x + SLOT_SIZE / 2 - 0.5, ls.y + SLOT_SIZE / 2 - 0.5);
+    gbPing(ls.x, ls.y, SLOT_SIZE, SLOT_SIZE);
+    redrawScene();
+    gbLoadLeases().then(function() {
+      setTimeout(function() { onSlotTapped(leaseSlot); }, 350);
+    });
     return;
   }
 

@@ -66,13 +66,22 @@ function setTransferTab(tab) {
 
 // Значок входящих: на кнопке «Армия» и на вкладке. Тикает в фоне,
 // чтобы предложение не пролежало незамеченным
+var trPendingTransfers = 0;
+
+// Значок «Армия» общий: входящие передачи плюс предложения аренды
+function paintArmyBadge() {
+  var n = trPendingTransfers + (typeof plPendingLeases === 'number' ? plPendingLeases : 0);
+  var army = document.getElementById('army-badge');
+  if (army) { army.textContent = n > 9 ? '9+' : String(n); army.style.display = n > 0 ? 'block' : 'none'; }
+}
+
 function refreshTransferBadge() {
   supabase.rpc('get_pending_transfer_count').then(function(res) {
     var n = res.error ? 0 : (res.data || 0);
     var text = n > 9 ? '9+' : String(n);
 
-    var army = document.getElementById('army-badge');
-    if (army) { army.textContent = text; army.style.display = n > 0 ? 'block' : 'none'; }
+    trPendingTransfers = n;
+    paintArmyBadge();
 
     var entry = document.getElementById('tr-inbox-badge');
     if (entry) { entry.textContent = text; entry.style.display = n > 0 ? 'inline-block' : 'none'; }

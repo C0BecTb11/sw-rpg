@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="../css/faction.css">
 <link rel="stylesheet" href="../css/staff.css">
 <link rel="stylesheet" href="../css/transfer.css">
+<link rel="stylesheet" href="../css/lease.css">
 <link rel="stylesheet" href="../css/quest.css">
 <link rel="stylesheet" href="../css/supply.css">
 </head>
@@ -99,6 +100,13 @@
         <em id="tr-inbox-badge"></em>
       </button>
     </div>
+    <div class="tr-entry pl-entry-row">
+      <button id="pl-open" class="tr-entry-btn pl-entry">
+        <span class="tr-entry-ico">⚒</span>
+        <span class="tr-entry-text"><b>Аренда производства</b><i id="pl-entry-sub">казармы, заводы и верфи союзников</i></span>
+        <em id="pl-inbox-badge"></em>
+      </button>
+    </div>
   </div>
 
   <div class="army-section">
@@ -164,6 +172,19 @@
     </div>
   </div>
   <div id="tr-toast"></div>
+</div>
+
+<div id="pl-panel" style="display:none;">
+  <div id="pl-panel-box">
+    <div id="pl-panel-header">
+      <div>
+        <div id="pl-panel-title">Аренда производства</div>
+        <div id="pl-panel-subtitle">казармы, заводы, храм и верфь союзников</div>
+      </div>
+      <button id="pl-panel-close">✕</button>
+    </div>
+    <div id="pl-panel-body"></div>
+  </div>
 </div>
 
 <div id="pr-panel" style="display:none;">
@@ -332,7 +353,9 @@
 <script src="../js/profile.js"></script>
 <script src="../js/bottom-panel.js"></script>
 <script src="../js/army.js"></script>
+<script src="../js/game-confirm.js"></script>
 <script src="../js/troop-transfer.js"></script>
+<script src="../js/production-lease.js"></script>
 <script src="../js/processes.js"></script>
 <script src="../js/supply.js"></script>
 <script src="../js/ship-cargo.js"></script>
