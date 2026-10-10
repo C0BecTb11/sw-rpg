@@ -352,6 +352,12 @@ function scRenderCargo() {
       box.appendChild(row);
     });
 
+    // Пачкой высаживают только на своей планете. На чужой и ничейной
+    // сервер отклоняет такой приказ — там высадка идёт поштучно в полосу
+    // вторжения с наземной карты, поэтому кнопок пачки тут не показываем.
+    var ownPlanet = typeof sysFaction !== 'undefined' && !!sysFaction &&
+      sysFaction === scShip.faction;
+
     mine.forEach(function(h) {
       var row = document.createElement('div');
       row.className = 'sc-hangar-row';
@@ -362,7 +368,7 @@ function scRenderCargo() {
       acts.className = 'sc-hangar-acts';
 
       [1, 5].forEach(function(n) {
-        if (n > h.quantity) return;
+        if (!ownPlanet || n > h.quantity) return;
         var b = document.createElement('button');
         b.className = 'sc-hangar-btn';
         b.textContent = 'Высадить ' + n;
@@ -379,7 +385,7 @@ function scRenderCargo() {
         acts.appendChild(b);
       });
 
-      row.appendChild(acts);
+      if (acts.children.length) row.appendChild(acts);
       box.appendChild(row);
     });
 
@@ -388,6 +394,16 @@ function scRenderCargo() {
       note.className = 'sc-hangar-empty';
       note.textContent = 'На чужой планете высадка идёт поштучно с наземной карты';
       box.appendChild(note);
+
+      if (mine.length && !ownPlanet) {
+        var go = document.createElement('button');
+        go.className = 'sc-hangar-btn wide';
+        go.textContent = 'К наземной карте';
+        go.addEventListener('click', function() {
+          window.location.href = 'ground-battle.html?system=' + encodeURIComponent(systemId);
+        });
+        box.appendChild(go);
+      }
     }
 
     if (goods.length) scRenderCargoGoods(box, forShip, goods, r[3] || {});
@@ -1008,7 +1024,7 @@ function scRenderGhost() {
   var box = scBox(scType, scShip.facing);
 
   var el = document.createElement('div');
-  el.className = 'sc-ghost';
+  el.className = 'sc-ghost' + (scPreviewBlocked() ? ' blocked' : '');
   el.style.left = (scPreview.x * CELL_PX) + 'px';
   el.style.top = (scPreview.y * CELL_PX) + 'px';
   el.style.width = (box.w * CELL_PX) + 'px';
@@ -1125,8 +1141,19 @@ function scBusy(on) {
   for (var i = 0; i < dirs.length; i++) dirs[i].disabled = on;
 }
 
+// Действие ещё копится — заведомо отклонённый приказ не шлём, а сразу
+// говорим, сколько ждать. Счётчик тот же, что в spend_ship_action.
+function scHasAp() {
+  if (!scShip) return false;
+  var st = scApState(scShip);
+  if (st.ap >= 1) return true;
+  scFail('Действие ещё не восстановилось: осталось ' + st.nextIn + ' с');
+  return false;
+}
+
 function scDoRotate(deg) {
   if (!scShip || deg === scShip.facing) return;
+  if (!scHasAp()) return;
   scBusy(true);
   supabase.rpc('rotate_ship', { p_ship_id: scShip.id, p_facing: deg }).then(function(res) {
     scBusy(false);
@@ -1168,8 +1195,36 @@ function scAimAt(cx, cy) {
   scRenderMode();
 }
 
+// Точка уже занята тем, что видно на карте: чужим или своим корпусом
+// либо станцией. Та же проверка пересечения, что в is_ship_box_free.
+// Невидимых в тумане кораблей клиент не знает — их по-прежнему
+// отсекает сервер, ничего не раскрывая.
+function scPreviewBlocked() {
+  if (!scPreview || !scShip || !scType) return false;
+  var me = scBox(scType, scShip.facing);
+  var hit = function(x, y, w, h) {
+    return scPreview.x < x + w && x < scPreview.x + me.w &&
+           scPreview.y < y + h && y < scPreview.y + me.h;
+  };
+  var list = (typeof shipsInSystem !== 'undefined' && shipsInSystem) || [];
+  for (var i = 0; i < list.length; i++) {
+    var o = list[i];
+    if (o.id === scShip.id || o.carrier_ship_id || o.in_transit) continue;
+    if (o.x === null || o.x === undefined || o.y === null || o.y === undefined) continue;
+    var ot = (typeof shipTypeById !== 'undefined') ? shipTypeById[o.ship_type] : null;
+    if (!ot) continue;
+    var ob = scBox(ot, o.facing);
+    if (hit(o.x, o.y, ob.w, ob.h)) return true;
+  }
+  if (typeof stationSlot !== 'undefined' && stationSlot && stationSlot.size &&
+      hit(stationSlot.x, stationSlot.y, stationSlot.size, stationSlot.size)) return true;
+  return false;
+}
+
 function scConfirmMove() {
   if (!scPreview) return;
+  if (scPreviewBlocked()) { scFail('Место занято — выбери точку рядом'); return; }
+  if (!scHasAp()) return;
   var target = scPreview;
 
   scBusy(true);
@@ -1294,6 +1349,7 @@ function scLog(kind, title, details) {
 }
 
 function scDoAttack(target, btn) {
+  if (!scHasAp()) return;
   if (btn) btn.disabled = true;
 
   // Стрелка запоминаем до запроса: к ответу выбор мог смениться.

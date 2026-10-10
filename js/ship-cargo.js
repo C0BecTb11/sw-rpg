@@ -180,9 +180,16 @@ function renderCargo() {
   Promise.all([
     supabase.rpc('get_ship_holds'),
     supabase.rpc('get_carried_units', { p_carrier_unit_id: null, p_ship_id: cargoShip.id }),
-    supabase.rpc('get_ship_resource_cargo', { p_ship_id: cargoShip.id })
+    supabase.rpc('get_ship_resource_cargo', { p_ship_id: cargoShip.id }),
+    supabase.from('systems').select('faction').eq('id', cargoShip.system_id).maybeSingle()
   ]).then(function(r) {
+    if (!cargoShip) return;
     var list = document.getElementById('shipcargo-list');
+
+    // Пехоту пачкой высаживают только на своей планете. На чужой сервер
+    // такой приказ отклонит: там высадка поштучно, в полосу вторжения
+    var sys = (!r[3].error && r[3].data) ? r[3].data : null;
+    var ownPlanet = !!(sys && sys.faction && sys.faction === cargoShip.faction);
 
     var holds = (!r[0].error && r[0].data) ? r[0].data : [];
     var mine = holds.filter(function(h) { return h.ship_id === cargoShip.id; });
@@ -202,11 +209,23 @@ function renderCargo() {
       list.appendChild(makeVehicleCargoRow(v));
     });
 
-    mine.filter(function(h) { return !h.is_vehicle; }).forEach(function(h) {
-      list.appendChild(makeShipCargoRow({
+    var infantry = mine.filter(function(h) { return !h.is_vehicle; });
+    infantry.forEach(function(h) {
+      var row = makeShipCargoRow({
         unit_type: h.unit_type, name: h.unit_name, image: h.unit_image
-      }, h.quantity, 'Высадить', h.slots / Math.max(1, h.quantity)));
+      }, h.quantity, 'Высадить', h.slots / Math.max(1, h.quantity));
+      if (!ownPlanet) {
+        var ctl = row.querySelector('.cargo-controls');
+        if (ctl) ctl.parentNode.removeChild(ctl);
+      }
+      list.appendChild(row);
     });
+    if (infantry.length && !ownPlanet) {
+      var note = document.createElement('div');
+      note.className = 'cargo-empty';
+      note.textContent = 'На чужой планете пехоту высаживают поштучно — с наземной карты, в полосу вторжения';
+      list.appendChild(note);
+    }
 
     if (cargoRes.length) {
       list.appendChild(makeCargoSection('Груз'));

@@ -5264,6 +5264,9 @@ function drawMoveCells() {
 }
 
 function handleGroundMoveTap(cellX, cellY) {
+  // Тап по своей же клетке — это «передумал», а не приказ: сервер ответил
+  // бы «Юнит уже здесь», и действие всё равно не потратилось бы
+  if (cellX === movingUnit.x && cellY === movingUnit.y) { cancelGroundMove(); return; }
   supabase.rpc('move_ground_unit', {
     p_unit_id: movingUnit.id, p_x: cellX, p_y: cellY
   }).then(function(r) {
@@ -5302,13 +5305,12 @@ function loadDropCargo() {
     });
 }
 
-// Кнопка высадки. Показываем через visibility, а не display: элемент
-// остаётся в раскладке, и его появление не заставляет браузер заново
-// растрировать лежащий под ним холст.
-// Десант и техника — только на чужой планете: своя высадка идёт пачкой
-// через панель трюма в космосе. Истребители садятся и на своей: ангар
-// это не десант, а способ вернуть машину на грунт. Раньше кнопка
-// пряталась на своей планете целиком, и «На грунт» вело в тупик.
+// Кнопка высадки (красная) — только для вторжения на чужую планету.
+// Показываем через visibility, а не display: элемент остаётся в раскладке,
+// и его появление не заставляет браузер заново растрировать холст.
+// На своей планете кнопки нет: войска высаживают пачкой из трюма в космосе,
+// а истребитель садится по «На грунт» из ангара — оттуда сразу открывается
+// режим посадки (ссылка &land=), список ему не нужен.
 function dropListFor() {
   var invading = iAmAttacker === true;
   return {
@@ -5323,7 +5325,7 @@ function updateDropBtn() {
   if (!btn) return;
   var busy = droppingUnit || droppingVehicle || landingFighter;
   var l = dropListFor();
-  var show = !busy && iAmAttacker !== null &&
+  var show = !busy && iAmAttacker === true &&
              (l.fighters.length + l.vehicles.length + l.cargo.length) > 0;
   btn.style.visibility = show ? 'visible' : 'hidden';
 }
