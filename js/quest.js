@@ -610,7 +610,12 @@
             targets: [{ cell: function() { return laid; }, tip: 'Стройка идёт — дождись' }]
           };
         }
+        // Окно «Точно?» по нужной постройке открыто — кольцо на его кнопку,
+        // а не на карточку под ним. Чужое окно (снос, другая постройка) не трогаем.
         var chain = [];
+        codes.forEach(function(c) {
+          chain.push({ sel: '#gc-confirm.open[data-tag="' + c + '"] .gc-ok', tip: 'Подтверди' });
+        });
         codes.forEach(function(c) {
           chain.push({ sel: '#build-panel .build-panel-item[data-code="' + c + '"]', tip: 'Строй', scroll: true });
         });
@@ -930,6 +935,8 @@
         }
         if (qSpotTarget) break;
       } else if (t.cell && QPAGE === 'ground') {
+        // Клетки карты под открытым окном подтверждения не подсвечиваем
+        if (document.getElementById('gc-confirm')) continue;
         var c = t.cell();
         if (!c) continue;
         var rr = qCellRect(c);

@@ -405,6 +405,12 @@ function stlArtHtml(id, icon, image, cls, overlay) {
     (overlay || '') + '</div>';
 }
 
+// Та же картинка квартала, что на плитке; не нашлась там — не тянем и в окно
+function stlArtSrc(id, image) {
+  var path = image || ('assets/districts/' + id + '.png');
+  return stlImgFailed[path] ? null : '../' + path;
+}
+
 function stlImgLoad(img) {
   stlImgOk[img.getAttribute('data-stl-img')] = true;
   if (img.parentNode) img.parentNode.classList.add('has-img');
@@ -905,7 +911,7 @@ function stlDistrictsHtml(L) {
   html += '</div>';
 
   html += '<div class="stl-hint">Квартал строится за кредиты и сырьё со склада планеты. ' +
-    'Снос возвращает четверть кредитов.</div>';
+    'Снос возвращает половину кредитов и сырья.</div>';
   return html;
 }
 
@@ -1123,23 +1129,38 @@ function stlOnClick(e) {
   if (act === 'upgrade') {
     if (!d.can_upgrade || !d.next) return;
     var nx = d.next;
-    var res = stlResCost(nx.resources, null);
-    var plain = res.html.replace(/<[^>]+>/g, '');
-    if (!confirm('Расширить поселение до «' + nx.name + '»?\n\n' +
-        'Спишется: ' + (nx.credits || 0) + ' кр.' + (plain ? ' · ' + plain : '') + '\n' +
-        'Стройка займёт ' + stlDur(nx.seconds || 0) + '.')) return;
-    stlAction(el, 'start_settlement_upgrade', { p_system_id: systemId });
+    stlAsk({
+      tone: 'build',
+      kicker: 'Подтверди расширение',
+      title: 'Поселение → «' + nx.name + '»',
+      sub: 'Уровень ' + (STL_ROMAN[nx.level] || nx.level) +
+           (nx.seconds ? ' · стройка ' + stlDur(nx.seconds) : ''),
+      rows: [{ label: 'Спишется', items: stlCostItems(nx.credits, nx.resources, d.stock) }],
+      note: 'Пока идёт расширение, кварталы работают как обычно.',
+      ok: 'Расширить'
+    }, function() {
+      stlAction(el, 'start_settlement_upgrade', { p_system_id: systemId });
+    }, 'Расширить поселение до «' + nx.name + '»?\n\nСтройка займёт ' + stlDur(nx.seconds || 0) + '.');
     return;
   }
 
   if (act === 'build') {
     var t = stlDistrictType(el.getAttribute('data-id'));
     if (!t || !stlPicker) return;
-    var rc = stlResCost(t.cost_resources, null).html.replace(/<[^>]+>/g, '');
-    if (!confirm('Заложить «' + t.name + '» на участке ' + stlPicker + '?\n\n' +
-        'Спишется: ' + (t.cost_credits || 0) + ' кр.' + (rc ? ' · ' + rc : '') + '\n' +
-        'Стройка займёт ' + stlDur(t.build_seconds || 0) + '.')) return;
-    stlAction(el, 'build_district', { p_system_id: systemId, p_slot: stlPicker, p_district: t.id });
+    var pickSlot = stlPicker;
+    stlAsk({
+      tone: 'build',
+      kicker: 'Подтверди стройку',
+      title: t.name,
+      image: stlArtSrc(t.id, t.image),
+      sub: 'Участок ' + (pickSlot < 10 ? '0' : '') + pickSlot +
+           (t.build_seconds ? ' · стройка ' + stlDur(t.build_seconds) : ''),
+      rows: [{ label: 'Спишется', items: stlCostItems(t.cost_credits, t.cost_resources, d.stock) }],
+      note: 'Если потом снести — вернётся половина кредитов и сырья.',
+      ok: 'Заложить'
+    }, function() {
+      stlAction(el, 'build_district', { p_system_id: systemId, p_slot: pickSlot, p_district: t.id });
+    }, 'Заложить «' + t.name + '» на участке ' + pickSlot + '?');
     return;
   }
 
@@ -1147,10 +1168,58 @@ function stlOnClick(e) {
     var slot = parseInt(el.getAttribute('data-slot'), 10);
     var x = (d.districts || []).filter(function(q) { return q.slot === slot; })[0];
     if (!x) return;
-    if (!confirm('Снести «' + x.name + '» на участке ' + slot + '?\n\n' +
-        'Вернётся четверть потраченных кредитов, сырьё не возвращается.')) return;
-    stlAction(el, 'demolish_district', { p_system_id: systemId, p_slot: slot });
+    var xt = stlDistrictType(x.id) || {};
+    var doDemolish = function() {
+      stlAction(el, 'demolish_district', { p_system_id: systemId, p_slot: slot });
+    };
+    if (!gcReady()) {
+      if (confirm('Снести «' + (x.name || xt.name) + '» на участке ' + slot + '?')) doDemolish();
+      return;
+    }
+    loadPlanetStock(function() {
+      // Панель закрыли, пока грузился склад — окно не всплывает само по себе
+      var sp = document.getElementById('settlement-panel');
+      if (!sp || sp.style.display === 'none') return;
+      // Снесённые склады перестают расширять предел ещё до возврата сырья
+      var drop = (x.id === 'warehouses' && !(x.building && x.seconds_left > 0))
+        ? Number(xt.effect_value) || 0 : 0;
+      var r = gcRefund(Math.floor((xt.cost_credits || 0) / 2), xt.cost_resources, 1, 2, drop);
+      gameConfirm({
+        tone: 'danger',
+        kicker: 'Подтверди снос',
+        title: x.name || xt.name || 'Квартал',
+        image: stlArtSrc(x.id, xt.image),
+        sub: 'Участок ' + (slot < 10 ? '0' : '') + slot,
+        rows: [{ label: 'Вернётся', dir: 'in', items: r.items }],
+        warn: gcJoin(gcCapWarn(drop), gcLostWarn(r)),
+        note: 'Квартал исчезнет сразу вместе со своим эффектом — отменить снос нельзя.',
+        ok: 'Снести'
+      }, doDemolish);
+    });
   }
+}
+
+// Цена квартала или расширения: склад поселения приходит вместе с панелью
+function stlCostItems(credits, res, stock) {
+  var items = [];
+  if (credits) items.push({ kind: 'credits', text: credits + ' кр.' });
+  for (var k in (res || {})) {
+    if (!Object.prototype.hasOwnProperty.call(res, k)) continue;
+    var need = Number(res[k]) || 0;
+    if (!need) continue;
+    items.push({
+      text: resourceName(k) + ' ' + need,
+      color: gcResColor(k),
+      bad: !!stock && (Number(stock[k]) || 0) < need
+    });
+  }
+  return items;
+}
+
+// Окно подтверждения, а без него — прежний системный вопрос
+function stlAsk(o, go, plain) {
+  if (gcReady()) { gameConfirm(o, go); return; }
+  if (confirm(plain)) go();
 }
 
 function stlAction(btn, fn, args) {
@@ -2584,7 +2653,16 @@ function onSlotTapped(slotIndex) {
 // Карточка существующей постройки: название и снос за половину стоимости
 // (возврат считается на сервере функцией demolish_building, клиент не может
 // подменить сумму возврата).
+var buildingInfoSeq = 0;        // какая карточка открыта: поздние ответы к чужой не липнут
+var buildingDemolishBusy = false;
+
+function buildingInfoShown() {
+  var p = document.getElementById('building-info-panel');
+  return !!p && p.style.display !== 'none';
+}
+
 function openBuildingInfo(building) {
+  var seq = ++buildingInfoSeq;
   var panel = document.getElementById('building-info-panel');
   var nameEl = document.getElementById('building-info-name');
   var refundEl = document.getElementById('building-info-refund');
@@ -2601,7 +2679,9 @@ function openBuildingInfo(building) {
     refundEl.textContent = 'Трофейная постройка. Снос обойдётся в ' + half;
     refundEl.style.display = 'block';
   } else if (isController) {
-    refundEl.textContent = 'При сносе вернётся: ' + half;
+    var fullType = buildingTypeByCode(type.code);
+    var hasRes = fullType && fullType.cost_resources && Object.keys(fullType.cost_resources).length > 0;
+    refundEl.textContent = 'При сносе вернётся: ' + half + ' кр.' + (hasRes ? ' и половина сырья' : '');
     refundEl.style.display = 'block';
   } else {
     refundEl.textContent = '';
@@ -2622,16 +2702,32 @@ function openBuildingInfo(building) {
   }
 
   demolishBtn.style.display = isController ? 'block' : 'none';
+  demolishBtn.disabled = buildingDemolishBusy;
   demolishBtn.onclick = function() {
-    demolishBtn.disabled = true;
-    supabase.rpc('demolish_building', { p_building_id: building.id }).then(function(res) {
-      demolishBtn.disabled = false;
-      closeBuildingInfo();
-      if (res.error) {
-        alert('Не удалось снести: ' + res.error.message);
-        return;
-      }
-      loadBuildings();
+    if (demolishBtn.disabled || buildingDemolishBusy) return;
+    askDemolishBuilding(building, captured && isController, function() {
+      if (buildingDemolishBusy) return;
+      buildingDemolishBusy = true;
+      demolishBtn.disabled = true;
+      var finish = function() {
+        buildingDemolishBusy = false;
+        demolishBtn.disabled = false;
+        // Закрываем только свою карточку, а не ту, что открыли следом
+        if (seq === buildingInfoSeq) closeBuildingInfo();
+      };
+      supabase.rpc('demolish_building', { p_building_id: building.id }).then(function(res) {
+        finish();
+        if (res.error) {
+          alert('Не удалось снести: ' + res.error.message);
+          return;
+        }
+        loadBuildings();
+        // Возвращённое сырьё сразу видно в полосе запаса при следующей стройке
+        loadPlanetStock();
+      }, function(e) {
+        finish();
+        alert('Не удалось снести: ' + ((e && e.message) || 'нет связи с сервером'));
+      });
     });
   };
 
@@ -3120,7 +3216,7 @@ function renderBuildCards(slotIndex, panel, list) {
         alert('На этой планете нет такого сырья');
         return;
       }
-      constructBuilding(slotIndex, type.id);
+      askConstructBuilding(slotIndex, type);
     });
     list.appendChild(item);
   });
@@ -3137,18 +3233,174 @@ function closeBuildPanel() {
 // Строительство идёт через защищённую серверную функцию: она сама проверяет
 // права контролёра, берёт цену из БД и списывает кредиты одной транзакцией —
 // клиент не может подменить ни цену, ни права.
+var constructBusy = false;   // запрос ушёл: второй тап по карточке не шлём
+
 function constructBuilding(slotIndex, buildingTypeId) {
+  if (constructBusy) return;
+  constructBusy = true;
   supabase.rpc('construct_building', {
     p_system_id: systemId,
     p_slot_index: slotIndex,
     p_building_type_id: buildingTypeId
   }).then(function(res) {
+    constructBusy = false;
     closeBuildPanel();
     if (res.error) {
       alert('Не удалось построить: ' + res.error.message);
       return;
     }
     loadBuildings();
+  }, function(e) {
+    constructBusy = false;
+    alert('Не удалось построить: ' + ((e && e.message) || 'нет связи с сервером'));
+  });
+}
+
+// ===== Подтверждение стройки и сноса =====
+// Окно «Точно?» (js/game-confirm.js) показывает цену и возврат по тем же
+// правилам, что на сервере: снос своего возвращает половину кредитов и
+// половину сырья (укрепление — урезанную по прочности), а сырьё сверх
+// вместимости склада пропадает. Окна нет (старая страница без скрипта) —
+// действие идёт сразу, как раньше.
+
+function gcReady() {
+  return typeof gameConfirm === 'function';
+}
+
+function gcResColor(key) {
+  var row = stockRow(key);
+  return resourceColors[key] || (row && row.color) || null;
+}
+
+// «Спишется»: кредиты и сырьё со склада, нехватку подсвечиваем красным
+function gcCostItems(credits, res) {
+  var items = [];
+  if (credits) items.push({ kind: 'credits', text: credits + ' кр.' });
+  for (var k in (res || {})) {
+    if (!Object.prototype.hasOwnProperty.call(res, k)) continue;
+    var need = Number(res[k]) || 0;
+    if (!need) continue;
+    var row = stockRow(k);
+    items.push({
+      text: resourceName(k) + ' ' + need,
+      color: gcResColor(k),
+      bad: planetStock.length > 0 && (!row || row.amount < need)
+    });
+  }
+  return items;
+}
+
+// «Вернётся»: часть сырья, которая влезет на склад; остальное — зачёркнутым.
+// Доля — дробью num/den и целочисленно, как на сервере (половина — 1/2,
+// укрепление — hp / (2 * max_hp)). capDrop — на сколько упадёт предел
+// склада после сноса (склады, хранилище): сервер кладёт сырьё уже после.
+function gcRefund(credits, res, num, den, capDrop) {
+  var out = { items: [], lost: [], unknown: false };
+  if (credits) out.items.push({ kind: 'credits', text: '+' + credits + ' кр.' });
+  // Склад видит только управляющий: без сведений не обещаем, что влезет
+  var known = planetStock.length > 0;
+  var cap0 = known ? Number(planetStock[0].cap) || 0 : 0;
+  den = Math.max(1, den || 1);
+  for (var k in (res || {})) {
+    if (!Object.prototype.hasOwnProperty.call(res, k)) continue;
+    var amt = Math.floor((Number(res[k]) || 0) * (num || 0) / den);
+    if (amt <= 0) continue;
+    if (!known) {
+      out.unknown = true;
+      out.items.push({ text: resourceName(k) + ' до +' + amt, color: gcResColor(k) });
+      continue;
+    }
+    var row = stockRow(k);
+    var cap = Math.max(0, (row ? Number(row.cap) || cap0 : cap0) - (capDrop || 0));
+    var fit = Math.max(0, Math.min(amt, cap - (row ? Number(row.amount) || 0 : 0)));
+    if (fit > 0) out.items.push({ text: resourceName(k) + ' +' + fit, color: gcResColor(k) });
+    if (fit < amt) {
+      out.items.push({ text: resourceName(k) + ' ' + (amt - fit), lost: true });
+      out.lost.push(resourceName(k).toLowerCase() + ' ' + (amt - fit));
+    }
+  }
+  return out;
+}
+
+function gcLostWarn(r) {
+  if (r.lost.length) return 'Склад полон: ' + r.lost.join(', ') + ' не поместится и пропадёт.';
+  if (r.unknown) return 'Сырьё ляжет на склад планеты — что не поместится в предел, пропадёт.';
+  return '';
+}
+
+// Достроенное здание или квартал, которые прибавляют к пределу склада
+function gcCapWarn(drop) {
+  return drop > 0 ? 'Предел склада планеты упадёт на ' + drop + '.' : '';
+}
+
+function gcJoin(a, b) {
+  return a && b ? a + ' ' + b : (a || b || '');
+}
+
+function buildingTypeByCode(code) {
+  for (var i = 0; i < buildingTypes.length; i++) {
+    if (buildingTypes[i].code === code) return buildingTypes[i];
+  }
+  return null;
+}
+
+function askConstructBuilding(slotIndex, type) {
+  if (!gcReady()) { constructBuilding(slotIndex, type.id); return; }
+  if (constructBusy) return;
+  var res = type.cost_resources || {};
+  gameConfirm({
+    tone: 'build',
+    tag: type.code,
+    kicker: 'Подтверди стройку',
+    title: type.name,
+    image: type.image ? '../' + type.image : null,
+    sub: 'Участок ' + slotIndex,
+    rows: [{ label: 'Спишется', items: gcCostItems(type.cost, res) }],
+    note: 'Если потом снести — вернётся половина кредитов' +
+          (Object.keys(res).length ? ' и сырья.' : '.'),
+    ok: 'Построить'
+  }, function() { constructBuilding(slotIndex, type.id); });
+}
+
+// Снос здания: склад перечитываем, чтобы честно сказать, что не влезет
+function askDemolishBuilding(building, captured, go) {
+  if (!gcReady()) { go(); return; }
+  var bt = building.building_types || {};
+  var full = buildingTypeByCode(bt.code) || {};
+  var half = Math.floor((bt.cost || full.cost || 0) / 2);
+
+  if (captured) {
+    gameConfirm({
+      tone: 'danger',
+      kicker: 'Подтверди снос',
+      title: bt.name || 'Постройка',
+      image: bt.image ? '../' + bt.image : null,
+      sub: 'Трофейная постройка · участок ' + building.slot_index,
+      rows: [{ label: 'Спишется', items: [{ kind: 'credits', text: half + ' кр.' }] }],
+      note: 'Расчистка чужой постройки платная. Вернуть её будет нельзя.',
+      ok: 'Снести'
+    }, go);
+    return;
+  }
+
+  var seq = buildingInfoSeq;
+  loadPlanetStock(function() {
+    // Пока склад грузился, карточку закрыли или открыли другую — молчим
+    if (seq !== buildingInfoSeq || !buildingInfoShown()) return;
+    var done = !building.completes_at || new Date(building.completes_at).getTime() <= Date.now();
+    var drop = done ? Number(full.storage_bonus) || 0 : 0;
+    var r = gcRefund(half, full.cost_resources, 1, 2, drop);
+    gameConfirm({
+      tone: 'danger',
+      kicker: 'Подтверди снос',
+      title: bt.name || 'Постройка',
+      image: bt.image ? '../' + bt.image : null,
+      sub: 'Участок ' + building.slot_index,
+      rows: [{ label: 'Вернётся', dir: 'in', items: r.items }],
+      warn: gcJoin(gcCapWarn(drop), gcLostWarn(r)),
+      note: 'Постройка исчезнет сразу — отменить снос нельзя.',
+      ok: 'Снести'
+    }, go);
   });
 }
 
@@ -8158,6 +8410,28 @@ function handleStructurePlacementTap(cellX, cellY) {
 function confirmStructurePlacement() {
   var p = placingStructure;
   if (!p || !p.preview || p.preview.problem) return;
+  if (!gcReady()) { sendStructurePlacement(); return; }
+  var st = p.type;
+  gameConfirm({
+    tone: 'build',
+    kicker: 'Подтверди стройку',
+    title: st.name,
+    image: st.image ? '../' + st.image : null,
+    sub: st.width_cells + '×' + st.height_cells + ' · клетка ' + p.preview.x + ':' + p.preview.y +
+         (st.build_seconds ? ' · ' + formatBuildTime(st.build_seconds) : ''),
+    rows: [{ label: 'Спишется', items: gcCostItems(st.cost, st.cost_resources) }],
+    note: 'Инженер потратит действие. Разобрать можно потом — вернётся половина, ' +
+          'если укрепление цело.',
+    ok: 'Построить'
+  }, function() {
+    // Пока окно было открыто, постановку могли отменить или сдвинуть
+    if (placingStructure === p && p.preview && !p.preview.problem) sendStructurePlacement();
+  });
+}
+
+function sendStructurePlacement() {
+  var p = placingStructure;
+  if (!p || !p.preview || p.preview.problem) return;
   var go = document.getElementById('area-go');
   if (go) go.disabled = true;
 
@@ -8241,19 +8515,52 @@ function openStructurePanel(s, keepView) {
 
   if (side === 'mine') {
     // Как на сервере: половина цены, урезанная по целости постройки
-    var whole = st.max_hp ? Math.max(0, Math.min(1, s.hp / st.max_hp)) : 1;
-    var back = Math.floor((st.cost || 0) / 2 * whole);
+    // Целочисленно: cost * hp / (2 * max_hp), остаток отбрасывается
+    var maxHp = Math.max(1, st.max_hp || s.hp || 1);
+    var hpNow = Math.max(0, Math.min(s.hp || 0, maxHp));
+    var whole = hpNow / maxHp;
+    var back = Math.floor((st.cost || 0) * hpNow / (2 * maxHp));
     var btn = document.createElement('button');
     btn.className = 'gu-abil-go struct-demolish';
     btn.textContent = 'Разобрать · вернётся ' + back + ' кр.';
     btn.addEventListener('click', function() {
-      if (!confirm('Разобрать «' + st.name + '»? Вернётся ' + back + ' кр.')) return;
-      btn.disabled = true;
-      supabase.rpc('demolish_structure', { p_id: s.id }).then(function(res) {
-        if (res.error) { btn.disabled = false; alert(res.error.message); return; }
-        selectedStructure = null;
-        hidePickup();
-        loadStructures();
+      if (btn.disabled) return;
+      var go = function() {
+        btn.disabled = true;
+        supabase.rpc('demolish_structure', { p_id: s.id }).then(function(res) {
+          if (res.error) { btn.disabled = false; alert(res.error.message); return; }
+          selectedStructure = null;
+          hidePickup();
+          loadStructures();
+          loadPlanetStock();
+        }, function(e) {
+          btn.disabled = false;
+          alert((e && e.message) || 'нет связи с сервером');
+        });
+      };
+      if (!gcReady()) {
+        if (confirm('Разобрать «' + st.name + '»? Вернётся ' + back + ' кр.')) go();
+        return;
+      }
+      // Сырьё возвращается на склад только своей планеты — как на сервере
+      var ownPlanet = !!myFaction && sysFaction === myFaction;
+      loadPlanetStock(function() {
+        // Пока склад грузился, выбрали другое или закрыли панель
+        if (!selectedStructure || selectedStructure.id !== s.id) return;
+        var r = gcRefund(back, ownPlanet ? st.cost_resources : null, hpNow, 2 * maxHp, 0);
+        gameConfirm({
+          tone: 'danger',
+          kicker: 'Подтверди разбор',
+          title: st.name || 'Укрепление',
+          image: st.image ? '../' + st.image : null,
+          sub: s.w + '×' + s.h + ' · клетка ' + s.x + ':' + s.y + ' · прочность ' + s.hp + ' / ' + (st.max_hp || s.hp),
+          rows: [{ label: 'Вернётся', dir: 'in', items: r.items.length ? r.items : [{ text: 'ничего', lost: true }] }],
+          warn: gcJoin(whole < 1
+            ? 'Укрепление повреждено — возврат урезан по прочности (' + Math.floor(whole * 100) + '%).'
+            : '', gcLostWarn(r)),
+          note: 'Укрепление исчезнет сразу — отменить разбор нельзя.',
+          ok: 'Разобрать'
+        }, go);
       });
     });
     document.getElementById('struct-actions').appendChild(btn);

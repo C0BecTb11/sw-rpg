@@ -185,6 +185,72 @@ function closeStationPanel() {
   document.getElementById('station-panel').style.display = 'none';
 }
 
+// Цена станции — из справочника построек по фракции (как считает сервер).
+// Кэшируем: справочник за игру не меняется.
+var stationCostCache = {};
+
+function stationCost(faction, done) {
+  if (!faction) { done(null); return; }
+  if (stationCostCache[faction] !== undefined) { done(stationCostCache[faction]); return; }
+  supabase.from('building_types').select('cost, image').eq('is_space', true).eq('faction', faction)
+    .limit(1).then(function(res) {
+      var row = (!res.error && res.data && res.data[0]) || null;
+      stationCostCache[faction] = row ? { cost: row.cost, image: row.image } : null;
+      done(stationCostCache[faction]);
+    }, function() { done(null); });
+}
+
+function askStation(kind) {
+  var btnId = kind === 'build' ? 'station-build-btn' : 'station-demolish-btn';
+  var btn = document.getElementById(btnId);
+  if (btn && btn.disabled) return;
+  var go = kind === 'build' ? buildStation : demolishStation;
+  if (typeof gameConfirm !== 'function') { go(); return; }
+
+  var fac = kind === 'build' ? spaceMyFaction : (stationRecord && stationRecord.faction);
+  var captured = kind !== 'build' && sysFaction && stationRecord && stationRecord.faction &&
+                 stationRecord.faction !== sysFaction;
+  if (btn) btn.disabled = true;
+
+  stationCost(fac, function(info) {
+    if (btn) btn.disabled = false;
+    // Пока ждали цену, панель станции закрыли — окно само не всплывает
+    var sp = document.getElementById('station-panel');
+    if (!sp || sp.style.display === 'none') return;
+    var cost = info ? info.cost : 5000;
+    var half = Math.floor(cost / 2);
+    var art = STATION_IMAGES[fac] || (info && info.image) || null;
+    var img = art ? '../' + art : null;
+    var o;
+    if (kind === 'build') {
+      o = {
+        tone: 'build', kicker: 'Подтверди стройку', title: 'Космическая станция',
+        image: img, sub: 'Верфь и оборона на орбите',
+        rows: [{ label: 'Спишется', items: [{ kind: 'credits', text: cost + ' кр.' }] }],
+        note: 'Если потом снести — вернётся половина цены.',
+        ok: 'Построить'
+      };
+    } else if (captured) {
+      o = {
+        tone: 'danger', kicker: 'Подтверди снос', title: (stationRecord && stationRecord.name) || 'Космическая станция',
+        image: img, sub: 'Трофейная станция',
+        rows: [{ label: 'Спишется', items: [{ kind: 'credits', text: half + ' кр.' }] }],
+        note: 'Расчистка чужой станции платная. Вернуть её будет нельзя.',
+        ok: 'Снести'
+      };
+    } else {
+      o = {
+        tone: 'danger', kicker: 'Подтверди снос', title: (stationRecord && stationRecord.name) || 'Космическая станция',
+        image: img, sub: 'Вместе со станцией пропадёт верфь',
+        rows: [{ label: 'Вернётся', dir: 'in', items: [{ kind: 'credits', text: '+' + half + ' кр.' }] }],
+        note: 'Станция исчезнет сразу — отменить снос нельзя.',
+        ok: 'Снести'
+      };
+    }
+    gameConfirm(o, go);
+  });
+}
+
 function buildStation() {
   var btn = document.getElementById('station-build-btn');
   btn.disabled = true;
@@ -649,10 +715,10 @@ function initSpaceBattle() {
   if (stationPanelClose) stationPanelClose.addEventListener('click', closeStationPanel);
 
   var stationBuildBtn = document.getElementById('station-build-btn');
-  if (stationBuildBtn) stationBuildBtn.addEventListener('click', buildStation);
+  if (stationBuildBtn) stationBuildBtn.addEventListener('click', function() { askStation('build'); });
 
   var stationDemolishBtn = document.getElementById('station-demolish-btn');
-  if (stationDemolishBtn) stationDemolishBtn.addEventListener('click', demolishStation);
+  if (stationDemolishBtn) stationDemolishBtn.addEventListener('click', function() { askStation('demolish'); });
 
   loadFighterInfo();
 
