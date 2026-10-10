@@ -248,6 +248,119 @@ function scRenderHud() {
   scRenderCommander();
   scRenderAp();
   scRenderMode();
+  scOverwatchStrip();
+  scRenderOwZone();
+}
+
+// ===== На чеку =====
+
+var scOwInfoKey = null;
+
+function scRenderOverwatchInfo(info) {
+  if (!info || !scShip || !scType) return;
+  var on = !!scShip.overwatch;
+  scOwInfoKey = scShip.id + ':' + on;
+  info.innerHTML = owInfoHtml(on, owReachShip(scShip, scType), null, 'sc');
+  var go = document.createElement('button');
+  go.className = 'sc-btn sc-btn-go ow-go' + (on ? ' off' : '');
+  go.textContent = on ? 'Снять с чеку' : 'Встать на чеку';
+  go.addEventListener('click', function() {
+    go.disabled = true;
+    scSetOverwatch(!on);
+  });
+  info.appendChild(go);
+}
+
+function scSetOverwatch(on) {
+  if (!scShip || typeof owSet !== 'function') return;
+  var id = scShip.id;
+  owSet('space', [id], on, function(err) {
+    if (err) {
+      scFail(err);
+      if (scShip && scShip.id === id) scRenderTiles();
+      return;
+    }
+    shipsInSystem.forEach(function(x) { if (x.id === id) x.overwatch = !!on; });
+    if (scShip && scShip.id === id) {
+      scShip.overwatch = !!on;
+      sxFloatOnShip(scShip, on ? 'на чеку' : 'отбой', on ? 'ow' : 'miss');
+      scSetMode(null);
+      scRenderHud();
+    }
+    if (typeof renderShips === 'function') renderShips();
+    // Включение сняло автоход — его отметки перечитываем
+    if (on && typeof amLoadSoon === 'function') amLoadSoon(200);
+    if (typeof loadShips === 'function') loadShips();
+  });
+}
+
+// Строка «На чеку» под очками действий
+function scOverwatchStrip() {
+  var old = document.getElementById('sc-ow-strip');
+  if (!scShip || !scShip.overwatch || typeof owStripHtml !== 'function') {
+    if (old) old.parentNode.removeChild(old);
+    return;
+  }
+  var strip = old;
+  if (!strip) {
+    var apRow = document.getElementById('sc-ap');
+    if (!apRow) return;
+    strip = document.createElement('div');
+    strip.id = 'sc-ow-strip';
+    strip.className = 'ow-strip';
+    apRow.parentNode.insertBefore(strip, apRow.nextSibling);
+  }
+  strip.innerHTML = owStripHtml(owReachShip(scShip, scType));
+  var off = strip.querySelector('[data-ow="off"]');
+  if (off) off.addEventListener('click', function() {
+    off.disabled = true;
+    scSetOverwatch(false);
+  });
+}
+
+// Зона огня выбранного корабля на чеку — габарит, раздутый на дальность
+var scOwZoneEl = null;
+function scRenderOwZone() {
+  if (scOwZoneEl && scOwZoneEl.parentNode) scOwZoneEl.parentNode.removeChild(scOwZoneEl);
+  scOwZoneEl = null;
+  if (!scShip || !scType || !scShip.overwatch || typeof owReachShip !== 'function') return;
+  if (typeof grid === 'undefined' || !grid) return;
+  var r = owReachShip(scShip, scType);
+  if (!r) return;
+  var box = scBox(scType, scShip.facing);
+  var el = document.createElement('div');
+  el.className = 'ow-zone';
+  el.style.left = ((scShip.x - r) * CELL_PX) + 'px';
+  el.style.top = ((scShip.y - r) * CELL_PX) + 'px';
+  el.style.width = ((box.w + r * 2) * CELL_PX) + 'px';
+  el.style.height = ((box.h + r * 2) * CELL_PX) + 'px';
+  // Под кораблями, а не поверх: заливка не должна мутить спрайты
+  grid.insertBefore(el, grid.querySelector('.ship-sprite'));
+  scOwZoneEl = el;
+}
+
+// Выстрелы на чеку со свежего списка: трассер от стрелка к цели
+function sxOverwatchShots(prev, next) {
+  if (!prev || !prev.length || typeof owNewShot !== 'function') return;
+  if (typeof grid === 'undefined' || !grid) return;
+  var before = {};
+  prev.forEach(function(s) { before[s.id] = s; });
+  var center = function(s) {
+    var t = shipTypeById[s.ship_type];
+    var b = t ? shipBoxCells(t, s.facing || 0) : { w: 1, h: 1 };
+    return { x: (s.x + b.w / 2) * CELL_PX, y: (s.y + b.h / 2) * CELL_PX };
+  };
+  next.forEach(function(s) {
+    var p = before[s.id];
+    if (!p || !owNewShot(p, s) || s.x === null || s.x === undefined) return;
+    var t = null;
+    for (var i = 0; i < next.length && !t; i++) if (next[i].id === s.ow_target) t = next[i];
+    if (!t) t = before[s.ow_target];
+    if (!t || t.x === null || t.x === undefined || t.carrier_ship_id) return;
+    var a = center(s), b = center(t);
+    owTracer(grid, a.x, a.y, b.x, b.y, !!s.ow_hit);
+    if (!s.ow_hit) sxFloatOnShip(t, 'мимо', 'miss', 250);
+  });
 }
 
 // ===== Вкладки =====
@@ -550,6 +663,20 @@ function scRenderTiles() {
       'истребитель прикрывает от них своих.',
       canAct ? null : 'нет очков действий');
   });
+
+  // На чеку: сам стреляет по ближайшему врагу, как только готово действие
+  // (js/overwatch.js). Действия на включение не нужны
+  if (typeof owInfoHtml === 'function' && !owArmedReason(scType, true)) {
+    add('watch', '◉', 'На чеку', true, function() { scRenderOverwatchInfo(info); });
+    var owTile = tiles.querySelector('.sc-tile[data-key="watch"]');
+    if (owTile && scShip.overwatch) owTile.classList.add('ow-on');
+    // Плитки перерисовываются каждую секунду (тикер очков) — описание
+    // с кнопкой трогаем, только когда сменился корабль или его режим
+    if (scMode === 'watch' && (scOwInfoKey !== scShip.id + ':' + !!scShip.overwatch ||
+                               !info.querySelector('.ow-go'))) {
+      scRenderOverwatchInfo(info);
+    }
+  }
 
   // Автоход: дальняя точка шагами, по действию на шаг (js/automove-space.js)
   if (typeof amAddTile === 'function') amAddTile(add, describe);
@@ -1089,6 +1216,7 @@ function scDeselect() {
   if (hud) hud.style.display = 'none';
   if (typeof setBottomInset === 'function') setBottomInset(0);
   scRenderRange();
+  scRenderOwZone();
 }
 
 // Полная очистка разделов: содержимое, состояние режимов и списки
@@ -1122,7 +1250,7 @@ function scSetMode(mode) {
   // а не полосы щитов
   var hud = document.getElementById('ship-hud');
   if (hud) {
-    hud.classList.remove('mode-move', 'mode-rotate', 'mode-attack', 'mode-hangar', 'mode-auto');
+    hud.classList.remove('mode-move', 'mode-rotate', 'mode-attack', 'mode-hangar', 'mode-auto', 'mode-watch');
     if (mode) hud.classList.add('mode-' + mode);
   }
   if (mode !== 'move') scPreview = null;
@@ -1567,6 +1695,7 @@ var sxPrevShipsAt = 0;       // серверное время, на которо
 function sxAfterShips(prev, req) {
   var at = scServerNow();
   sxDiffShips(prev, shipsInSystem, sxPrevShipsAt || at, at);
+  sxOverwatchShots(prev, shipsInSystem);
   sxPrevShipsAt = at;
   sxRefreshIntel();
 }

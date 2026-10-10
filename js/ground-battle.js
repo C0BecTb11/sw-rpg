@@ -4710,6 +4710,8 @@ function loadUnits() {
     gbSoon('vision', loadVision, 120);
     if (window.sceneLoader) sceneLoader.mark('units');
     cbDiffUnits(prevUnits, unitsOnMap, requestedAt);
+    gbOverwatchShots(prevUnits, unitsOnMap);
+    gbOverwatchRefresh(prevUnits);
     cbReconcileHp(requestedAt);
     if (typeof amAfterUnits === 'function') amAfterUnits();
   });
@@ -4816,6 +4818,11 @@ function drawUnits() {
     var shelter = fieldStructures.length ? unitShelter(u) : null;
     if (shelter) drawShelterMark(shelter, px + inset, py + inset, boxW, boxH);
 
+    // На чеку (свои и союзники): оранжевый значок в углу
+    if (u.overwatch && (mine || (myFaction && u.faction === myFaction))) {
+      drawOverwatchMark(px + inset, py + inset, boxW);
+    }
+
     // Подчинённый чужой воле: рамка обведена вторым контуром,
     // чтобы своих временных бойцов было видно с одного взгляда
     if (u.control_until) {
@@ -4843,6 +4850,11 @@ function drawUnits() {
   if (selectedUnit) {
     var t = unitTypeById[selectedUnit.unit_type];
     if (t && selectedUnit.owner_user_id === currentUserId) {
+      // На чеку: сначала залитая зона огня, поверх — обычные рамки
+      var owLive = guLiveUnit(selectedUnit);
+      if (owLive.overwatch && typeof owReachUnit === 'function') {
+        drawOverwatchZone(owLive, owReachUnit(owLive, t));
+      }
       drawCellRange(selectedUnit, t.vision_range, 'rgba(95,217,104,0.55)');
       drawCellRange(selectedUnit, unitMoveRange(selectedUnit), 'rgba(74,144,217,0.55)');
     } else if (t) {
@@ -4855,6 +4867,132 @@ function drawUnits() {
       drawCellRange(selectedUnit, t.vision_range, 'rgba(217,169,64,0.45)');
     }
   }
+}
+
+// ===== На чеку (js/overwatch.js) =====
+
+// Значок в левом верхнем углу бойца: кружок с прицелом
+function drawOverwatchMark(x, y, boxW) {
+  var r = Math.max(5, Math.min(9, boxW * 0.16));
+  var cx = x + r + 1, cy = y + r + 1;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(10,13,20,0.92)';
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = '#e8923a';
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 0.42, 0, Math.PI * 2);
+  ctx.fillStyle = '#e8923a';
+  ctx.fill();
+}
+
+// Зона огня: клетки, до которых боец и видит, и достаёт (как box_gap
+// на сервере — от краёв корпуса, а не от угла)
+function drawOverwatchZone(unit, reach) {
+  if (!reach) return;
+  var b = unitBox(unit);
+  var x0 = (unit.x - reach) * CELL_PX;
+  var y0 = (unit.y - reach) * CELL_PX;
+  var w = (b.w + reach * 2) * CELL_PX;
+  var h = (b.h + reach * 2) * CELL_PX;
+  ctx.fillStyle = 'rgba(232,146,58,0.08)';
+  ctx.fillRect(x0, y0, w, h);
+  ctx.strokeStyle = 'rgba(232,146,58,0.85)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([3, 5]);
+  ctx.strokeRect(x0, y0, w, h);
+  ctx.setLineDash([]);
+}
+
+function gbSetOverwatch(unit, on) {
+  if (!unit || typeof owSet !== 'function') return;
+  owSet('ground', [unit.id], on, function(err) {
+    if (err) { alert('Не вышло: ' + err); return; }
+    // Сразу показываем новое состояние, не дожидаясь перезагрузки карты
+    unitsOnMap.forEach(function(x) { if (x.id === unit.id) x.overwatch = !!on; });
+    unit.overwatch = !!on;
+    cbFloatOnUnit(guLiveUnit(unit), on ? 'на чеку' : 'отбой', on ? 'ow' : 'miss');
+    // Включение сняло автоход — отметки автохода перечитываем
+    if (on && typeof amLoadSoon === 'function') amLoadSoon(200);
+    guPickedAbility = null;
+    if (selectedUnit && selectedUnit.id === unit.id) {
+      selectedUnit = guLiveUnit(unit);
+      offerPickup(selectedUnit);
+    }
+    redrawScene();
+    loadUnits();
+  });
+}
+
+// Строка «На чеку» под очками действий открытой панели своего бойца
+function gbOverwatchStrip(bar, unit) {
+  if (!bar) return;
+  var old = document.getElementById('ow-strip');
+  var type = unitTypeById[unit.unit_type];
+  if (!unit.overwatch || typeof owStripHtml !== 'function' || !type) {
+    if (old) old.parentNode.removeChild(old);
+    return;
+  }
+  var strip = old;
+  if (!strip) {
+    var apRow = bar.querySelector('.gu-ap-row');
+    if (!apRow) return;
+    strip = document.createElement('div');
+    strip.id = 'ow-strip';
+    strip.className = 'ow-strip';
+    apRow.parentNode.insertBefore(strip, apRow.nextSibling);
+  }
+  strip.innerHTML = owStripHtml(owReachUnit(unit, type));
+  var off = strip.querySelector('[data-ow="off"]');
+  if (off) off.addEventListener('click', function() {
+    off.disabled = true;
+    gbSetOverwatch(guLiveUnit(unit), false);
+  });
+}
+
+// Свежая карта: у кого сменилась отметка выстрела на чеку — рисуем трассер
+function gbOverwatchShots(prev, next) {
+  if (!prev || !prev.length || typeof owNewShot !== 'function') return;
+  var before = {};
+  prev.forEach(function(u) { before[u.id] = u; });
+  var layer = null;
+  next.forEach(function(u) {
+    var p = before[u.id];
+    if (!p || !owNewShot(p, u) || u.x === null || u.x === undefined) return;
+    var t = null;
+    for (var i = 0; i < next.length && !t; i++) if (next[i].id === u.ow_target) t = next[i];
+    if (!t) t = before[u.ow_target];     // цель могла погибнуть этим выстрелом
+    if (!t || t.x === null || t.x === undefined) return;
+    if (!layer) layer = cbEnsureFxLayer();
+    var a = unitBox(u), b = unitBox(t);
+    owTracer(layer, (u.x + a.w / 2) * CELL_PX, (u.y + a.h / 2) * CELL_PX,
+             (t.x + b.w / 2) * CELL_PX, (t.y + b.h / 2) * CELL_PX, !!u.ow_hit);
+    if (!u.ow_hit) cbFloatOnUnit(t, 'мимо', 'miss', 250);
+  });
+}
+
+// Режим снялся или включился на сервере (ручной приказ, другой экран) —
+// открытая панель бойца должна это показать
+function gbOverwatchRefresh(prev) {
+  if (!selectedUnit || selectedUnit.owner_user_id !== currentUserId) return;
+  var bar = document.getElementById('pickup-bar');
+  if (!bar || bar.style.visibility === 'hidden' || !bar.querySelector('#gu-dots')) return;
+  if (bar.getAttribute('data-intel') || bar.getAttribute('data-struct')) return;
+  var fresh = guLiveUnit(selectedUnit);
+  var old = null;
+  (prev || []).forEach(function(u) { if (u.id === fresh.id) old = u; });
+  if (old && !!old.overwatch === !!fresh.overwatch) return;
+  // Выбранный боец — свежий экземпляр: зона огня рисуется по нему
+  selectedUnit = fresh;
+  redrawScene();
+  var had = !!document.getElementById('ow-strip');
+  gbOverwatchStrip(bar, fresh);
+  var tile = bar.querySelector('.gu-tile[data-key="watch"]');
+  if (tile) tile.classList.toggle('ow-on', !!fresh.overwatch);
+  if (tile && tile.classList.contains('active') && typeof tile._guPick === 'function') tile._guPick();
+  if (had !== !!document.getElementById('ow-strip')) setBottomInset(insetFor(bar));
 }
 
 // Какой кусок картинки бойца показывать на клетке: [sx, sy, sw, sh].
@@ -5057,6 +5195,8 @@ function showPickup(unit, ships, carriers, inside, boardable, ap, liftCarriers) 
 
   // Идёт автоход — строка состояния и «Стоп» под очками действий
   if (typeof amPanelStrip === 'function') amPanelStrip(bar, unit);
+  // На чеку — своя строка с кнопкой «Снять»
+  gbOverwatchStrip(bar, unit);
 
   bar.style.visibility = 'visible';
   setBottomInset(insetFor(bar));
@@ -5232,6 +5372,24 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
       attackTile.classList.remove('active');
       startGroundAttack(guLiveUnit(unit));
     });
+  }
+
+  // На чеку: сам стреляет по ближайшему врагу, как только готово действие.
+  // Артиллерии и безоружным плитки нет — им стрелять прицельно нечем
+  if (typeof owInfoHtml === 'function' && !owArmedReason(type, false)) {
+    var owTile = addTile('watch', '◉', 'На чеку', true, function() {
+      var live = guLiveUnit(unit);
+      var on = !!live.overwatch;
+      info.innerHTML = owInfoHtml(on, owReachUnit(live, type), null, 'gu');
+      guAbilityAction(info, on ? 'Снять с чеку' : 'Встать на чеку', true, function() {
+        gbSetOverwatch(guLiveUnit(unit), !on);
+      });
+      var owGo = info.querySelector('.gu-abil-go');
+      if (owGo) { owGo.classList.add('ow-go'); owGo.classList.toggle('off', on); }
+    });
+    // Действия режиму не нужны — тикер очков не должен его гасить
+    owTile.setAttribute('data-need', '0');
+    owTile.classList.toggle('ow-on', !!unit.overwatch);
   }
 
   // Автоход: сам идёт к дальней точке, шагая по мере очков действий

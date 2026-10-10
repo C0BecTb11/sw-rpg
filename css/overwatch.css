@@ -1,0 +1,203 @@
+/* Режим «На чеку» — земля и орбита. Свой цвет — оранжевый: режим не
+   действие и не автоход, это постоянная готовность открыть огонь.
+   Золото занято автоходом, синий — выбором, красный — врагом. */
+
+/* ── Плитка в панели способностей ─────────────────────────────── */
+.gu-tile.ow-on,
+.sc-tile.ow-on {
+  position: relative;
+  border-color: rgba(232,146,58,0.75);
+  color: #e8923a;
+  background: rgba(232,146,58,0.07);
+}
+
+.gu-tile.ow-on.active,
+.sc-tile.ow-on.active {
+  border-color: #e8923a;
+  box-shadow: 0 0 0 2px rgba(232,146,58,0.25);
+}
+
+.gu-tile.ow-on::before,
+.sc-tile.ow-on::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #e8923a;
+  box-shadow: 0 0 6px rgba(232,146,58,0.85);
+  animation: ow-blink 1.6s ease-in-out infinite;
+}
+
+@keyframes ow-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+.gu-abil-meta.ow-on-note,
+.sc-abil-meta.ow-on-note { color: #e8923a; }
+
+/* Кнопка «Встать на чеку» в описании — оранжевая, «Снять» — контуром */
+.gu-abil-go.ow-go,
+.sc-btn.ow-go {
+  background: #e8923a;
+  border-color: #e8923a;
+  color: #0a0d14;
+}
+
+.gu-abil-go.ow-go.off,
+.sc-btn.ow-go.off {
+  background: rgba(232,146,58,0.08);
+  border: 1px solid rgba(232,146,58,0.6);
+  color: #e8923a;
+}
+
+.sc-btn.ow-go { display: block; width: 100%; margin-top: 9px; }
+
+/* ── Строка «На чеку» под очками действий ─────────────────────── */
+.ow-strip {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 9px;
+  padding: 6px 6px 6px 8px;
+  background: linear-gradient(90deg, rgba(232,146,58,0.12) 0%, rgba(16,21,30,0.6) 70%);
+  border: 1px solid rgba(232,146,58,0.4);
+  border-radius: 9px;
+  font-family: 'Courier New', monospace;
+}
+
+.ow-strip-ico {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: rgba(232,146,58,0.15);
+  color: #e8923a;
+  font-size: 14px;
+}
+
+.ow-strip-txt { flex: 1; min-width: 0; }
+
+.ow-strip-txt b {
+  display: block;
+  font-size: 10px;
+  font-weight: normal;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #e8923a;
+}
+
+.ow-strip-txt span {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: #8fa8c4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ow-strip-btn {
+  flex: none;
+  min-height: 34px;
+  padding: 0 11px;
+  background: rgba(232,146,58,0.08);
+  border: 1px solid rgba(232,146,58,0.6);
+  border-radius: 7px;
+  color: #e8923a;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+
+.ow-strip-btn:disabled { opacity: 0.4; }
+
+/* В панели корабля строка стоит между очками и вкладками */
+#ship-hud .ow-strip { margin: 0 0 8px; }
+
+/* ── Отметки на карте ─────────────────────────────────────────── */
+
+/* Корабль на чеку: кружок с прицелом в левом верхнем углу,
+   одного размера на любом зуме */
+.ship-sprite .ow-badge {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  width: 14px;
+  height: 14px;
+  margin: -6px 0 0 -6px;
+  box-sizing: border-box;
+  border: 1.5px solid #e8923a;
+  border-radius: 50%;
+  background: radial-gradient(circle, #e8923a 0 2.5px, #0a0d14 3px);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.65), 0 0 6px rgba(232,146,58,0.6);
+  transform: scale(min(var(--fx-inv, 1), 2.4));
+  transform-origin: 6px 6px;
+  pointer-events: none;
+}
+
+/* Зона огня выбранного корабля на чеку */
+.ow-zone {
+  position: absolute;
+  pointer-events: none;
+  border: 2px dashed rgba(232,146,58,0.8);
+  background: rgba(232,146,58,0.07);
+  border-radius: 4px;
+}
+
+/* ── Выстрел на чеку: трассер и вспышка ───────────────────────── */
+.ow-tracer {
+  position: absolute;
+  height: calc(3px * var(--fx-inv, 1));
+  margin-top: calc(-1.5px * var(--fx-inv, 1));
+  transform-origin: 0 50%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, rgba(232,146,58,0) 0%, rgba(232,146,58,0.7) 45%, #ffd9a8 100%);
+  box-shadow: 0 0 calc(8px * var(--fx-inv, 1)) rgba(232,146,58,0.85);
+  pointer-events: none;
+  animation: ow-shot 0.9s ease-out forwards;
+}
+
+.ow-tracer.miss {
+  background: linear-gradient(90deg, rgba(232,146,58,0) 0%, rgba(232,146,58,0.45) 60%, rgba(232,146,58,0) 100%);
+  box-shadow: none;
+}
+
+@keyframes ow-shot {
+  0%   { opacity: 0; clip-path: inset(0 100% 0 0); }
+  22%  { opacity: 1; clip-path: inset(0 0 0 0); }
+  100% { opacity: 0; clip-path: inset(0 0 0 0); }
+}
+
+.ow-flash {
+  position: absolute;
+  width: calc(26px * var(--fx-inv, 1));
+  height: calc(26px * var(--fx-inv, 1));
+  margin: calc(-13px * var(--fx-inv, 1)) 0 0 calc(-13px * var(--fx-inv, 1));
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff3dc 0%, rgba(232,146,58,0.9) 35%, rgba(232,146,58,0) 70%);
+  pointer-events: none;
+  opacity: 0;
+  animation: ow-flash 0.6s 0.15s ease-out forwards;
+}
+
+@keyframes ow-flash {
+  0%   { opacity: 0; transform: scale(0.4); }
+  30%  { opacity: 1; transform: scale(1.1); }
+  100% { opacity: 0; transform: scale(1.5); }
+}
+
+/* Всплывающая подпись «на чеку» над бойцом и кораблём */
+.fx-txt.fx-ow {
+  color: #e8923a;
+  font-size: 12px;
+  letter-spacing: 2px;
+}

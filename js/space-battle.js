@@ -1004,6 +1004,14 @@ function renderShips() {
       el.classList.add('ship-targetable');
     }
 
+    // На чеку (свои и союзники): оранжевый значок в левом верхнем углу
+    if (ship.overwatch && (mine || ally)) {
+      el.classList.add('ow-on');
+      var owB = document.createElement('span');
+      owB.className = 'ow-badge';
+      el.appendChild(owB);
+    }
+
     // Автоход: ведущий и корабли флота в кольце
     if (typeof amShipMark === 'function') {
       var amMark = amShipMark(ship);

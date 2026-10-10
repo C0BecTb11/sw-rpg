@@ -272,7 +272,7 @@ function feedSet(list) {
 var FEED_SPACE = feedSet(['ship_built', 'ship_lost', 'ship_destroyed', 'ship_hit', 'ship_missed',
   'tractor_locked', 'station_built', 'station_started', 'station_demolished', 'refit_done',
   'hangar_restocked', 'fleet_arrived', 'fleet_pushed_out', 'fleet_stranded', 'cargo_delivered',
-  'cargo_lost']);
+  'cargo_lost', 'overwatch_space']);
 var FEED_STATION = feedSet(['station_built', 'station_started']);
 
 // Поселение: открываем его панель
@@ -287,7 +287,7 @@ var FEED_SETTLEMENT = feedSet(['district_built', 'district_started', 'settlement
 // Земля без точного места — просто карта планеты
 var FEED_GROUND = feedSet(['unit_deployed', 'unit_loaded', 'unit_killed', 'unit_damaged',
   'unit_missed', 'unit_hit', 'unit_healed', 'hero_died', 'hero_hired', 'hero_trained',
-  'hero_training', 'artillery_strike', 'artillery_hit', 'return_fire', 'npc_return_fire', 'turret_report',
+  'hero_training', 'artillery_strike', 'artillery_hit', 'return_fire', 'npc_return_fire', 'turret_report', 'overwatch_report',
   'structure_built', 'structure_started', 'structure_lost', 'structure_destroyed',
   'scout_arrived', 'scout_jammed', 'building_built', 'building_started', 'building_demolished',
   'research_done', 'production_idle', 'mind_released', 'troops_pushed_out', 'militia_raised', 'ability_used', 'enemy_spotted',
