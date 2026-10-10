@@ -185,6 +185,19 @@ function amOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
 
 // Что из видимого мешает встать на точку. Невидимое сервер обойдёт сам —
 // встанет рядом, — а видимое честнее показать заранее.
+// Неподвижные препятствия для прокладки пути — те же, что у сервера:
+// станция и чужая полоса прыжка (своя проходима)
+function amSpaceObstacles() {
+  var list = [];
+  if (typeof stationSlot !== 'undefined' && stationSlot) {
+    list.push({ x: stationSlot.x, y: stationSlot.y, w: STATION_SIZE, h: STATION_SIZE });
+  }
+  if (typeof myZoneSide !== 'undefined' && myZoneSide) {
+    list.push({ x: 0, y: myZoneSide === 'top' ? GRID_CELLS - ZONE_HEIGHT : 0, w: GRID_CELLS, h: ZONE_HEIGHT });
+  }
+  return list;
+}
+
 function amBlockAt(x, y, box, skip) {
   if (typeof stationSlot !== 'undefined' && stationSlot &&
       amOverlap(x, y, box.w, box.h, stationSlot.x, stationSlot.y, STATION_SIZE, STATION_SIZE)) {
@@ -239,7 +252,9 @@ function amPlan() {
     t = amSpread(t, box, dir, taken);
     taken.push({ x: t.x, y: t.y, w: box.w, h: box.h });
     if (t.band) band = true;
-    var path = amPath(s.x, s.y, t.x, t.y, range);
+    // Путь в обход станции — как его проложит сервер
+    var path = amRoute({ grid: GRID_CELLS, w: box.w, h: box.h, x0: s.x, y0: s.y,
+                         x1: t.x, y1: t.y, range: range, obstacles: amSpaceObstacles() });
     var block = amBlockAt(t.x, t.y, box, skip);
     if (block && (!warn || s.id === am.leaderId)) warn = block;
     steps = Math.max(steps, path.length);

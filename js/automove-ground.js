@@ -125,6 +125,24 @@ function amEtaFor(u, n) {
 
 // ---------- Занятость точки финиша (то, что видно игроку) ----------
 
+// Неподвижные препятствия для прокладки пути — те же, что у сервера
+// (automove_obstacles): участки под застройку, само поселение и свои
+// постройки, куда этому бойцу не войти. Чужие в тумане путь не выдаёт.
+function amStaticObstacles(u) {
+  var t = unitTypeById[u.unit_type] || {};
+  var list = [];
+  buildSlots.forEach(function(sl) { list.push({ x: sl.x, y: sl.y, w: SLOT_SIZE, h: SLOT_SIZE }); });
+  if (settlement) list.push({ x: settlement.x, y: settlement.y, w: settlement.size, h: settlement.size });
+  fieldStructures.forEach(function(s) {
+    if (s.faction !== u.faction) return;
+    var st = structTypeById[s.type_id] || {};
+    if (!st.enterable || (st.infantry_only && t.is_vehicle)) {
+      list.push({ x: s.x, y: s.y, w: s.w || 1, h: s.h || 1 });
+    }
+  });
+  return list;
+}
+
 function amBoxBlocked(u, x, y, skip) {
   var b = unitBox(u);
   var t = unitTypeById[u.unit_type] || {};
@@ -140,10 +158,11 @@ function amBoxBlocked(u, x, y, skip) {
     if (!boxOverlap(x, y, b.w, b.h, s.x, s.y, s.w || 1, s.h || 1)) continue;
     if (!st.enterable || s.faction !== u.faction || (st.infantry_only && t.is_vehicle)) return true;
   }
+  // Участок (даже пустой) и само поселение — не место для бойца
   for (var k = 0; k < buildSlots.length; k++) {
-    if (!buildingsBySlot[k + 1]) continue;
     if (boxOverlap(x, y, b.w, b.h, buildSlots[k].x, buildSlots[k].y, SLOT_SIZE, SLOT_SIZE)) return true;
   }
+  if (settlement && boxOverlap(x, y, b.w, b.h, settlement.x, settlement.y, settlement.size, settlement.size)) return true;
   return false;
 }
 
@@ -903,7 +922,9 @@ function amPlan() {
     var b = unitBox(u);
     var tx = amClamp(amPick.target.x + (u.x - L.x), 0, GRID_SIZE - b.w);
     var ty = amClamp(amPick.target.y + (u.y - L.y), 0, GRID_SIZE - b.h);
-    var path = amSteps(u.x, u.y, tx, ty, range);
+    // Путь в обход участков, поселения и своих построек — как у сервера
+    var path = amRoute({ grid: GRID_SIZE, w: b.w, h: b.h, x0: u.x, y0: u.y,
+                         x1: tx, y1: ty, range: range, obstacles: amStaticObstacles(u) });
     var blocked = path.length > 0 && amBoxBlocked(u, tx, ty, skip);
     if (blocked) { plan.blocked++; if (u.id === L.id) plan.leadBlocked = true; }
     plan.steps = Math.max(plan.steps, path.length);

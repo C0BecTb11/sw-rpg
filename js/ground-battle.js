@@ -2004,6 +2004,7 @@ function drawScene(grid) {
   drawPlacementCells();
   drawDropCells();
   drawDisembarkCells();
+  drawBlockedSites();
   drawMoveCells();
   drawTargetCells();
   drawAttackZone();
@@ -5435,6 +5436,32 @@ function cancelGroundMove() {
   document.getElementById('placement-hint').style.display = 'none';
   setBottomInset(0);
   redrawScene();
+}
+
+// Пока боец выбирает, куда идти (ход или автоход), показываем, куда нельзя:
+// пустые участки под застройку и само поселение. На обычной карте пустые
+// участки скрыты — без подсказки отказ «участок под застройку» был бы загадкой.
+function drawBlockedSites() {
+  var picking = movingUnit || (typeof amPick !== 'undefined' && amPick);
+  if (!picking) return;
+  var size = SLOT_SIZE * CELL_PX;
+  ctx.save();
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 5]);
+  for (var i = 0; i < buildSlots.length; i++) {
+    if (buildingsBySlot[i + 1]) continue;   // здание и так видно
+    var sl = buildSlots[i];
+    ctx.fillStyle = 'rgba(217,74,74,0.09)';
+    ctx.fillRect(sl.x * CELL_PX, sl.y * CELL_PX, size, size);
+    ctx.strokeStyle = 'rgba(217,74,74,0.5)';
+    ctx.strokeRect(sl.x * CELL_PX + 1, sl.y * CELL_PX + 1, size - 2, size - 2);
+  }
+  if (settlement) {
+    ctx.strokeStyle = 'rgba(217,74,74,0.55)';
+    ctx.strokeRect(settlement.x * CELL_PX - 2, settlement.y * CELL_PX - 2,
+                   settlement.size * CELL_PX + 4, settlement.size * CELL_PX + 4);
+  }
+  ctx.restore();
 }
 
 // Зона хода: квадрат по дистанции Чебышёва, как у кораблей
