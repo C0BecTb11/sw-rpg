@@ -781,17 +781,17 @@
     return false;
   }
 
-  // Клетки поверхности в экранные координаты: канвас уже сдвинут и
-  // отмасштабирован трансформацией, берём его прямоугольник как есть
+  // Клетки поверхности в экранные координаты. Холст теперь размером с
+  // экран, а камеру (сдвиг и масштаб) держат panX/panY/scale наземной
+  // карты — считаем от окна просмотра по ним
   function qCellRect(c) {
-    var cv = document.getElementById('ground-canvas');
-    if (!cv || !c) return null;
-    var r = cv.getBoundingClientRect();
-    var grid = (window.GRID_SIZE || 144);
-    var k = r.width / grid;
+    var vp = document.getElementById('ground-viewport');
+    if (!vp || !c || typeof window.scale !== 'number') return null;
+    var r = vp.getBoundingClientRect();
+    var k = (window.CELL_PX || 32) * window.scale;
     if (!k) return null;
     return {
-      left: r.left + c.x * k, top: r.top + c.y * k,
+      left: r.left + (window.panX || 0) + c.x * k, top: r.top + (window.panY || 0) + c.y * k,
       width: c.w * k, height: c.h * k
     };
   }
@@ -869,6 +869,7 @@
   }
 
   function qHideSpot() {
+    qPlaceSig = 'none';
     if (qSpot) { qSpot.style.display = 'none'; qTip.style.display = 'none'; }
     qMarks.forEach(function(m) { m.style.display = 'none'; });
     qEdges.forEach(function(m) { m.style.display = 'none'; });
@@ -948,11 +949,44 @@
     return null;
   }
 
+  // Кадр за кадром подсветка обычно стоит на месте. Раньше каждый кадр
+  // заново писал стили и тут же мерил подсказку — браузер пересчитывал
+  // раскладку страницы 60 раз в секунду всё обучение. Теперь сначала
+  // только читаем положение целей и, если ничего не сдвинулось, выходим.
+  var qPlaceSig = 'none';
+
+  function qRectSig(r) {
+    return r ? Math.round(r.left) + ',' + Math.round(r.top) + ',' + Math.round(r.width) + ',' + Math.round(r.height) : '-';
+  }
+
   function qPlace() {
-    if (!qSpotTarget) { qHideSpot(); return; }
-    qEnsureSpot();
+    if (!qSpotTarget) { if (qPlaceSig !== 'none') qHideSpot(); return; }
 
     var r = (qSpotTarget.el || qSpotTarget.cell) ? qRectOf(qSpotTarget) : null;
+
+    // Вспомогательные рамки: зона прыжка, площадки сброса, зона охраны
+    var boxes = [];
+    (qSpotTarget.marks || []).forEach(function(m) {
+      if (m.sel) {
+        var els = document.querySelectorAll(m.sel);
+        for (var i = 0; i < els.length; i++) {
+          if (!m.all && i > 0) break;
+          var er = els[i].getBoundingClientRect();
+          if (er.width > 0) boxes.push({ r: er, label: m.label });
+        }
+      } else if (m.cell && QPAGE === 'ground') {
+        var cr = qCellRect(m.cell());
+        if (cr) boxes.push({ r: cr, label: m.label });
+      }
+    });
+
+    var sig = qRectSig(r) + '|' + (qSpotTarget.tip || '') + '|' + window.innerWidth + 'x' + window.innerHeight +
+      '|' + (window.uiBottomInset || 0) + '|' +
+      boxes.map(function(b) { return qRectSig(b.r) + (b.label || ''); }).join(';');
+    if (sig === qPlaceSig && qSpot) return;
+    qPlaceSig = sig;
+    qEnsureSpot();
+
     var edges = [];
     if (r && r.width > 0 && qSpotTarget.cell && qOffscreen(r)) {
       // Цель за краем экрана: вместо кольца — стрелка у края
@@ -984,22 +1018,6 @@
       qSpot.style.display = 'none';
       qTip.style.display = 'none';
     }
-
-    // Вспомогательные рамки: зона прыжка, площадки сброса, зона охраны
-    var boxes = [];
-    (qSpotTarget.marks || []).forEach(function(m) {
-      if (m.sel) {
-        var els = document.querySelectorAll(m.sel);
-        for (var i = 0; i < els.length; i++) {
-          if (!m.all && i > 0) break;
-          var er = els[i].getBoundingClientRect();
-          if (er.width > 0) boxes.push({ r: er, label: m.label });
-        }
-      } else if (m.cell && QPAGE === 'ground') {
-        var cr = qCellRect(m.cell());
-        if (cr) boxes.push({ r: cr, label: m.label });
-      }
-    });
 
     boxes = boxes.filter(function(b) {
       if (!qOffscreen(b.r)) return true;

@@ -96,13 +96,21 @@ function svNextPayoutMs() {
   return n;
 }
 
-// Часы и минуты в поясе сервера, независимо от пояса телефона
+// Часы и минуты в поясе сервера, независимо от пояса телефона.
+// Форматтер с часовым поясом создаётся долго — держим готовый на пояс
+// и вариант с секундами, а не собираем новый каждую секунду
+var svFmtCache = {};
 function svFormatTime(ms, withSeconds) {
   try {
-    return new Intl.DateTimeFormat('ru-RU', {
-      timeZone: svClock.tz, hour: '2-digit', minute: '2-digit',
-      second: withSeconds ? '2-digit' : undefined, hour12: false
-    }).format(new Date(ms));
+    var key = (svClock.tz || '') + (withSeconds ? '|s' : '|m');
+    var fmt = svFmtCache[key];
+    if (!fmt) {
+      fmt = svFmtCache[key] = new Intl.DateTimeFormat('ru-RU', {
+        timeZone: svClock.tz, hour: '2-digit', minute: '2-digit',
+        second: withSeconds ? '2-digit' : undefined, hour12: false
+      });
+    }
+    return fmt.format(new Date(ms));
   } catch (e) {
     var d = new Date(ms);
     return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);

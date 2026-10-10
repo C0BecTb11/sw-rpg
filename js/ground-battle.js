@@ -1216,7 +1216,7 @@ function drawSettlement() {
 
   var img = getBuildingImage('assets/buildings/settlement.png');
   if (img && img.complete && !img.failed && img.naturalWidth > 0) {
-    ctx.drawImage(img, px, py, sz, sz);
+    gbDrawImage(img, px, py, sz, sz);
   } else {
     ctx.fillStyle = '#6b5a3e';
     ctx.fillRect(px, py, sz, sz);
@@ -1281,7 +1281,9 @@ function drawSettlementBadge(px, py, sz) {
   var y = Math.round(py - h / 2);
 
   ctx.shadowColor = 'rgba(0,0,0,0.6)';
-  ctx.shadowBlur = 8;
+  // Тень холст не масштабирует трансформацией — умножаем сами, иначе
+  // на отдалении она расползалась бы, а вблизи пропадала
+  ctx.shadowBlur = 8 * gbScaleK();
   ctx.fillStyle = 'rgba(10,13,20,0.94)';
   stlRoundRect(x, y, w, h, 6);
   ctx.fill();
@@ -1828,33 +1830,170 @@ var TERRAIN_COLORS = {
   lake:    '#2a5a78'
 };
 
-function drawScene(grid) {
-  // Присвоение canvas.width заново выделяет буфер: при 3840x3840 это
-  // около 60 МБ на каждую отрисовку. Отсюда и было мигание с кусками —
-  // телефон не успевал. Размер ставим один раз.
-  var need = GRID_SIZE * CELL_PX;
-  if (canvas.width !== need || canvas.height !== need) {
-    canvas.width = need;
-    canvas.height = need;
-  }
+// ===== Камера =====
+// Раньше поле рисовалось на одном холсте 4608×4608 (около 81 МБ), а
+// сдвиг и зум делал CSS. Такой холст больше предела текстуры многих
+// телефонов: отсюда чёрный экран, рваная карта и подёргивания — каждая
+// перерисовка гнала в видеопамять весь буфер. Теперь холст размером с
+// экран (с учётом плотности пикселей), а сдвиг и масштаб применяются при
+// рисовании. Все функции отрисовки по-прежнему работают в координатах
+// поля (клетка × CELL_PX) — камеру им подставляет setTransform.
+// Плотность выше 2 на глаз неотличима, а заливку удорожает вдвое.
+var GB_MAX_DPR = 2;
+var gbDpr = 1;
+var gbCssW = 0, gbCssH = 0;
+var terrainBitmap = null;   // рельеф: одна точка на клетку, растягивается без сглаживания
 
+function gbSizeCanvas() {
+  var w = viewport.clientWidth, h = viewport.clientHeight;
+  var dpr = Math.min(window.devicePixelRatio || 1, GB_MAX_DPR);
+  var bw = Math.max(1, Math.round(w * dpr));
+  var bh = Math.max(1, Math.round(h * dpr));
+  // Присвоение width заново выделяет буфер — только когда размер сменился
+  if (canvas.width !== bw || canvas.height !== bh) {
+    canvas.width = bw;
+    canvas.height = bh;
+  }
+  if (w !== gbCssW || h !== gbCssH) {
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    gbCssW = w; gbCssH = h;
+  }
+  gbDpr = w ? bw / w : dpr;
+}
+
+// Сколько пикселей экрана (физических) приходится на пиксель поля
+function gbScaleK() {
+  return scale * gbDpr;
+}
+
+function gbHexRgb(hex) {
+  var v = parseInt(String(hex).slice(1), 16);
+  return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+}
+
+// Рельеф — сплошные цвета по клеткам, поэтому храним его картинкой
+// 144×144 и растягиваем без сглаживания: одна операция на кадр вместо
+// двадцати тысяч заливок, клетки остаются с чёткими краями
+function gbTerrainBitmap(grid) {
+  if (terrainBitmap && terrainBitmap.grid === grid) return terrainBitmap;
+  var c = document.createElement('canvas');
+  c.width = GRID_SIZE;
+  c.height = GRID_SIZE;
+  var g = c.getContext('2d');
+  var data = g.createImageData(GRID_SIZE, GRID_SIZE);
+  var rgb = {};
+  Object.keys(TERRAIN_COLORS).forEach(function(k) { rgb[k] = gbHexRgb(TERRAIN_COLORS[k]); });
+  var fallback = gbHexRgb(TERRAIN_COLORS.grass_a);
   for (var y = 0; y < GRID_SIZE; y++) {
     for (var x = 0; x < GRID_SIZE; x++) {
-      ctx.fillStyle = TERRAIN_COLORS[grid[y][x]];
-      ctx.fillRect(x * CELL_PX, y * CELL_PX, CELL_PX, CELL_PX);
+      var col = rgb[grid[y][x]] || fallback;
+      var i = (y * GRID_SIZE + x) * 4;
+      data.data[i] = col[0];
+      data.data[i + 1] = col[1];
+      data.data[i + 2] = col[2];
+      data.data[i + 3] = 255;
     }
   }
+  g.putImageData(data, 0, 0);
+  c.grid = grid;
+  terrainBitmap = c;
+  return c;
+}
 
-  ctx.strokeStyle = 'rgba(0,0,0,0.15)';
-  ctx.lineWidth = 1;
-  for (var i = 0; i <= GRID_SIZE; i++) {
+// Клетки, попавшие на экран (с запасом в одну), — для сетки
+function gbVisibleCells() {
+  var cell = CELL_PX * scale;
+  var x0 = Math.max(0, Math.floor(-panX / cell) - 1);
+  var y0 = Math.max(0, Math.floor(-panY / cell) - 1);
+  var x1 = Math.min(GRID_SIZE, Math.ceil((gbCssW - panX) / cell) + 1);
+  var y1 = Math.min(GRID_SIZE, Math.ceil((gbCssH - panY) / cell) + 1);
+  return { x0: x0, y0: y0, x1: x1, y1: y1 };
+}
+
+// ===== Чёткие картинки на любом масштабе =====
+// Исходники крупные (512–1024 px), а на экране боец занимает от десятка
+// до пары сотен точек. Ужимать большой файл в каждом кадре дорого и даёт
+// «зубчики» на отдалении. Держим уменьшенные копии ступенями 32…512 (каждая
+// получена из вдвое большей — так уменьшение остаётся гладким) и рисуем
+// ближайшую не меньше нужного. На приближении берётся сам исходник.
+var gbMipCache = {};
+// Выше 256 точек копии не держим: столько боец занимает на экране только
+// на самом крупном зуме, а там лучше рисовать прямо из исходника
+var GB_MIP_STEPS = [32, 64, 128, 256];
+
+function gbMip(img, sx, sy, sw, sh, step, key) {
+  var set = gbMipCache[key] || (gbMipCache[key] = {});
+  if (set[step]) return set[step];
+  var srcMax = Math.max(sw, sh);
+  var r = step / srcMax;
+  var c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(sw * r));
+  c.height = Math.max(1, Math.round(sh * r));
+  var g = c.getContext('2d');
+  g.imageSmoothingEnabled = true;
+  if ('imageSmoothingQuality' in g) g.imageSmoothingQuality = 'high';
+  // Из вдвое большей копии уменьшение глаже, но ради неё не строим всю
+  // лестницу: нет готовой — берём исходник (качество «high» его вытянет)
+  var big = set[step * 2];
+  if (big) {
+    g.drawImage(big, 0, 0, big.width, big.height, 0, 0, c.width, c.height);
+  } else {
+    g.drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
+  }
+  set[step] = c;
+  return c;
+}
+
+function gbDrawSprite(img, sx, sy, sw, sh, dx, dy, dw, dh) {
+  var need = Math.max(dw, dh) * gbScaleK();
+  var srcMax = Math.max(sw, sh);
+  var step = 0;
+  for (var i = 0; i < GB_MIP_STEPS.length; i++) {
+    if (GB_MIP_STEPS[i] >= need) { step = GB_MIP_STEPS[i]; break; }
+  }
+  if (!step || step * 1.5 >= srcMax) {
+    ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
+    return;
+  }
+  var c = gbMip(img, sx, sy, sw, sh, step, img.src + '|' + sx + ',' + sy + ',' + sw + ',' + sh);
+  ctx.drawImage(c, 0, 0, c.width, c.height, dx, dy, dw, dh);
+}
+
+// Вся картинка целиком — частный случай
+function gbDrawImage(img, dx, dy, dw, dh) {
+  gbDrawSprite(img, 0, 0, img.naturalWidth, img.naturalHeight, dx, dy, dw, dh);
+}
+
+function drawScene(grid) {
+  gbSizeCanvas();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  var k = gbScaleK();
+  ctx.setTransform(k, 0, 0, k, panX * gbDpr, panY * gbDpr);
+
+  // Рельеф одним растяжением
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(gbTerrainBitmap(grid), 0, 0, GRID_SIZE, GRID_SIZE,
+                0, 0, GRID_SIZE * CELL_PX, GRID_SIZE * CELL_PX);
+  ctx.imageSmoothingEnabled = true;
+
+  // Сетка — одним контуром и только в видимой части (на любом масштабе:
+  // даже на самом дальнем она даёт полю привычную фактуру)
+  {
+    var v = gbVisibleCells();
+    ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(0, i * CELL_PX);
-    ctx.lineTo(GRID_SIZE * CELL_PX, i * CELL_PX);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(i * CELL_PX, 0);
-    ctx.lineTo(i * CELL_PX, GRID_SIZE * CELL_PX);
+    for (var gx = v.x0; gx <= v.x1; gx++) {
+      ctx.moveTo(gx * CELL_PX, v.y0 * CELL_PX);
+      ctx.lineTo(gx * CELL_PX, v.y1 * CELL_PX);
+    }
+    for (var gy = v.y0; gy <= v.y1; gy++) {
+      ctx.moveTo(v.x0 * CELL_PX, gy * CELL_PX);
+      ctx.lineTo(v.x1 * CELL_PX, gy * CELL_PX);
+    }
     ctx.stroke();
   }
 
@@ -1938,7 +2077,7 @@ function drawBuildSlots() {
     if (img && img.complete && !img.failed && img.naturalWidth > 0) {
       ctx.save();
       if (!ready) ctx.globalAlpha = 0.45; // недостроенное здание бледнее
-      ctx.drawImage(img, px, py, size, size);
+      gbDrawImage(img, px, py, size, size);
       ctx.restore();
     } else {
       // картинки нет или ещё грузится — заглушка с символом
@@ -2016,9 +2155,13 @@ function drawConstructionProgress(building, px, py, size, now) {
   ctx.fillText(label, px + size / 2, barY - 4);
 }
 
+// Сдвиг и зум теперь не двигают холст, а перерисовывают видимую часть.
+// Слой подписей сдвигаем сразу: автоход меряет свои ярлыки сразу после
+// focusCell. На экран оба изменения попадают в одном кадре — стиль
+// применяется к отрисовке, перед которой и срабатывает кадровый колбэк.
 function applyTransform() {
-  canvas.style.transform = 'translate(' + panX + 'px, ' + panY + 'px) scale(' + scale + ')';
   cbSyncFxLayer();
+  redrawScene();
 }
 
 function clampPan() {
@@ -2053,7 +2196,19 @@ function centerGridInitially() {
   applyTransform();
 }
 
+// Поворот телефона, клавиатура, смена окна: холст подгоняется под экран
+function gbOnViewportResize() {
+  clampPan();
+  applyTransform();
+}
+
 function initPanAndZoom() {
+  if (window.ResizeObserver) {
+    new ResizeObserver(gbOnViewportResize).observe(viewport);
+  } else {
+    window.addEventListener('resize', gbOnViewportResize);
+  }
+
   var isDragging = false;
   var dragStartX = 0;
   var dragStartY = 0;
@@ -2517,12 +2672,17 @@ function formatResearchLeft(sec) {
   return sec + ' с';
 }
 
+// Названия техники для веток каталога не меняются — берём один раз,
+// а не каждые 5 секунд вместе со списком исследований
+var researchNamesLoaded = false;
+
 function loadResearchPanel() {
   Promise.all([
     supabase.rpc('get_researches'),
-    supabase.from('ship_types').select('id, name').eq('is_fighter', false),
-    supabase.from('unit_types').select('id, name')
+    researchNamesLoaded ? Promise.resolve({ data: [] }) : supabase.from('ship_types').select('id, name').eq('is_fighter', false),
+    researchNamesLoaded ? Promise.resolve({ data: [] }) : supabase.from('unit_types').select('id, name')
   ]).then(function(r) {
+    if (!r[1].error && !r[2].error && (r[1].data || []).length && (r[2].data || []).length) researchNamesLoaded = true;
     var res = r[0];
     var list = document.getElementById('research-list');
     if (!list) return;
@@ -3015,15 +3175,23 @@ function loadBuildings() {
 // планете это семь-восемь полных отрисовок подряд. Собираем их в одну.
 // Через setTimeout, а не requestAnimationFrame: кадровые колбэки не
 // работают в скрытых панелях предпросмотра.
+// Теперь кадр рисуется к ближайшему обновлению экрана: при сдвиге пальцем
+// приходят десятки событий, а рисуем по одному разу на кадр. В скрытой
+// панели предпросмотра кадровые колбэки не идут — там срабатывает таймер.
 var redrawQueued = false;
 
 function scheduleRedraw() {
   if (redrawQueued) return;
   redrawQueued = true;
-  setTimeout(function() {
+  var done = false;
+  var run = function() {
+    if (done) return;
+    done = true;
     redrawQueued = false;
     redrawSceneNow();
-  }, 0);
+  };
+  if (window.requestAnimationFrame) window.requestAnimationFrame(run);
+  setTimeout(run, 50);
 }
 
 // Все просьбы перерисовать карту за один проход кода сливаются в одну
@@ -3041,6 +3209,7 @@ function redrawSceneNow() {
   if (!terrainCache) {
     terrainCache = generateTerrain(hashStringToSeed(systemId));
   }
+  cbSyncFxLayer();
   drawScene(terrainCache);
   if (window.sceneLoader) sceneLoader.mark('terrain');
   if (typeof amOnRedraw === 'function') amOnRedraw();
@@ -3094,19 +3263,32 @@ function checkBuildRights() {
   });
 }
 
+// Пачка событий — одна перезагрузка. Автоход, залп или высадка двигают
+// десяток бойцов одной транзакцией, и раньше каждое событие тянуло все
+// войска планеты заново и перерисовывало карту. Теперь события за
+// короткое окно сливаются в один запрос.
+var gbSoonTimers = {};
+function gbSoon(key, fn, ms) {
+  if (gbSoonTimers[key]) return;
+  gbSoonTimers[key] = setTimeout(function() {
+    gbSoonTimers[key] = null;
+    fn();
+  }, ms);
+}
+
 // Realtime: любое изменение построек на этой планете — перерисовываем слоты у всех.
 function subscribeToGroundChanges() {
   if (!systemId) return;
   supabase
     .channel('ground-' + systemId)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'buildings', filter: 'system_id=eq.' + systemId }, function() {
-      loadBuildings();
+      gbSoon('buildings', loadBuildings, 250);
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'unit_positions', filter: 'system_id=eq.' + systemId }, function() {
-      loadUnits();
+      gbSoon('units', loadUnits, 150);
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'field_structures', filter: 'system_id=eq.' + systemId }, function() {
-      loadStructures();
+      gbSoon('structures', loadStructures, 250);
     })
     .subscribe();
 }
@@ -3210,13 +3392,14 @@ function initGroundBattle() {
       loadGroundSettings();
       loadGroundSides();
       loadScoutReport();
-      setInterval(loadScoutReport, 20000);
+      // Опросы — только пока вкладка на экране; вернулся — сразу свежие
+      setInterval(function() { if (!document.hidden) loadScoutReport(); }, 20000);
       syncGroundTime();
       loadSettlement();
       loadCaptureState();
       // Базу спрашиваем редко: строка меняется только при смене расклада.
       // Полосу перерисовываем локально раз в секунду.
-      setInterval(loadCaptureState, 60000);
+      setInterval(function() { if (!document.hidden) loadCaptureState(); }, 60000);
       setInterval(function() { if (captureState) renderCaptureBar(); }, 1000);
       loadDropCargo();
       gbDeepLink();
@@ -3247,7 +3430,17 @@ function initGroundBattle() {
       initTreeGestures();
       loadBuildings();
       loadUnitOrders();
-      setInterval(loadUnitOrders, 5000);
+      setInterval(function() { if (!document.hidden) loadUnitOrders(); }, 5000);
+      document.addEventListener('visibilitychange', function() {
+        if (document.hidden) return;
+        loadUnitOrders();
+        loadScoutReport();
+        loadCaptureState();
+        // Пока вкладка спала, реалтайм мог пропустить события
+        gbSoon('units', loadUnits, 50);
+        gbSoon('buildings', loadBuildings, 50);
+        gbSoon('structures', loadStructures, 50);
+      });
       centerGridInitially();
       initPanAndZoom();
       initBuildSwitcher();
@@ -3926,13 +4119,17 @@ var placingOrder = null;   // {unitId, quantity} — ждём выбор кле�
 // и показал бы ложное «лечение» в сводке.
 var loadUnitsSeq = 0;
 var loadUnitsApplied = 0;
+// Справочник типов не меняется по ходу боя: раньше он целиком приходил
+// заново на каждое движение любого бойца. Берём один раз и перечитываем,
+// только если на карте появился неизвестный тип.
+var unitTypesFresh = false;
 
 function loadUnits() {
   var seq = ++loadUnitsSeq;
   var requestedAt = Date.now();
   Promise.all([
     supabase.from('unit_positions').select('*').eq('system_id', systemId).eq('layer', 'ground'),
-    supabase.from('unit_types').select('*')
+    unitTypesFresh ? Promise.resolve(null) : supabase.from('unit_types').select('*')
   ]).then(function(r) {
     // Применяем только ответ свежее уже показанного. Ждать именно
     // последний нельзя: при частых обновлениях карта не обновилась бы вовсе.
@@ -3949,10 +4146,12 @@ function loadUnits() {
       if (u.carrier_unit_id) inside[u.carrier_unit_id] = (inside[u.carrier_unit_id] || 0) + 1;
     });
     unitsOnMap.forEach(function(u) { u.passengers = inside[u.id] || 0; });
-    if (!r[1].error && r[1].data && r[1].data.length) {
+    if (r[1] && !r[1].error && r[1].data && r[1].data.length) {
       unitTypeById = {};
       r[1].data.forEach(function(t) { unitTypeById[t.id] = t; });
+      unitTypesFresh = true;
     }
+    if (unitsOnMap.some(function(u) { return !unitTypeById[u.unit_type]; })) unitTypesFresh = false;
     // Сначала карточка разведки берёт свежий экземпляр бойца, потом
     // рисуем: иначе рамки дальности отстают на одно обновление
     cbRefreshIntel();
@@ -4065,12 +4264,8 @@ function drawUnits() {
         sy = img.naturalHeight * 0.07;
         sh = sw;
       }
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(px + inset, py + inset, boxW, boxH);
-      ctx.clip();
-      ctx.drawImage(img, sx, sy, sw, sh, px + inset, py + inset, boxW, boxH);
-      ctx.restore();
+      // Кадр вырезается самим источником — обрезка холстом не нужна
+      gbDrawSprite(img, sx, sy, sw, sh, px + inset, py + inset, boxW, boxH);
     } else {
       ctx.fillStyle = color;
       ctx.font = Math.round(CELL_PX * 0.5) + 'px monospace';
@@ -7465,7 +7660,7 @@ function drawStructures() {
     ctx.save();
     if (!ready) ctx.globalAlpha = 0.5;
     if (img && img.complete && !img.failed && img.naturalWidth > 0) {
-      ctx.drawImage(img, px + 1, py + 1, w - 2, h - 2);
+      gbDrawImage(img, px + 1, py + 1, w - 2, h - 2);
     } else {
       ctx.fillStyle = 'rgba(217,169,64,0.30)';
       ctx.fillRect(px + 2, py + 2, w - 4, h - 4);
@@ -7671,7 +7866,7 @@ function drawStructPlacement() {
   ctx.save();
   ctx.globalAlpha = 0.72;
   if (img && img.complete && !img.failed && img.naturalWidth > 0) {
-    ctx.drawImage(img, px + 1, py + 1, w * CELL_PX - 2, h * CELL_PX - 2);
+    gbDrawImage(img, px + 1, py + 1, w * CELL_PX - 2, h * CELL_PX - 2);
   }
   ctx.restore();
   ctx.fillStyle = pv.problem ? 'rgba(217,74,74,0.25)' : 'rgba(95,217,104,0.18)';
@@ -8143,10 +8338,17 @@ function cbEnsureFxLayer() {
   return cbFxLayer;
 }
 
+// --fx-inv пересчитывает стили всего слоя, поэтому трогаем его только
+// при смене масштаба, а не на каждый сдвиг пальцем
+var cbFxInv = null;
 function cbSyncFxLayer() {
   if (!cbFxLayer) return;
   cbFxLayer.style.transform = 'translate(' + panX + 'px, ' + panY + 'px) scale(' + scale + ')';
-  cbFxLayer.style.setProperty('--fx-inv', (1 / (scale || 1)).toFixed(4));
+  var inv = (1 / (scale || 1)).toFixed(4);
+  if (inv !== cbFxInv || !cbFxLayer.style.getPropertyValue('--fx-inv')) {
+    cbFxInv = inv;
+    cbFxLayer.style.setProperty('--fx-inv', inv);
+  }
 }
 
 // kind: dmg | heal | miss | kill. Точка — верхний центр корпуса.

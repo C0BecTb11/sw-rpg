@@ -560,15 +560,27 @@ function initPanAndZoom() {
 // Заготовка realtime-канала под конкретную планету — пока без данных,
 // но подписка уже поднята, чтобы не переделывать структуру, когда
 // появится сама механика размещения кораблей.
+// Пачка событий — одна перезагрузка: залп, автоход или выход из гиперпрыжка
+// двигают несколько кораблей разом, и каждое событие раньше тянуло весь
+// флот системы и пересобирало все спрайты заново
+var spSoonTimers = {};
+function spSoon(key, fn, ms) {
+  if (spSoonTimers[key]) return;
+  spSoonTimers[key] = setTimeout(function() {
+    spSoonTimers[key] = null;
+    fn();
+  }, ms);
+}
+
 function subscribeToSpaceChanges() {
   if (!systemId) return;
   supabase
     .channel('space-' + systemId)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'space_stations', filter: 'system_id=eq.' + systemId }, function() {
-      loadStation();
+      spSoon('station', loadStation, 250);
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'ships', filter: 'system_id=eq.' + systemId }, function() {
-      loadShips();
+      spSoon('ships', loadShips, 150);
     })
     .subscribe();
 }
@@ -579,6 +591,13 @@ function initSpaceBattle() {
 
   viewport = document.getElementById('space-viewport');
   grid = document.getElementById('space-grid');
+  // Размер поля берём из тех же чисел, что и логика карты. В стилях
+  // оставалось 5200px со времён поля 130×130 — сетка и край обрывались
+  // за 20 клеток до настоящей границы
+  if (grid) {
+    grid.style.width = (GRID_CELLS * CELL_PX) + 'px';
+    grid.style.height = (GRID_CELLS * CELL_PX) + 'px';
+  }
 
   var backBtn = document.getElementById('space-back-btn');
   backBtn.addEventListener('click', function() {
@@ -608,7 +627,8 @@ function initSpaceBattle() {
   var shipInfoClose = document.getElementById('ship-info-close');
   if (shipInfoClose) shipInfoClose.addEventListener('click', closeShipInfo);
 
-  setInterval(loadShipOrders, 5000);
+  // Очередь верфи — только пока вкладка на экране
+  setInterval(function() { if (!document.hidden && systemId) loadShipOrders(); }, 5000);
 
   supabase.auth.getSession().then(function(res) {
     if (!res.data.session) {
@@ -626,6 +646,13 @@ function initSpaceBattle() {
       initBuildSwitcher();
       initBuildToggle(true);
       subscribeToSpaceChanges();
+      // Пока вкладка спала, реалтайм мог пропустить события. Слушаем
+      // только после загрузки: раньше это сбило бы экран загрузки
+      document.addEventListener('visibilitychange', function() {
+        if (document.hidden) return;
+        spSoon('ships', loadShips, 50);
+        spSoon('station', loadStation, 50);
+      });
       if (typeof sxDeepLink === 'function') sxDeepLink();
     });
   });
@@ -644,11 +671,17 @@ function getShipImage(path) {
   if (shipImages[path]) return shipImages[path];
   var img = new Image();
   img.src = '../' + path;
-  img.onload = function() { renderShips(); };
+  // Дозагрузка картинок сливается в одну пересборку: на флоте из
+  // разных типов их приходит несколько подряд
+  img.onload = function() { spSoon('render', renderShips, 30); };
   img.onerror = function() { img.failed = true; };
   shipImages[path] = img;
   return img;
 }
+
+// Справочник типов кораблей по ходу боя не меняется — один раз, и заново
+// только если в системе появился неизвестный тип
+var shipTypesFresh = false;
 
 function loadShips() {
   // Номер запроса: старый ответ не должен лечь поверх нового
@@ -657,17 +690,19 @@ function loadShips() {
     // Корабли в гиперпространстве на карте не показываем: они уже
     // покинули систему и физически здесь их нет
     supabase.from('ships').select('*').eq('system_id', systemId).eq('in_transit', false),
-    supabase.from('ship_types').select('*')
+    shipTypesFresh ? Promise.resolve(null) : supabase.from('ship_types').select('*')
   ]).then(function(r) {
     if (req && typeof sxShipsFresh === 'function' && !sxShipsFresh(req)) return;
     // Сбой запроса не стирает корабли с карты
     if (r[0].error || !r[0].data) return;
     var prevShips = shipsInSystem;
     shipsInSystem = r[0].data;
-    if (!r[1].error && r[1].data && r[1].data.length) {
+    if (r[1] && !r[1].error && r[1].data && r[1].data.length) {
       shipTypeById = {};
       r[1].data.forEach(function(t) { shipTypeById[t.id] = t; });
+      shipTypesFresh = true;
     }
+    if (shipsInSystem.some(function(sh) { return !shipTypeById[sh.ship_type]; })) shipTypesFresh = false;
     renderShips();
     if (window.sceneLoader) sceneLoader.mark('ships');
     loadShipOrders();

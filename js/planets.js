@@ -43,6 +43,22 @@ var planetLoopRunning = false;
 var PLANET_FPS = 20;
 var planetsPaused = false;   // на время перетаскивания и зума вращение стоит
 
+// Карта закрыта сплошным экраном (фракция, армия, процессы, снабжение,
+// управление)? Тогда крутить планеты и вести ракеты незачем: их не видно,
+// а размытый фон панели пересчитывался бы на каждом кадре. Полупрозрачные
+// карточки (планета, обучение, передача войск) не в счёт — сквозь них
+// карту видно, и она должна жить. Проверка — не чаще двух раз в секунду.
+var MAP_COVER_SCREENS = '#faction-screen, #army-screen, #processes-screen, #supply-screen, #faction-control-screen';
+var mapCoveredAt = 0;
+var mapCovered = false;
+function isMapCovered(now) {
+  if (now - mapCoveredAt < 500 && now >= mapCoveredAt) return mapCovered;
+  mapCoveredAt = now;
+  var el = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
+  mapCovered = !!(el && el.closest && el.closest(MAP_COVER_SCREENS));
+  return mapCovered;
+}
+
 function renderRotatingPlanet(canvas, tex, radius, speed) {
   var size = radius * 2 + 8;
   canvas.width = size;
@@ -102,17 +118,19 @@ function drawPlanet(p) {
     );
   }
 
-  var shadeGrad = ctx.createLinearGradient(cx - r, 0, cx + r, 0);
-  shadeGrad.addColorStop(0, 'rgba(0,0,0,0.6)');
-  shadeGrad.addColorStop(0.45, 'rgba(0,0,0,0)');
-  shadeGrad.addColorStop(1, 'rgba(0,0,0,0.08)');
-  ctx.fillStyle = shadeGrad;
+  // Затенение у планеты неизменно — градиенты собираем один раз
+  if (!p.shadeGrad) {
+    p.shadeGrad = ctx.createLinearGradient(cx - r, 0, cx + r, 0);
+    p.shadeGrad.addColorStop(0, 'rgba(0,0,0,0.6)');
+    p.shadeGrad.addColorStop(0.45, 'rgba(0,0,0,0)');
+    p.shadeGrad.addColorStop(1, 'rgba(0,0,0,0.08)');
+    p.edgeGrad = ctx.createRadialGradient(cx, cy, r * 0.7, cx, cy, r);
+    p.edgeGrad.addColorStop(0, 'rgba(0,0,0,0)');
+    p.edgeGrad.addColorStop(1, 'rgba(0,0,0,0.5)');
+  }
+  ctx.fillStyle = p.shadeGrad;
   ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
-
-  var edgeGrad = ctx.createRadialGradient(cx, cy, r * 0.7, cx, cy, r);
-  edgeGrad.addColorStop(0, 'rgba(0,0,0,0)');
-  edgeGrad.addColorStop(1, 'rgba(0,0,0,0.5)');
-  ctx.fillStyle = edgeGrad;
+  ctx.fillStyle = p.edgeGrad;
   ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
 
   ctx.restore();
@@ -130,6 +148,7 @@ function startPlanetLoop() {
     if (planetsPaused) return;
     if (now - last < interval) return;
     last = now;
+    if (isMapCovered(now)) return;
 
     // Планеты за пределами экрана не перерисовываем: при зуме это снимает
     // почти всю нагрузку, ведь видно от силы несколько систем.
@@ -259,7 +278,7 @@ function initPlanets() {
         markerBox.style.pointerEvents = 'none';
         wrapper.appendChild(markerBox);
 
-        planetElements[planet.id] = { labelEl: label, wrapperEl: wrapper, markerBoxEl: markerBox };
+        planetElements[planet.id] = { labelEl: label, wrapperEl: wrapper, markerBoxEl: markerBox, faction: planet.faction };
 
         wrapper.addEventListener('click', function() {
           if (typeof openPlanetInfo === 'function') {
@@ -474,6 +493,10 @@ function subscribeToSystemChanges() {
       var updated = payload.new;
       var els = planetElements[updated.id];
       if (!els) return;
+      // Строку систем трогают не только при захвате — вспыхиваем
+      // только когда сменился хозяин
+      if (!updated.faction || updated.faction === els.faction) return;
+      els.faction = updated.faction;
 
       var newColor = FACTION_COLORS[updated.faction] || '#8fa8c4';
       els.labelEl.style.color = newColor;
@@ -484,9 +507,17 @@ function subscribeToSystemChanges() {
         els.wrapperEl.style.transition = 'filter 1.2s ease';
         els.wrapperEl.style.filter = 'brightness(1)';
       }, 50);
+      // После вспышки фильтр снимаем совсем: иначе он пересчитывался бы
+      // на каждом кадре вращения планеты
+      setTimeout(function() {
+        els.wrapperEl.style.transition = '';
+        els.wrapperEl.style.filter = '';
+      }, 1400);
     })
     .subscribe();
 }
+
+var commandersReloadTimer = null;
 
 // Realtime-подписка на командиров: при появлении/перемещении/разблокировке
 // командира любым игроком — карта у всех перерисовывает маркеры заново.
@@ -495,13 +526,17 @@ function subscribeToCommanderChanges() {
     .channel('commanders-changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'commanders' }, function() {
       if (!currentUserFaction) return;
-      supabase.from('commanders').select('*').eq('unlocked', true).eq('faction', currentUserFaction).then(function(res) {
-        if (res.error) return;
-        lastCommanders = res.data;
-        renderCommanderMarkers(res.data);
-        loadScoutedEnemies();
-        renderFlights(res.data);
-      });
+      // Подписка на всю игру: несколько событий подряд — одна перезагрузка
+      clearTimeout(commandersReloadTimer);
+      commandersReloadTimer = setTimeout(function() {
+        supabase.from('commanders').select('*').eq('unlocked', true).eq('faction', currentUserFaction).then(function(res) {
+          if (res.error) return;
+          lastCommanders = res.data;
+          renderCommanderMarkers(res.data);
+          loadScoutedEnemies();
+          renderFlights(res.data);
+        });
+      }, 300);
     })
     .subscribe();
 }
@@ -560,6 +595,10 @@ function renderFlights(commanders) {
     el.className = 'flight-rocket';
     el.src = '../assets/ui/rocket.png';
     el.style.position = 'absolute';
+    // Ракета ставится трансформацией от угла слоя: сдвиг left/top каждый
+    // кадр заставлял браузер заново раскладывать страницу
+    el.style.left = '0';
+    el.style.top = '0';
     el.style.width = '9px';
     el.style.transformOrigin = '50% 50%';
     // свои — зелёная подсветка, союзные — синяя (как и фишки командиров)
@@ -587,7 +626,7 @@ function renderFlights(commanders) {
   // на случай если realtime-событие о чужом прибытии не дошло.
   if (activeFlights.length > 0) {
     if (!flightPollTimer) {
-      flightPollTimer = setInterval(reloadCommanders, 10000);
+      flightPollTimer = setInterval(function() { if (!document.hidden) reloadCommanders(); }, 10000);
     }
   } else if (flightPollTimer) {
     clearInterval(flightPollTimer);
@@ -595,15 +634,27 @@ function renderFlights(commanders) {
   }
 }
 
-function animateFlights() {
+// Перелёт длится минуты, ракета за кадр сдвигается на доли пикселя —
+// 30 кадров в секунду на глаз не отличить от 60, а работы вдвое меньше
+var FLIGHT_FPS = 30;
+var flightLastFrame = 0;
+
+function animateFlights(frameNow) {
   if (activeFlights.length === 0) {
     flightAnimationRunning = false;
     return;
   }
+  frameNow = frameNow || performance.now();
+  // Допуск в 4 мс: кадры при 60 Гц приходят неровно, без него счёт
+  // проваливался бы до 20 кадров
+  if (frameNow - flightLastFrame < 1000 / FLIGHT_FPS - 4) {
+    requestAnimationFrame(animateFlights);
+    return;
+  }
+  flightLastFrame = frameNow;
+  // Под панелью ракету не двигаем, но прибытие проверяем как обычно
+  var hidden = isMapCovered(frameNow);
 
-  var mapArea = document.getElementById('map-area');
-  var w = mapArea ? mapArea.clientWidth : 1;
-  var h = mapArea ? mapArea.clientHeight : 1;
   var now = serverNow();
 
   activeFlights.forEach(function(f) {
@@ -615,15 +666,18 @@ function animateFlights() {
     var px = f.from.x + (f.to.x - f.from.x) * progress;
     var py = f.from.y + (f.to.y - f.from.y) * progress;
 
-    f.el.style.left = px + 'px';
-    f.el.style.top = py + 'px';
+    // Новую ракету ставим на место сразу, даже под панелью: иначе она
+    // ждала бы в углу карты, пока панель не закроют
+    if (!hidden || !f.placed) {
+      f.placed = true;
+      var dxPx = f.to.x - f.from.x;
+      var dyPx = f.to.y - f.from.y;
+      // Ракета на картинке смотрит вверх, поэтому +90°, чтобы нос шёл по курсу.
+      var angleDeg = Math.atan2(dyPx, dxPx) * 180 / Math.PI + 90;
 
-    var dxPx = f.to.x - f.from.x;
-    var dyPx = f.to.y - f.from.y;
-    // Ракета на картинке смотрит вверх, поэтому +90°, чтобы нос шёл по курсу.
-    var angleDeg = Math.atan2(dyPx, dxPx) * 180 / Math.PI + 90;
-
-    f.el.style.transform = 'translate(-50%, -50%) rotate(' + angleDeg + 'deg)';
+      f.el.style.transform = 'translate(' + px.toFixed(2) + 'px, ' + py.toFixed(2) + 'px) ' +
+        'translate(-50%, -50%) rotate(' + angleDeg + 'deg)';
+    }
 
     if (progress >= 1 && !f.finishRequested) {
       f.finishRequested = true;

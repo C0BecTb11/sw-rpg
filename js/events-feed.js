@@ -40,7 +40,9 @@ function initEventsFeed() {
   });
 
   refreshFeedCounts();
-  feedTimer = setInterval(refreshFeedCounts, 30000);
+  // Пока вкладка спрятана, счётчики не опрашиваем; вернулся — сразу свежие
+  feedTimer = setInterval(function() { if (!document.hidden) refreshFeedCounts(); }, 30000);
+  document.addEventListener('visibilitychange', function() { if (!document.hidden) refreshFeedCounts(); });
 }
 
 // Счётчики непрочитанного тикают в фоне: значок должен загораться

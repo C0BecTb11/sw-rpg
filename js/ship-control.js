@@ -1622,8 +1622,15 @@ function sxFloatOnShip(ship, text, kind, delay, shift) {
 }
 
 // Масштаб подписей обратный масштабу поля — на любом зуме одного размера
+// --fx-inv пересчитывает стили всего поля со спрайтами, поэтому пишем его
+// только при смене масштаба, а не на каждый сдвиг пальцем
+var sxFxInv = null;
 function sxSyncScale() {
-  if (typeof grid !== 'undefined' && grid) grid.style.setProperty('--fx-inv', (1 / (scale || 1)).toFixed(4));
+  if (typeof grid === 'undefined' || !grid) return;
+  var inv = (1 / (scale || 1)).toFixed(4);
+  if (inv === sxFxInv && grid.style.getPropertyValue('--fx-inv')) return;
+  sxFxInv = inv;
+  grid.style.setProperty('--fx-inv', inv);
 }
 
 // ---------- Карточка сводки ----------

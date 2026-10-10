@@ -765,5 +765,5 @@ document.addEventListener('DOMContentLoaded', function() {
   if (inbox) inbox.addEventListener('click', function() { openTransferPanel('inbox'); });
 
   refreshTransferBadge();
-  setInterval(refreshTransferBadge, 30000);
+  setInterval(function() { if (!document.hidden) refreshTransferBadge(); }, 30000);
 });

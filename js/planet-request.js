@@ -419,5 +419,5 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('pr-review-btn').addEventListener('click', openPlanetRequests);
 
   refreshPlanetRequestBadge();
-  setInterval(refreshPlanetRequestBadge, 30000);
+  setInterval(function() { if (!document.hidden) refreshPlanetRequestBadge(); }, 30000);
 });
