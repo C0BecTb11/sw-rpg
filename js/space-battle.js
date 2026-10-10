@@ -574,7 +574,11 @@ function initPanAndZoom() {
       dragStartY = e.touches[0].clientY;
       panStartX = panX;
       panStartY = panY;
+      // Палец на своём корабле: удержит — корабль поднимется под палец
+      if (typeof sdArm === 'function') sdArm(dragStartX, dragStartY);
     } else if (e.touches.length === 2) {
+      // Второй палец — щипок, а не приказ: поднятый корабль отпускаем
+      if (typeof sdCancel === 'function') sdCancel();
       isDragging = false;
       pinchStartDist = distance(e.touches[0], e.touches[1]);
       pinchStartScale = scale;
@@ -590,6 +594,15 @@ function initPanAndZoom() {
   }, { passive: true });
 
   viewport.addEventListener('touchmove', function(e) {
+    if (typeof sdActive === 'function' && sdActive()) {
+      if (e.touches.length === 1) sdMove(e.touches[0].clientX, e.touches[0].clientY);
+      return;
+    }
+    if (e.touches.length === 1 && typeof sdArmMoved === 'function') {
+      sdArmMoved(e.touches[0].clientX, e.touches[0].clientY);
+    } else if (typeof sdRefused !== 'undefined') {
+      sdRefused = null;
+    }
     if (e.touches.length === 1 && isDragging) {
       panX = panStartX + (e.touches[0].clientX - dragStartX);
       panY = panStartY + (e.touches[0].clientY - dragStartY);
@@ -613,7 +626,40 @@ function initPanAndZoom() {
     }
   }, { passive: true });
 
+  viewport.addEventListener('touchcancel', function() {
+    if (typeof sdCancel === 'function') sdCancel();
+    if (typeof sdRefused !== 'undefined') sdRefused = null;
+    isDragging = false;
+  });
+
+  // Долгое нажатие не должно открывать меню браузера над кораблём
+  viewport.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+
+  // После жеста браузер может прислать клик по кораблю или клетке —
+  // он не должен открыть карточку или поставить второй приказ
+  viewport.addEventListener('click', function(e) {
+    if (typeof sdNoClickUntil !== 'undefined' && Date.now() < sdNoClickUntil) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  }, true);
+
   viewport.addEventListener('touchend', function(e) {
+    if (typeof sdDisarm === 'function') sdDisarm();
+    if (typeof sdActive === 'function' && sdActive()) {
+      if (e.touches.length === 0) {
+        if (e.cancelable) e.preventDefault();
+        sdEnd();
+        isDragging = false;
+      }
+      return;
+    }
+    // Поднять не дали (нет действий, луч) и палец не уводили — обычный тап
+    if (e.touches.length === 0 && typeof sdRefused !== 'undefined' && sdRefused) {
+      sdReleaseRefused();
+      isDragging = false;
+      return;
+    }
     if (e.touches.length === 0) {
       isDragging = false;
     } else if (e.touches.length === 1) {
@@ -629,14 +675,18 @@ function initPanAndZoom() {
   // на всякий случай — поддержка мыши для отладки на компьютере
   var mouseDragging = false;
   viewport.addEventListener('mousedown', function(e) {
+    if (e.button !== undefined && e.button !== 0) return;
     mouseDragging = true;
     dragStartX = e.clientX;
     dragStartY = e.clientY;
     panStartX = panX;
     panStartY = panY;
+    if (typeof sdArm === 'function') sdArm(e.clientX, e.clientY);
   });
   window.addEventListener('mousemove', function(e) {
+    if (typeof sdActive === 'function' && sdActive()) { sdMove(e.clientX, e.clientY); return; }
     if (!mouseDragging) return;
+    if (typeof sdArmMoved === 'function') sdArmMoved(e.clientX, e.clientY);
     panX = panStartX + (e.clientX - dragStartX);
     panY = panStartY + (e.clientY - dragStartY);
     clampPan();
@@ -644,6 +694,9 @@ function initPanAndZoom() {
   });
   window.addEventListener('mouseup', function() {
     mouseDragging = false;
+    if (typeof sdDisarm === 'function') sdDisarm();
+    if (typeof sdActive === 'function' && sdActive()) { sdEnd(); return; }
+    if (typeof sdRefused !== 'undefined' && sdRefused) sdReleaseRefused();
   });
 
   viewport.addEventListener('wheel', function(e) {
@@ -933,6 +986,9 @@ function renderShips() {
 
     grid.appendChild(el);
   });
+
+  // Поднятый жестом корабль и его цели остаются отмеченными после перерисовки
+  if (typeof sdDecorate === 'function') sdDecorate();
 }
 
 function openShipInfo(ship, type) {

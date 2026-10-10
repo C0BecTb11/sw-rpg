@@ -518,7 +518,7 @@ function scRenderTiles() {
 
   add('move', '⇢', 'Ход', canAct, function() {
     describe('Перемещение',
-      'До ' + scType.move_range + ' клеток за одно действие. ' +
+      'До ' + sdRange(scShip, scType) + ' клеток за одно действие. ' +
       'Коснись клетки — корабль встанет на неё серединой.',
       canAct ? null : 'нет очков действий');
   });
@@ -965,7 +965,7 @@ function scRenderMode() {
   if (scMode === 'attack') {
     hint.textContent = 'Ткни в цель на карте или выбери из списка';
   } else if (scMode === 'move' && scPreview) {
-    hint.textContent = 'Пройдёт ' + scPreview.dist + ' из ' + scType.move_range +
+    hint.textContent = 'Пройдёт ' + scPreview.dist + ' из ' + sdRange(scShip, scType) +
       ' кл. · можно ткнуть в другую клетку';
   } else if (scMode === 'move') {
     hint.textContent = 'Коснись клетки — корабль встанет на неё серединой';
@@ -974,7 +974,8 @@ function scRenderMode() {
   } else if (scMode === 'auto') {
     hint.textContent = typeof amHintText === 'function' ? amHintText() : '';
   } else {
-    hint.textContent = '';
+    // Без режима подсказываем быстрый жест — его не видно из кнопок
+    hint.textContent = 'Быстрее: зажми корабль на карте и веди — на клетку или на врага';
   }
 
   scRenderRange();
@@ -1001,7 +1002,7 @@ function scRenderRange() {
   if (scMode !== 'move' || !scShip || !scType) return;
 
   var a = scAnchor(scShip, scType);
-  var r = scType.move_range;
+  var r = sdRange(scShip, scType);
 
   var el = document.createElement('div');
   el.className = 'sc-range';
@@ -1169,7 +1170,8 @@ function scAimAt(cx, cy) {
   if (!scShip || !scType) return;
 
   var a = scAnchor(scShip, scType);
-  var r = scType.move_range;
+  // Дальность с улучшениями — как ship_stats на сервере
+  var r = sdRange(scShip, scType);
 
   // Тап за пределом дальности не отбрасываем, а прижимаем к пределу:
   // игрок хотел «туда, максимально далеко», и получает ровно это,
@@ -2082,4 +2084,453 @@ function sxPing(x, y, w, h) {
   el.innerHTML = '<i></i><i></i>';
   grid.appendChild(el);
   setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, 4200);
+}
+
+// ===== Жест «зажал и тянешь» в космосе (js/drag-command.js) =====
+// Палец держат на своём корабле — он «поднимается», дальше палец ведёт его
+// призрак в натуральную величину. Отпустил на свободной клетке — ход
+// (корабль идёт как стоит, без разворота), на враге — выстрел, на самом
+// корабле — отмена. Цели и шансы отдаёт сервер (get_attack_targets с
+// туманом войны), ход проверяем теми же правилами, что move_ship, а приказ
+// всё равно проверяет база: жест не даёт ни дальности, ни лишних действий.
+
+var sdDrag = null;          // поднятый корабль
+var sdArmed = null;         // палец лёг на свой корабль, ждём удержания
+var sdInFlight = {};        // id корабля -> приказ ушёл, ответа ещё нет
+var sdRefused = null;       // поднять не дали (нет действий, луч): отпускание — обычный тап
+var sdNoClickUntil = 0;     // после жеста браузер может прислать клик — гасим
+
+function sdModeBusy() {
+  return !!(scMode || scHangarMode ||
+            (typeof gameConfirmOpen === 'function' && gameConfirmOpen()));
+}
+
+function sdClientCell(cx, cy) {
+  var rect = viewport.getBoundingClientRect();
+  return {
+    x: Math.floor(((cx - rect.left - panX) / scale) / CELL_PX),
+    y: Math.floor(((cy - rect.top - panY) / scale) / CELL_PX)
+  };
+}
+
+function sdOnMap(s) {
+  return !!s && !s.carrier_ship_id && !s.in_transit &&
+         s.x !== null && s.x !== undefined && s.y !== null && s.y !== undefined;
+}
+
+function sdShipAtCell(x, y, skipId) {
+  for (var i = shipsInSystem.length - 1; i >= 0; i--) {
+    var s = shipsInSystem[i];
+    if (s.id === skipId || !sdOnMap(s)) continue;
+    var t = shipTypeById[s.ship_type];
+    if (!t) continue;
+    var b = scBox(t, s.facing || 0);
+    if (x >= s.x && x < s.x + b.w && y >= s.y && y < s.y + b.h) return s;
+  }
+  return null;
+}
+
+function sdRange(ship, type) {
+  return (type.move_range || 0) + (ship.bonus_move || 0);
+}
+
+function sdActive() { return !!sdDrag; }
+
+function sdArm(cx, cy) {
+  sdDisarm();
+  sdRefused = null;
+  if (sdDrag || sdModeBusy()) return;
+  var c = sdClientCell(cx, cy);
+  var s = sdShipAtCell(c.x, c.y);
+  if (!s || s.owner_user_id !== currentUserId) return;
+  sdArmed = { ship: s, cx: cx, cy: cy, cell: c, timer: setTimeout(sdLift, DC_HOLD_MS) };
+}
+
+function sdDisarm() {
+  if (sdArmed && sdArmed.timer) clearTimeout(sdArmed.timer);
+  sdArmed = null;
+}
+
+function sdArmMoved(cx, cy) {
+  if (sdRefused && (Math.abs(cx - sdRefused.cx) > DC_SLOP || Math.abs(cy - sdRefused.cy) > DC_SLOP)) sdRefused = null;
+  if (!sdArmed) return;
+  if (Math.abs(cx - sdArmed.cx) > DC_SLOP || Math.abs(cy - sdArmed.cy) > DC_SLOP) { sdDisarm(); return; }
+  // Подъём считаем от того, где палец сейчас: карта могла чуть сдвинуться
+  sdArmed.lx = cx; sdArmed.ly = cy;
+}
+
+// Отпустили палец, а поднять корабль было нельзя: это обычный тап по нему.
+// После долгого нажатия браузер клик может не прислать — жмём сами.
+function sdReleaseRefused() {
+  var r = sdRefused;
+  sdRefused = null;
+  if (!r) return;
+  var spr = grid.querySelector('.ship-sprite[data-ship-id="' + r.id + '"]');
+  if (spr) spr.click();
+  sdNoClickUntil = Date.now() + 500;
+}
+
+function sdLift() {
+  var a = sdArmed;
+  sdArmed = null;
+  if (!a || sdModeBusy()) return;
+  var ship = sxShipById(a.ship.id) || a.ship;
+  var type = shipTypeById[ship.ship_type];
+  if (!type || !sdOnMap(ship) || ship.owner_user_id !== currentUserId) return;
+  var px = a.lx !== undefined ? a.lx : a.cx, py = a.ly !== undefined ? a.ly : a.cy;
+  var cell = sdClientCell(px, py);
+  var box = scBox(type, ship.facing || 0);
+  // Под пальцем уже не этот корабль (карта уехала) — не поднимаем
+  if (cell.x < ship.x || cell.x >= ship.x + box.w || cell.y < ship.y || cell.y >= ship.y + box.h) return;
+
+  // Поднять нельзя — подсказка, а отпускание станет обычным тапом
+  var refuse = function(title, sub, tone, ms) {
+    dcFlash(px, py, title, sub, tone, ms);
+    sdRefused = { id: ship.id, cx: px, cy: py };
+  };
+  if (sdInFlight[ship.id]) { refuse('Приказ уже отдан', 'ждём ответ сервера', 'wait', 1500); return; }
+  if (ship.tractor_until && new Date(ship.tractor_until).getTime() > scServerNow()) {
+    var left = Math.ceil((new Date(ship.tractor_until).getTime() - scServerNow()) / 1000);
+    refuse('Держит луч захвата', 'осталось ' + left + ' с', 'bad', 1800);
+    return;
+  }
+  var st = scApState(ship);
+  if (st.ap < 1) {
+    dcBuzz(8);
+    refuse('Нет действий', 'восстановится через ' + st.nextIn + ' с', 'bad', 1800);
+    return;
+  }
+
+  var d = {
+    ship: ship, type: type, box: box,
+    gx: cell.x - ship.x, gy: cell.y - ship.y,
+    cx: px, cy: py, hx: cell.x, hy: cell.y,
+    lx: px, ly: py, left: false,
+    range: sdRange(ship, type),
+    targets: [], loaded: false, loadP: null, intent: null, raf: 0, els: {}
+  };
+  sdDrag = d;
+
+  d.loadP = supabase.rpc('get_attack_targets', { p_ship_id: ship.id }).then(function(res) {
+    d.targets = (res.error || !res.data) ? [] : res.data;
+    d.loaded = true;
+    if (sdDrag === d) sdUpdate();
+  }, function() {
+    d.loaded = true;
+    if (sdDrag === d) sdUpdate();
+  });
+
+  dcBuzz(14);
+  sdUpdate();
+  d.raf = requestAnimationFrame(sdEdgeTick);
+}
+
+function sdMove(cx, cy) {
+  var d = sdDrag;
+  if (!d) return;
+  d.cx = cx; d.cy = cy;
+  sdUpdate();
+}
+
+function sdEdgeTick() {
+  var d = sdDrag;
+  if (!d) return;
+  // Пока палец стоит, где подняли, карту не двигаем — иначе удержание
+  // у края само увезло бы клетку под пальцем и отдало ход
+  if (!d.left) { d.raf = requestAnimationFrame(sdEdgeTick); return; }
+  var r = viewport.getBoundingClientRect();
+  var box = { left: r.left, top: r.top, right: r.right, bottom: r.bottom - uiBottomInset };
+  var v = dcEdgeVelocity(box, d.cx, d.cy);
+  if (v.x || v.y) {
+    var px = panX, py = panY;
+    panX += v.x; panY += v.y;
+    clampPan();
+    if (panX !== px || panY !== py) { applyTransform(); sdUpdate(); }
+  }
+  d.raf = requestAnimationFrame(sdEdgeTick);
+}
+
+function sdUpdate() {
+  var d = sdDrag;
+  if (!d) return;
+  var c = sdClientCell(d.cx, d.cy);
+  d.hx = c.x; d.hy = c.y;
+  if (!d.left && (Math.abs(d.cx - d.lx) > DC_SLOP || Math.abs(d.cy - d.ly) > DC_SLOP)) d.left = true;
+  d.intent = sdEval(d);
+  dcChip(d.cx, d.cy, d.intent.title, d.intent.sub, d.intent.tone);
+  sdRender();
+}
+
+function sdEval(d) {
+  var s = sxShipById(d.ship.id) || d.ship, b = d.box, hx = d.hx, hy = d.hy;
+
+  // Отмена — когда призрак вернулся точно на место. Не «палец над кораблём»:
+  // длинный корабль взяли за середину и сдвинули на пару клеток вдоль
+  // корпуса — палец ещё на нём, но это уже ход.
+  if (hx - d.gx === s.x && hy - d.gy === s.y) {
+    return { kind: 'home', tone: 'wait', title: 'Отмена', sub: 'веди на клетку или на врага' };
+  }
+
+  var other = sdShipAtCell(hx, hy, s.id);
+  if (other) {
+    var ot = shipTypeById[other.ship_type] || {};
+    var side = sxSide(other);
+    if (side !== 'enemy') {
+      return { kind: 'bad', tone: 'bad', title: 'Место занято', sub: (side === 'mine' ? 'твой ' : 'союзный ') + (ot.name || 'корабль') };
+    }
+    if (!d.loaded) return { kind: 'wait', tone: 'wait', title: 'Цель: ' + (ot.name || 'корабль'), sub: 'проверяем дальность…', target: other };
+    var t = null;
+    for (var i = 0; i < d.targets.length; i++) {
+      if (d.targets[i].target_id === other.id) { t = d.targets[i]; break; }
+    }
+    if (!t) return { kind: 'bad', tone: 'bad', title: 'Не достать', sub: (ot.name || 'цель') + ' вне дальности', target: other };
+    return {
+      kind: 'attack', tone: 'attack', title: 'Огонь: ' + (t.ship_name || ot.name || 'цель'),
+      sub: 'попадание ' + t.chance + '% · урон ' + t.damage, target: other, pick: t
+    };
+  }
+
+  var ax = hx - d.gx, ay = hy - d.gy;
+  var out = { ax: ax, ay: ay };
+  var dist = dcCheb(s.x, s.y, ax, ay);
+  var bad = function(title, sub) { out.kind = 'bad'; out.tone = 'bad'; out.title = title; out.sub = sub; return out; };
+
+  if (ax < 0 || ay < 0 || ax + b.w > GRID_CELLS || ay + b.h > GRID_CELLS) return bad('Край карты', 'сюда корпус не влезет');
+  if (dist > d.range) return bad('Слишком далеко', 'дальность хода ' + d.range + ' кл., а тут ' + dist + ' кл.');
+
+  var hit = function(x, y, w, h) { return ax < x + w && x < ax + b.w && ay < y + h && y < ay + b.h; };
+  if (typeof stationSlot !== 'undefined' && stationSlot &&
+      hit(stationSlot.x, stationSlot.y, stationSlot.size || STATION_SIZE, stationSlot.size || STATION_SIZE)) {
+    return bad('Здесь станция', 'обойди её');
+  }
+  // Полоса прыжка противника — как hyperspace_band_at на сервере
+  if (typeof myZoneSide !== 'undefined' && myZoneSide) {
+    var ey = myZoneSide === 'top' ? GRID_CELLS - ZONE_HEIGHT : 0;
+    if (hit(0, ey, GRID_CELLS, ZONE_HEIGHT)) return bad('Зона прыжка врага', 'туда не войти');
+  }
+  for (var j = 0; j < shipsInSystem.length; j++) {
+    var o = shipsInSystem[j];
+    if (o.id === s.id || !sdOnMap(o)) continue;
+    var oty = shipTypeById[o.ship_type];
+    if (!oty) continue;
+    var ob = scBox(oty, o.facing || 0);
+    if (hit(o.x, o.y, ob.w, ob.h)) return bad('Место занято', 'тут уже стоит корабль');
+  }
+
+  out.kind = 'move'; out.tone = 'move';
+  out.title = 'Идти · ' + dcCellsWord(dist);
+  out.sub = 'отпусти — встанет здесь';
+  return out;
+}
+
+// Призрак, зона хода, нить и прицел — элементами поверх карты
+function sdEl(d, key, cls) {
+  var el = d.els[key];
+  if (!el || !el.parentNode) {
+    el = document.createElement('div');
+    el.className = cls;
+    grid.appendChild(el);
+    d.els[key] = el;
+  }
+  return el;
+}
+
+function sdRender() {
+  var d = sdDrag;
+  if (!d) return;
+  var s = d.ship, b = d.box, C = CELL_PX, it = d.intent || {};
+
+  var zone = sdEl(d, 'zone', 'sc-range sd-zone');
+  zone.style.left = ((s.x - d.range) * C) + 'px';
+  zone.style.top = ((s.y - d.range) * C) + 'px';
+  zone.style.width = ((d.range * 2 + b.w) * C) + 'px';
+  zone.style.height = ((d.range * 2 + b.h) * C) + 'px';
+
+  sdDecorate();
+
+  var attack = it.kind === 'attack';
+  var ok = attack || it.kind === 'move';
+  var tone = attack ? 'attack' : ok ? 'move' : it.kind === 'wait' || it.kind === 'home' ? 'wait' : 'bad';
+
+  // Куда тянется нить: к цели или к середине будущего места
+  var tg = it.target || null, ex, ey, tb = null;
+  if (tg) {
+    var tt = shipTypeById[tg.ship_type];
+    var tbox = tt ? scBox(tt, tg.facing || 0) : { w: 1, h: 1 };
+    tb = { x: tg.x, y: tg.y, w: tbox.w, h: tbox.h };
+    ex = (tb.x + tb.w / 2) * C; ey = (tb.y + tb.h / 2) * C;
+  } else if (it.ax !== undefined) {
+    ex = (it.ax + b.w / 2) * C; ey = (it.ay + b.h / 2) * C;
+  } else {
+    ex = (d.hx + 0.5) * C; ey = (d.hy + 0.5) * C;
+  }
+
+  var line = sdEl(d, 'line', 'sd-line');
+  var sx = (s.x + b.w / 2) * C, sy = (s.y + b.h / 2) * C;
+  var len = Math.sqrt((ex - sx) * (ex - sx) + (ey - sy) * (ey - sy));
+  line.style.display = it.kind === 'home' ? 'none' : 'block';
+  line.style.left = sx + 'px';
+  line.style.top = sy + 'px';
+  line.style.width = Math.max(0, len) + 'px';
+  line.style.transform = 'rotate(' + Math.atan2(ey - sy, ex - sx) + 'rad)';
+  line.setAttribute('data-tone', tone);
+
+  var ret = sdEl(d, 'ret', 'sd-reticle');
+  if (tb) {
+    ret.style.display = 'block';
+    ret.style.left = (tb.x * C - 6) + 'px';
+    ret.style.top = (tb.y * C - 6) + 'px';
+    ret.style.width = (tb.w * C + 12) + 'px';
+    ret.style.height = (tb.h * C + 12) + 'px';
+    ret.setAttribute('data-tone', tone);
+  } else {
+    ret.style.display = 'none';
+  }
+
+  var ghost = sdEl(d, 'ghost', 'sc-ghost sd-ghost');
+  if (it.ax !== undefined && !tb) {
+    ghost.style.display = 'block';
+    ghost.classList.toggle('blocked', !ok);
+    ghost.style.left = (it.ax * C) + 'px';
+    ghost.style.top = (it.ay * C) + 'px';
+    ghost.style.width = (b.w * C) + 'px';
+    ghost.style.height = (b.h * C) + 'px';
+    if (!ghost.firstChild && d.type.image) {
+      var im = document.createElement('img');
+      im.src = '../' + d.type.image;
+      im.alt = '';
+      im.style.width = (d.type.width_cells * C) + 'px';
+      im.style.height = (d.type.height_cells * C) + 'px';
+      im.style.position = 'absolute';
+      im.style.left = '50%';
+      im.style.top = '50%';
+      im.style.transform = 'translate(-50%, -50%) rotate(' + (s.facing || 0) + 'deg)';
+      ghost.appendChild(im);
+    }
+  } else {
+    ghost.style.display = 'none';
+  }
+}
+
+// Отметки на спрайтах: поднятый корабль приглушён, достижимые цели —
+// красной рамкой. renderShips пересобирает спрайты, поэтому вызывается и оттуда.
+function sdDecorate() {
+  var d = sdDrag;
+  var els = grid ? grid.querySelectorAll('.ship-sprite') : [];
+  var hit = {};
+  if (d) d.targets.forEach(function(t) { hit[t.target_id] = true; });
+  for (var i = 0; i < els.length; i++) {
+    var id = els[i].getAttribute('data-ship-id');
+    els[i].classList.toggle('sd-lifted', !!d && id === d.ship.id);
+    els[i].classList.toggle('sd-reach', !!d && !!hit[id]);
+  }
+}
+
+function sdClearEls(d) {
+  for (var k in d.els) {
+    if (d.els[k] && d.els[k].parentNode) d.els[k].parentNode.removeChild(d.els[k]);
+  }
+  d.els = {};
+}
+
+function sdEnd() {
+  var d = sdDrag;
+  if (!d) return;
+  if (d.raf) cancelAnimationFrame(d.raf);
+  var c = sdClientCell(d.cx, d.cy);
+  d.hx = c.x; d.hy = c.y;
+  var it = sdEval(d);
+  sdDrag = null;
+  sdClearEls(d);
+  sdDecorate();
+
+  // Подержал и отпустил на месте — это обычный тап по кораблю. После
+  // долгого нажатия браузер клик может и не прислать, поэтому жмём сами,
+  // а возможный родной клик следом гасим.
+  if (it.kind === 'home' && !d.left) {
+    dcHideChip();
+    var spr = grid.querySelector('.ship-sprite[data-ship-id="' + d.ship.id + '"]');
+    if (spr) spr.click();
+    sdNoClickUntil = Date.now() + 500;
+    return;
+  }
+  sdNoClickUntil = Date.now() + 500;
+
+  // Стрелять будем только в того, на кого отпустили: пока ждали список,
+  // он мог уйти, а на его клетку — встать другой
+  if (it.kind === 'wait' && d.loadP) {
+    var want = it.target ? it.target.id : null;
+    dcChip(d.cx, d.cy, it.title, 'проверяем дальность…', 'wait');
+    sdInFlight[d.ship.id] = true;
+    d.loadP.then(function() {
+      delete sdInFlight[d.ship.id];
+      var again = sdEval(d);
+      var same = again.kind === 'attack' && again.target && again.target.id === want;
+      if (!same && (again.kind === 'attack' || again.kind === 'move' || again.kind === 'wait')) {
+        again = { kind: 'bad', title: 'Цель ушла', sub: 'приказ не отдан — веди заново' };
+      }
+      sdCommit(d, again);
+    });
+    return;
+  }
+  sdCommit(d, it);
+}
+
+function sdCancel() {
+  sdDisarm();
+  var d = sdDrag;
+  if (!d) return;
+  if (d.raf) cancelAnimationFrame(d.raf);
+  sdDrag = null;
+  sdClearEls(d);
+  sdDecorate();
+  dcHideChip();
+  sdNoClickUntil = Date.now() + 500;
+}
+
+function sdCommit(d, it) {
+  var ship = d.ship, type = d.type;
+  if (it.kind === 'home') { dcHideChip(); return; }
+  if (it.kind === 'bad' || it.kind === 'wait') { dcFlash(d.cx, d.cy, it.title, it.sub, 'bad', 1800); return; }
+  dcHideChip();
+  sdInFlight[ship.id] = true;
+  var done = function() { delete sdInFlight[ship.id]; };
+  var fail = function(msg) {
+    done();
+    dcFlash(d.cx, d.cy, 'Не вышло', msg || 'нет связи с сервером', 'bad', 2600);
+  };
+
+  if (it.kind === 'move') {
+    // Корабль сразу встаёт на новое место; откажет сервер — вернётся
+    var live = sxShipById(ship.id) || ship;
+    var fromX = live.x, fromY = live.y;
+    live.x = it.ax; live.y = it.ay;
+    renderShips();
+    var undo = function() {
+      var now = sxShipById(ship.id);
+      if (now && now.x === it.ax && now.y === it.ay) { now.x = fromX; now.y = fromY; renderShips(); }
+    };
+    supabase.rpc('move_ship', { p_ship_id: ship.id, p_x: it.ax, p_y: it.ay, p_facing: null }).then(function(res) {
+      if (res.error) { undo(); fail(res.error.message); return; }
+      done();
+      if (scShip && scShip.id === ship.id && scPreview) scCancelAim();
+      loadShips();
+    }, function(e) { undo(); fail(e && e.message); });
+    return;
+  }
+
+  if (it.kind === 'attack') {
+    var target = it.pick;
+    var snap = sxShipById(target.target_id);
+    if (snap) snap = Object.assign({}, snap);
+    sxLastOwnAction = Date.now();
+    sxSkipDiff[target.target_id] = Date.now() + 4000;
+    supabase.rpc('attack_ship', { p_attacker_id: ship.id, p_target_id: target.target_id }).then(function(res) {
+      if (res.error) { fail(res.error.message); return; }
+      done();
+      var r = (res.data && res.data.length) ? res.data[0] : null;
+      if (r) sxReportShot(ship, type, target, r, snap);
+      loadShips();
+    }, function(e) { fail(e && e.message); });
+  }
 }

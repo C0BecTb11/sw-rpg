@@ -1525,3 +1525,55 @@
 .sc-goods-txt em { font-style: normal; font-size: 10px; color: #55606c; }
 .sc-cargo-goods .sc-hangar-acts { flex: none; margin-top: 0; }
 .sc-cargo-goods .sc-hangar-btn { flex: none; min-width: 46px; padding: 7px 9px; }
+
+/* ===== Жест «зажал и тянешь» (js/ship-control.js, sd*) ===== */
+.sd-ghost { z-index: 6; opacity: 0.85; }
+.sd-ghost img { opacity: 0.8; }
+
+/* Нить от корабля к пальцу */
+.sd-line {
+  position: absolute;
+  z-index: 5;
+  height: 0;
+  border-top: 3px dashed rgba(95,217,104,0.9);
+  transform-origin: 0 50%;
+  margin-top: -1.5px;
+  pointer-events: none;
+}
+.sd-line[data-tone="attack"] { border-top-color: rgba(255,107,107,0.95); }
+.sd-line[data-tone="bad"]    { border-top-color: rgba(154,166,178,0.85); }
+.sd-line[data-tone="wait"]   { border-top-color: rgba(217,169,64,0.9); }
+
+/* Прицел на цели: угловые скобки */
+.sd-reticle {
+  position: absolute;
+  z-index: 6;
+  pointer-events: none;
+  --sd-c: #ff6b6b;
+  background:
+    linear-gradient(var(--sd-c), var(--sd-c)) top left / 28% 4px no-repeat,
+    linear-gradient(var(--sd-c), var(--sd-c)) top left / 4px 28% no-repeat,
+    linear-gradient(var(--sd-c), var(--sd-c)) top right / 28% 4px no-repeat,
+    linear-gradient(var(--sd-c), var(--sd-c)) top right / 4px 28% no-repeat,
+    linear-gradient(var(--sd-c), var(--sd-c)) bottom left / 28% 4px no-repeat,
+    linear-gradient(var(--sd-c), var(--sd-c)) bottom left / 4px 28% no-repeat,
+    linear-gradient(var(--sd-c), var(--sd-c)) bottom right / 28% 4px no-repeat,
+    linear-gradient(var(--sd-c), var(--sd-c)) bottom right / 4px 28% no-repeat;
+}
+.sd-reticle[data-tone="bad"]  { --sd-c: #9aa6b2; }
+.sd-reticle[data-tone="wait"] { --sd-c: #d9a940; }
+
+/* Поднятый корабль приглушён на старом месте, достижимые цели — в рамке */
+.ship-sprite.sd-lifted { opacity: 0.4; }
+.ship-sprite.sd-reach {
+  outline: 2px solid rgba(217,74,74,0.95) !important;
+  box-shadow: 0 0 0 3px rgba(217,74,74,0.3);
+}
+
+/* Картинка корабля не должна ловить долгое нажатие сама (меню «сохранить») */
+.ship-sprite img {
+  pointer-events: none;
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+}

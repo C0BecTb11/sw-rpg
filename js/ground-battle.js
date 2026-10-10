@@ -2080,6 +2080,7 @@ function drawScene(grid) {
   drawAttackZone();
   drawUnits();
   drawStructureOverlay();
+  drawDragOverlay();
 }
 
 // ===== Туман войны =====
@@ -2364,7 +2365,11 @@ function initPanAndZoom() {
       dragStartY = e.touches[0].clientY;
       panStartX = panX;
       panStartY = panY;
+      // Палец на своём бойце: удержит — боец поднимется под палец
+      gbDragArm(dragStartX, dragStartY);
     } else if (e.touches.length === 2) {
+      // Второй палец — это щипок, а не приказ: поднятого бойца отпускаем
+      gbDragCancel();
       isDragging = false;
       pinchStartDist = distance(e.touches[0], e.touches[1]);
       pinchStartScale = scale;
@@ -2379,6 +2384,11 @@ function initPanAndZoom() {
   }, { passive: true });
 
   viewport.addEventListener('touchmove', function(e) {
+    if (gbDragActive()) {
+      if (e.touches.length === 1) gbDragMove(e.touches[0].clientX, e.touches[0].clientY);
+      return;
+    }
+    if (e.touches.length === 1) gbDragArmMoved(e.touches[0].clientX, e.touches[0].clientY);
     if (e.touches.length === 1 && isDragging) {
       var dx = e.touches[0].clientX - dragStartX;
       var dy = e.touches[0].clientY - dragStartY;
@@ -2404,7 +2414,25 @@ function initPanAndZoom() {
     }
   }, { passive: true });
 
+  viewport.addEventListener('touchcancel', function() {
+    gbDragCancel();
+    isDragging = false;
+  });
+
+  // Долгое нажатие не должно открывать меню браузера поверх карты
+  viewport.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+
   viewport.addEventListener('touchend', function(e) {
+    gbDragDisarm();
+    if (gbDragActive()) {
+      if (e.touches.length === 0) {
+        if (e.cancelable) e.preventDefault();
+        lastTouchEndMs = Date.now();
+        gbDragEnd();
+        isDragging = false;
+      }
+      return;
+    }
     if (e.touches.length === 0) {
       if (isDragging && !movedDuringDrag) {
         // Браузер после касания дублирует событие мышью. Оно попадает уже
@@ -2429,15 +2457,19 @@ function initPanAndZoom() {
   var mouseMoved = false;
   viewport.addEventListener('mousedown', function(e) {
     if (Date.now() - lastTouchEndMs < 700) return; // это эхо касания, не мышь
+    if (e.button !== undefined && e.button !== 0) return;
     mouseDragging = true;
     mouseMoved = false;
     dragStartX = e.clientX;
     dragStartY = e.clientY;
     panStartX = panX;
     panStartY = panY;
+    gbDragArm(e.clientX, e.clientY);
   });
   window.addEventListener('mousemove', function(e) {
+    if (gbDragActive()) { gbDragMove(e.clientX, e.clientY); return; }
     if (!mouseDragging) return;
+    gbDragArmMoved(e.clientX, e.clientY);
     var dx = e.clientX - dragStartX;
     var dy = e.clientY - dragStartY;
     if (Math.abs(dx) > 4 || Math.abs(dy) > 4) mouseMoved = true;
@@ -2448,6 +2480,8 @@ function initPanAndZoom() {
   });
   window.addEventListener('mouseup', function(e) {
     if (Date.now() - lastTouchEndMs < 700) { mouseDragging = false; return; }
+    gbDragDisarm();
+    if (gbDragActive()) { mouseDragging = false; gbDragEnd(); return; }
     if (mouseDragging && !mouseMoved) {
       handleTap(e.clientX, e.clientY);
     }
@@ -4549,27 +4583,9 @@ function drawUnits() {
     ctx.fillRect(px + inset, py + inset, boxW, boxH);
 
     if (img && img.complete && !img.failed && img.naturalWidth > 0) {
-      // Исходник вытянутый 1:2, а клетка квадратная. Берём из кадра
-      // квадратный кусок с головой и торсом — так юнит узнаётся даже
-      // на иконке в 32 пикселя, и фигура не сплющивается.
-      // У техники кадр квадратный и весь по делу, у пехоты берём
-      // квадрат с головой и торсом
-      var sw, sx, sy, sh;
-      if (type && type.is_vehicle && img.naturalHeight > img.naturalWidth * 1.2) {
-        // Высокая машина (артиллерия) снята в полный рост, как пехота:
-        // файл не режем, а на клетке показываем квадрат по корпусу
-        sw = img.naturalWidth; sh = sw; sx = 0;
-        sy = Math.max(0, Math.min(img.naturalHeight - sh, img.naturalHeight * 0.55 - sh / 2));
-      } else if (type && type.is_vehicle) {
-        sw = img.naturalWidth; sh = img.naturalHeight; sx = 0; sy = 0;
-      } else {
-        sw = img.naturalWidth * 0.70;
-        sx = (img.naturalWidth - sw) / 2;
-        sy = img.naturalHeight * 0.07;
-        sh = sw;
-      }
       // Кадр вырезается самим источником — обрезка холстом не нужна
-      gbDrawSprite(img, sx, sy, sw, sh, px + inset, py + inset, boxW, boxH);
+      var cr = gbUnitCrop(img, type);
+      gbDrawSprite(img, cr[0], cr[1], cr[2], cr[3], px + inset, py + inset, boxW, boxH);
     } else {
       ctx.fillStyle = color;
       ctx.font = Math.round(CELL_PX * 0.5) + 'px monospace';
@@ -4626,6 +4642,22 @@ function drawUnits() {
       drawCellRange(selectedUnit, t.vision_range, 'rgba(217,169,64,0.45)');
     }
   }
+}
+
+// Какой кусок картинки бойца показывать на клетке: [sx, sy, sw, sh].
+// Исходник вытянутый 1:2, а клетка квадратная. Берём из кадра квадратный
+// кусок с головой и торсом — так юнит узнаётся даже на иконке в 32 пикселя,
+// и фигура не сплющивается. У техники кадр квадратный и весь по делу.
+function gbUnitCrop(img, type) {
+  if (type && type.is_vehicle && img.naturalHeight > img.naturalWidth * 1.2) {
+    // Высокая машина (артиллерия) снята в полный рост, как пехота:
+    // файл не режем, а на клетке показываем квадрат по корпусу
+    var w = img.naturalWidth;
+    return [0, Math.max(0, Math.min(img.naturalHeight - w, img.naturalHeight * 0.55 - w / 2)), w, w];
+  }
+  if (type && type.is_vehicle) return [0, 0, img.naturalWidth, img.naturalHeight];
+  var sw = img.naturalWidth * 0.70;
+  return [(img.naturalWidth - sw) / 2, img.naturalHeight * 0.07, sw, sw];
 }
 
 function drawCellRange(unit, range, color) {
@@ -4922,7 +4954,8 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
   // Ход и атака — базовые действия, они есть у всех
   addTile('move', '⇢', 'Идти', canAct(), function() {
     info.innerHTML = '<div class="gu-abil-name">Перемещение</div>' +
-      '<div class="gu-abil-text">До ' + unitMoveRange(unit) + ' клеток за одно действие.</div>';
+      '<div class="gu-abil-text">До ' + unitMoveRange(unit) + ' клеток за одно действие.</div>' +
+      '<div class="gu-abil-meta">быстрее: зажми бойца на карте и веди — отпусти на клетке или на враге</div>';
     guAbilityAction(info, 'Идти', canAct(), function() { startGroundMove(guLiveUnit(unit)); });
   });
 
@@ -5800,6 +5833,526 @@ function handleGroundMoveTap(cellX, cellY) {
     selectedUnit = null;
     loadUnits();
   });
+}
+
+// ===== Жест «зажал и тянешь» (js/drag-command.js) =====
+// Палец держат на своём бойце — он «поднимается», дальше палец ведёт его
+// призрак. Отпустил на пустой клетке — ход, на враге — выстрел, на самом
+// бойце — отмена. Что будет, видно заранее: призрак зелёный или красный,
+// над пальцем подсказка. Цели и дальность берём у сервера (get_ground_targets
+// с туманом войны), ход проверяем теми же правилами, что move_ground_unit,
+// а сам приказ всё равно проверяет база. Жест ничего не добавляет к
+// возможностям бойца — только быстрее отдаёт обычный приказ.
+
+var gbDrag = null;       // поднятый боец: { unit, type, box, gx, gy, cx, cy, hx, hy, ... }
+var gbDragArmed = null;  // палец лёг на своего бойца, ждём, удержит ли
+var gbDragInFlight = {}; // id бойца -> приказ ушёл, ответа ещё нет
+
+// Жест работает только в обычном режиме карты: в любом наведении
+// (ход по кнопке, атака, способность, высадка, стройка) палец занят им
+function gbDragModeBusy() {
+  return !!(buildMode || placingStructure || landingFighter || droppingVehicle ||
+            disembarking || heroAbility || upgradeAbility || artilleryUnit ||
+            attackingUnit || abilityUnit || movingUnit || droppingUnit || placingOrder ||
+            (typeof amPick !== 'undefined' && amPick) ||
+            (typeof gameConfirmOpen === 'function' && gameConfirmOpen()));
+}
+
+function gbClientCell(cx, cy) {
+  var rect = viewport.getBoundingClientRect();
+  return {
+    x: Math.floor(((cx - rect.left - panX) / scale) / CELL_PX),
+    y: Math.floor(((cy - rect.top - panY) / scale) / CELL_PX)
+  };
+}
+
+function gbUnitAtCell(x, y, skipId) {
+  for (var i = unitsOnMap.length - 1; i >= 0; i--) {
+    var u = unitsOnMap[i];
+    if (u.x === null || u.x === undefined || u.id === skipId) continue;
+    var b = unitBox(u);
+    if (x >= u.x && x < u.x + b.w && y >= u.y && y < u.y + b.h) return u;
+  }
+  return null;
+}
+
+// Своего бойца можно поднять, если он стоит на карте и в строю
+function gbDragCanLift(u) {
+  if (!u || u.owner_user_id !== currentUserId) return false;
+  if (u.x === null || u.x === undefined) return false;
+  if (u.hp !== undefined && u.hp !== null && u.hp <= 0) return false;
+  if (u.transit_to) return false;
+  if (u.training_until && new Date(u.training_until).getTime() > gbServerNow()) return false;
+  return true;
+}
+
+// Палец лёг на карту. Если под ним свой боец — заводим таймер удержания.
+function gbDragArm(cx, cy) {
+  gbDragDisarm();
+  if (gbDrag || gbDragModeBusy()) return;
+  var c = gbClientCell(cx, cy);
+  var u = gbUnitAtCell(c.x, c.y);
+  if (!gbDragCanLift(u)) return;
+  gbDragArmed = {
+    unit: u, cx: cx, cy: cy, cell: c,
+    timer: setTimeout(function() { gbDragLift(); }, DC_HOLD_MS)
+  };
+}
+
+function gbDragDisarm() {
+  if (gbDragArmed && gbDragArmed.timer) clearTimeout(gbDragArmed.timer);
+  gbDragArmed = null;
+}
+
+// Палец сдвинулся до срабатывания таймера — это прокрутка карты
+function gbDragArmMoved(cx, cy) {
+  if (!gbDragArmed) return;
+  if (Math.abs(cx - gbDragArmed.cx) > DC_SLOP || Math.abs(cy - gbDragArmed.cy) > DC_SLOP) { gbDragDisarm(); return; }
+  // Пока держат, карта могла чуть сдвинуться — подъём считаем от того,
+  // где палец сейчас, а не где он лёг
+  gbDragArmed.lx = cx; gbDragArmed.ly = cy;
+}
+
+function gbDragActive() { return !!gbDrag; }
+
+// Удержали — боец «поднят»
+function gbDragLift() {
+  var a = gbDragArmed;
+  gbDragArmed = null;
+  if (!a || gbDragModeBusy()) return;
+  var u = guLiveUnit(a.unit);
+  if (!gbDragCanLift(u)) return;
+  var px = a.lx !== undefined ? a.lx : a.cx, py = a.ly !== undefined ? a.ly : a.cy;
+  var cell = gbClientCell(px, py);
+  // Под пальцем уже не этот боец (карта уехала) — не поднимаем
+  var bx0 = unitBox(u);
+  if (cell.x < u.x || cell.x >= u.x + bx0.w || cell.y < u.y || cell.y >= u.y + bx0.h) return;
+
+  // Поднять нельзя — подсказка, а отпускание останется обычным тапом
+  var type = unitTypeById[u.unit_type] || {};
+  if (gbDragInFlight[u.id]) {
+    dcFlash(px, py, 'Приказ уже отдан', 'ждём ответ сервера', 'wait', 1500);
+    return;
+  }
+  var st = unitApState(u);
+  if (st && st.ap < 1) {
+    dcBuzz(8);
+    dcFlash(px, py, 'Нет действий', 'восстановится через ' + st.next_in + ' с', 'bad', 1800);
+    return;
+  }
+
+  var d = {
+    unit: u, type: type, box: bx0,
+    gx: cell.x - u.x, gy: cell.y - u.y,     // за какую клетку корпуса взяли
+    cx: px, cy: py, hx: cell.x, hy: cell.y,
+    lx: px, ly: py, left: false,            // откуда подняли; уводили ли палец
+    range: unitMoveRange(u),
+    artillery: (type.splash_size || 0) > 0,
+    targets: [], structTargets: [], loaded: false, loadP: null,
+    intent: null, raf: 0
+  };
+  gbDrag = d;
+
+  // Цели — у сервера: он знает дальность с улучшениями и туман войны
+  if (!d.artillery) {
+    d.loadP = Promise.all([
+      supabase.rpc('get_ground_targets', { p_unit_id: u.id }),
+      supabase.rpc('get_structure_targets', { p_unit_id: u.id })
+    ]).then(function(r) {
+      d.targets = (!r[0].error && r[0].data) ? r[0].data : [];
+      d.structTargets = (!r[1].error && r[1].data) ? r[1].data : [];
+      d.loaded = true;
+      if (gbDrag === d) gbDragUpdate();
+    }, function() {
+      d.loaded = true;
+      if (gbDrag === d) gbDragUpdate();
+    });
+  } else {
+    d.loaded = true;
+    d.loadP = Promise.resolve();
+  }
+
+  dcBuzz(14);
+  gbDragUpdate();
+  d.raf = requestAnimationFrame(gbDragEdgeTick);
+}
+
+// Палец ведёт призрака
+function gbDragMove(cx, cy) {
+  var d = gbDrag;
+  if (!d) return;
+  d.cx = cx; d.cy = cy;
+  gbDragUpdate();
+}
+
+// У края карты она сама едет за пальцем — иначе дальний ход на крупном
+// масштабе не дотянуть, не отпуская бойца
+function gbDragEdgeTick() {
+  var d = gbDrag;
+  if (!d) return;
+  // Пока палец стоит, где подняли, карту не двигаем: иначе удержание
+  // у края само увезло бы клетку под пальцем и отдало ход
+  if (!d.left) { d.raf = requestAnimationFrame(gbDragEdgeTick); return; }
+  var r = viewport.getBoundingClientRect();
+  var box = { left: r.left, top: r.top, right: r.right, bottom: r.bottom - uiBottomInset };
+  var v = dcEdgeVelocity(box, d.cx, d.cy);
+  if (v.x || v.y) {
+    var px = panX, py = panY;
+    panX += v.x; panY += v.y;
+    clampPan();
+    if (panX !== px || panY !== py) { applyTransform(); gbDragUpdate(); }
+  }
+  d.raf = requestAnimationFrame(gbDragEdgeTick);
+}
+
+function gbDragUpdate() {
+  var d = gbDrag;
+  if (!d) return;
+  var c = gbClientCell(d.cx, d.cy);
+  d.hx = c.x; d.hy = c.y;
+  if (!d.left && (Math.abs(d.cx - d.lx) > DC_SLOP || Math.abs(d.cy - d.ly) > DC_SLOP)) d.left = true;
+  d.intent = gbDragEval(d);
+  var it = d.intent;
+  dcChip(d.cx, d.cy, it.title, it.sub, it.tone);
+  redrawScene();
+}
+
+// Что значит отпустить палец здесь
+function gbDragEval(d) {
+  var u = guLiveUnit(d.unit), b = d.box, hx = d.hx, hy = d.hy;
+
+  // Отмена — когда призрак вернулся точно на место. Не «палец над бойцом»:
+  // технику 2×2 взяли за угол и сдвинули на клетку — палец ещё на ней,
+  // но это уже ход.
+  if (hx - d.gx === u.x && hy - d.gy === u.y) {
+    return { kind: 'home', tone: 'wait', title: 'Отмена', sub: 'веди на клетку или на врага' };
+  }
+
+  // Под пальцем кто-то стоит: враг — выстрел, свой или союзник — занято
+  var other = gbUnitAtCell(hx, hy, u.id);
+  if (other) {
+    var side = cbUnitSide(other);
+    var oName = (unitTypeById[other.unit_type] || {}).name || 'боец';
+    if (side !== 'enemy') {
+      return { kind: 'bad', tone: 'bad', title: 'Место занято', sub: (side === 'mine' ? 'твой ' : 'союзный ') + oName };
+    }
+    if (d.artillery) {
+      return { kind: 'bad', tone: 'bad', title: 'Только залпом', sub: 'артиллерия бьёт по площади — кнопка «Залп»' };
+    }
+    if (!d.loaded) {
+      return { kind: 'wait', tone: 'wait', title: 'Цель: ' + oName, sub: 'проверяем дальность…', target: other };
+    }
+    var t = null;
+    for (var i = 0; i < d.targets.length; i++) {
+      if (d.targets[i].target_id === other.id) { t = d.targets[i]; break; }
+    }
+    if (!t) {
+      return { kind: 'bad', tone: 'bad', title: 'Не достать', sub: oName + ' вне дальности стрельбы', target: other };
+    }
+    return {
+      kind: 'attack', tone: 'attack', title: 'Огонь: ' + (t.name || oName),
+      sub: 'попадание ' + t.chance + '% · урон ' + t.damage, target: other, pick: t
+    };
+  }
+
+  // Вражеская полевая постройка
+  var sAt = structAt(hx, hy);
+  if (sAt && structSide(sAt) === 'enemy') {
+    var sName = (structTypeById[sAt.type_id] || {}).name || 'постройка';
+    if (d.artillery) return { kind: 'bad', tone: 'bad', title: 'Только залпом', sub: 'артиллерия бьёт по площади — кнопка «Залп»' };
+    if (!d.loaded) return { kind: 'wait', tone: 'wait', title: 'Цель: ' + sName, sub: 'проверяем дальность…' };
+    var sp = null;
+    for (var j = 0; j < d.structTargets.length; j++) {
+      if (d.structTargets[j].structure_id === sAt.id) { sp = d.structTargets[j]; break; }
+    }
+    if (!sp) return { kind: 'bad', tone: 'bad', title: 'Не достать', sub: sName + ' вне дальности стрельбы' };
+    return {
+      kind: 'attack-struct', tone: 'attack', title: 'Огонь: ' + (sp.name || sName),
+      sub: 'попадание ' + sp.chance + '% · урон ' + sp.damage, spick: sp
+    };
+  }
+
+  // Пустая клетка — ход. Корпус встаёт так, как его взяли пальцем.
+  var ax = hx - d.gx, ay = hy - d.gy;
+  var out = { ax: ax, ay: ay };
+  var dist = dcCheb(u.x, u.y, ax, ay);
+  if (ax < 0 || ay < 0 || ax + b.w > GRID_SIZE || ay + b.h > GRID_SIZE) {
+    out.kind = 'bad'; out.tone = 'bad'; out.title = 'Край карты'; out.sub = 'сюда корпус не влезет';
+    return out;
+  }
+  if (dist > d.range) {
+    out.kind = 'bad'; out.tone = 'bad'; out.title = 'Слишком далеко';
+    out.sub = 'дальность хода ' + d.range + ' кл., а тут ' + dist + ' кл.';
+    return out;
+  }
+  var why = gbDragMoveProblem(u, ax, ay);
+  if (why) { out.kind = 'bad'; out.tone = 'bad'; out.title = why[0]; out.sub = why[1]; return out; }
+  out.kind = 'move'; out.tone = 'move';
+  out.title = 'Идти · ' + dcCellsWord(dist);
+  out.sub = 'отпусти — встанет здесь';
+  return out;
+}
+
+// Почему сюда нельзя: те же правила, что у move_ground_unit, по тому,
+// что видно на карте. Невидимых в тумане врагов отсекает сервер.
+function gbDragMoveProblem(u, x, y) {
+  var b = unitBox(u);
+  var t = unitTypeById[u.unit_type] || {};
+  if (settlement && boxOverlap(x, y, b.w, b.h, settlement.x, settlement.y, settlement.size, settlement.size)) {
+    return ['В поселение не войти', 'встань в кольце вокруг него'];
+  }
+  for (var k = 0; k < buildSlots.length; k++) {
+    if (boxOverlap(x, y, b.w, b.h, buildSlots[k].x, buildSlots[k].y, SLOT_SIZE, SLOT_SIZE)) {
+      return buildingsBySlot[k + 1] ? ['Здесь здание', 'обойди его'] : ['Участок под застройку', 'обойди его'];
+    }
+  }
+  for (var i = 0; i < unitsOnMap.length; i++) {
+    var o = unitsOnMap[i];
+    if (o.id === u.id || o.x === null || o.x === undefined) continue;
+    var ob = unitBox(o);
+    if (boxOverlap(x, y, b.w, b.h, o.x, o.y, ob.w, ob.h)) return ['Место занято', 'тут уже кто-то стоит'];
+  }
+  for (var j = 0; j < fieldStructures.length; j++) {
+    var s = fieldStructures[j];
+    var st = structTypeById[s.type_id] || {};
+    if (!boxOverlap(x, y, b.w, b.h, s.x, s.y, s.w || 1, s.h || 1)) continue;
+    if (st.enterable && s.faction === u.faction && st.infantry_only && t.is_vehicle) {
+      return ['Технике не въехать', (st.name || 'укрытие') + ' — только для пехоты'];
+    }
+    if (!st.enterable || s.faction !== u.faction) return ['Сюда не встать', st.name || 'постройка'];
+  }
+  return null;
+}
+
+// Отпустили палец
+function gbDragEnd() {
+  var d = gbDrag;
+  if (!d) return;
+  if (d.raf) cancelAnimationFrame(d.raf);
+  var c = gbClientCell(d.cx, d.cy);
+  d.hx = c.x; d.hy = c.y;
+  var it = gbDragEval(d);
+  gbDrag = null;
+
+  // Подержал и отпустил на месте — это обычный тап: открываем бойца
+  if (it.kind === 'home' && !d.left) {
+    dcHideChip();
+    redrawScene();
+    handleTap(d.cx, d.cy);
+    return;
+  }
+
+  // Цель ещё проверяется: дожидаемся ответа и решаем по нему. Стрелять
+  // будем только в того, на кого отпустили: за это время он мог уйти,
+  // а на его клетку — встать другой.
+  if (it.kind === 'wait' && d.loadP) {
+    var want = it.target ? it.target.id : null;
+    dcChip(d.cx, d.cy, it.title, 'проверяем дальность…', 'wait');
+    gbDragInFlight[d.unit.id] = true;
+    d.loadP.then(function() {
+      delete gbDragInFlight[d.unit.id];
+      var again = gbDragEval(d);
+      var same = again.kind === 'attack' && again.target && again.target.id === want;
+      if (!same && (again.kind === 'attack' || again.kind === 'attack-struct' || again.kind === 'move' || again.kind === 'wait')) {
+        again = { kind: 'bad', title: 'Цель ушла', sub: 'приказ не отдан — веди заново' };
+      }
+      gbDragCommit(d, again);
+    });
+    redrawScene();
+    return;
+  }
+  gbDragCommit(d, it);
+  redrawScene();
+}
+
+function gbDragCancel() {
+  var d = gbDrag;
+  gbDragDisarm();
+  if (!d) return;
+  if (d.raf) cancelAnimationFrame(d.raf);
+  gbDrag = null;
+  dcHideChip();
+  redrawScene();
+}
+
+function gbDragCommit(d, it) {
+  var u = d.unit;
+  if (it.kind === 'home') { dcHideChip(); return; }
+  if (it.kind === 'bad' || it.kind === 'wait') {
+    dcFlash(d.cx, d.cy, it.title, it.sub, 'bad', 1800);
+    return;
+  }
+  dcHideChip();
+  gbDragInFlight[u.id] = true;
+  var done = function() { delete gbDragInFlight[u.id]; };
+  var fail = function(msg) {
+    done();
+    dcFlash(d.cx, d.cy, 'Не вышло', msg || 'нет связи с сервером', 'bad', 2600);
+  };
+  var after = function() {
+    if (selectedUnit && selectedUnit.id === u.id) { selectedUnit = null; hidePickup(); }
+  };
+
+  if (it.kind === 'move') {
+    // Боец сразу встаёт на новое место; откажет сервер — вернётся назад
+    var live = guLiveUnit(u);
+    var fromX = live.x, fromY = live.y;
+    live.x = it.ax; live.y = it.ay;
+    redrawScene();
+    supabase.rpc('move_ground_unit', { p_unit_id: u.id, p_x: it.ax, p_y: it.ay }).then(function(r) {
+      if (r.error) {
+        var now = guLiveUnit(u);
+        if (now.x === it.ax && now.y === it.ay) { now.x = fromX; now.y = fromY; }
+        redrawScene();
+        fail(r.error.message);
+        return;
+      }
+      done(); after(); loadUnits();
+    }, function(e) {
+      var now = guLiveUnit(u);
+      if (now.x === it.ax && now.y === it.ay) { now.x = fromX; now.y = fromY; }
+      redrawScene();
+      fail(e && e.message);
+    });
+    return;
+  }
+
+  if (it.kind === 'attack') {
+    var pick = it.pick;
+    cbLastOwnAction = Date.now();
+    supabase.rpc('attack_unit', { p_attacker_id: u.id, p_target_id: pick.target_id }).then(function(r) {
+      if (r.error) { fail(r.error.message); return; }
+      done();
+      var res = (r.data && r.data.length) ? r.data[0] : null;
+      if (res) cbReportShot(u, pick, res);
+      after(); loadUnits();
+    }, function(e) { fail(e && e.message); });
+    return;
+  }
+
+  if (it.kind === 'attack-struct') {
+    var sp = it.spick;
+    cbLastOwnAction = Date.now();
+    supabase.rpc('attack_structure', { p_attacker_id: u.id, p_structure_id: sp.structure_id }).then(function(r) {
+      if (r.error) { fail(r.error.message); return; }
+      done();
+      var res = (r.data && r.data.length) ? r.data[0] : null;
+      if (res) cbReportStructShot(u, sp, res);
+      after(); loadStructures(); loadUnits();
+    }, function(e) { fail(e && e.message); });
+  }
+}
+
+// Отрисовка жеста: зона хода, цели, «поднятый» боец, нить и призрак
+function drawDragOverlay() {
+  var d = gbDrag;
+  if (!d) return;
+  var u = guLiveUnit(d.unit), b = d.box, C = CELL_PX;
+  var it = d.intent || {};
+
+  // Зона хода — как в обычном «Идти»
+  var r = d.range;
+  ctx.fillStyle = 'rgba(95,217,104,0.08)';
+  ctx.fillRect((u.x - r) * C, (u.y - r) * C, (r * 2 + b.w) * C, (r * 2 + b.h) * C);
+  ctx.strokeStyle = 'rgba(95,217,104,0.5)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([7, 5]);
+  ctx.strokeRect((u.x - r) * C, (u.y - r) * C, (r * 2 + b.w) * C, (r * 2 + b.h) * C);
+  ctx.setLineDash([]);
+
+  // Кого можно достать отсюда
+  ctx.lineWidth = 2;
+  d.targets.forEach(function(t) {
+    var tu = gbUnitById(t.target_id);
+    var tb = tu ? unitBox(tu) : { w: 1, h: 1 };
+    ctx.strokeStyle = 'rgba(217,74,74,0.75)';
+    ctx.strokeRect(t.x * C + 2, t.y * C + 2, tb.w * C - 4, tb.h * C - 4);
+  });
+  ctx.setLineDash([6, 4]);
+  d.structTargets.forEach(function(t) {
+    ctx.strokeStyle = 'rgba(217,74,74,0.7)';
+    ctx.strokeRect(t.x * C + 2, t.y * C + 2, t.w * C - 4, t.h * C - 4);
+  });
+  ctx.setLineDash([]);
+
+  // Боец «поднят» с места: само место приглушаем
+  ctx.fillStyle = 'rgba(5,6,10,0.55)';
+  ctx.fillRect(u.x * C + 2, u.y * C + 2, b.w * C - 4, b.h * C - 4);
+
+  var ok = it.kind === 'move' || it.kind === 'attack' || it.kind === 'attack-struct';
+  var col = it.kind === 'attack' || it.kind === 'attack-struct' ? '#ff6b6b'
+          : ok ? '#5fd968' : it.kind === 'wait' || it.kind === 'home' ? '#d9a940' : '#9aa6b2';
+
+  // Куда смотрит нить: середина будущего места или цели
+  var ex, ey, tbx = null;
+  if (it.kind === 'attack' || it.kind === 'wait' || (it.kind === 'bad' && it.target)) {
+    var tg = it.target;
+    if (tg) {
+      var tgb = unitBox(tg);
+      tbx = { x: tg.x, y: tg.y, w: tgb.w, h: tgb.h };
+    }
+  } else if (it.kind === 'attack-struct' && it.spick) {
+    tbx = { x: it.spick.x, y: it.spick.y, w: it.spick.w, h: it.spick.h };
+  }
+  if (tbx) { ex = (tbx.x + tbx.w / 2) * C; ey = (tbx.y + tbx.h / 2) * C; }
+  else if (it.ax !== undefined) { ex = (it.ax + b.w / 2) * C; ey = (it.ay + b.h / 2) * C; }
+  else { ex = (d.hx + 0.5) * C; ey = (d.hy + 0.5) * C; }
+
+  if (it.kind !== 'home') {
+    ctx.strokeStyle = col;
+    ctx.globalAlpha = 0.85;
+    ctx.lineWidth = 3;
+    ctx.setLineDash([10, 7]);
+    ctx.beginPath();
+    ctx.moveTo((u.x + b.w / 2) * C, (u.y + b.h / 2) * C);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+  }
+
+  // Прицел на цели: угловые скобки
+  if (tbx) {
+    var x0 = tbx.x * C - 4, y0 = tbx.y * C - 4, w = tbx.w * C + 8, h = tbx.h * C + 8;
+    var k = Math.min(w, h) * 0.32;
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0 + k); ctx.lineTo(x0, y0); ctx.lineTo(x0 + k, y0);
+    ctx.moveTo(x0 + w - k, y0); ctx.lineTo(x0 + w, y0); ctx.lineTo(x0 + w, y0 + k);
+    ctx.moveTo(x0 + w, y0 + h - k); ctx.lineTo(x0 + w, y0 + h); ctx.lineTo(x0 + w - k, y0 + h);
+    ctx.moveTo(x0 + k, y0 + h); ctx.lineTo(x0, y0 + h); ctx.lineTo(x0, y0 + h - k);
+    ctx.stroke();
+    return;
+  }
+
+  // Призрак бойца на будущем месте
+  if (it.ax === undefined) return;
+  var gx = it.ax * C + 2, gy = it.ay * C + 2, gw = b.w * C - 4, gh = b.h * C - 4;
+  ctx.globalAlpha = 0.78;
+  ctx.fillStyle = 'rgba(5,6,10,0.85)';
+  ctx.fillRect(gx, gy, gw, gh);
+  var img = d.type ? getUnitImage(u.portrait || d.type.image) : null;
+  if (img && img.complete && !img.failed && img.naturalWidth > 0) {
+    var cr = gbUnitCrop(img, d.type);
+    gbDrawSprite(img, cr[0], cr[1], cr[2], cr[3], gx, gy, gw, gh);
+  }
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = col;
+  ctx.lineWidth = 3;
+  ctx.strokeRect(gx, gy, gw, gh);
+  if (!ok) {
+    // Крест поверх: сюда не пойдёт
+    ctx.beginPath();
+    ctx.moveTo(gx + gw * 0.25, gy + gh * 0.25); ctx.lineTo(gx + gw * 0.75, gy + gh * 0.75);
+    ctx.moveTo(gx + gw * 0.75, gy + gh * 0.25); ctx.lineTo(gx + gw * 0.25, gy + gh * 0.75);
+    ctx.stroke();
+  }
+}
+
+function gbUnitById(id) {
+  for (var i = 0; i < unitsOnMap.length; i++) if (unitsOnMap[i].id === id) return unitsOnMap[i];
+  return null;
 }
 
 function hidePickup() {

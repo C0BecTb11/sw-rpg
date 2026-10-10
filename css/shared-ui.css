@@ -500,3 +500,77 @@ body.gc-open #quest-tip { z-index: 4002; }
 @media (prefers-reduced-motion: reduce) {
   #gc-confirm, #gc-confirm .gc-box { transition: none; }
 }
+
+/* ===== Жест «зажал и тянешь» (js/drag-command.js) =====
+   Подсказка над пальцем: что случится, если отпустить здесь. Цвет кромки —
+   намерение: зелёный ход, красный выстрел, серый «нельзя». */
+#dc-chip {
+  --dc-accent: #5fd968;
+  --dc-ax: 50%;
+  position: fixed;
+  z-index: 3800;
+  display: none;
+  pointer-events: none;
+  min-width: 120px;
+  max-width: min(260px, calc(100vw - 16px));
+  padding: 6px 11px 7px;
+  background: rgba(10, 13, 20, 0.94);
+  border: 1px solid var(--dc-accent);
+  border-radius: 9px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55), 0 0 12px rgba(0, 0, 0, 0.3);
+  font-family: 'Courier New', monospace;
+  text-align: center;
+  white-space: nowrap;
+}
+#dc-chip.show { display: block; }
+#dc-chip b {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  color: var(--dc-accent);
+}
+#dc-chip span {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  color: #8fa8c4;
+}
+#dc-chip.tone-attack { --dc-accent: #ff6b6b; }
+#dc-chip.tone-bad    { --dc-accent: #9aa6b2; }
+#dc-chip.tone-bad b  { color: #e3c37a; }
+#dc-chip.tone-wait   { --dc-accent: #d9a940; }
+
+/* Хвостик к пальцу */
+#dc-chip::after {
+  content: '';
+  position: absolute;
+  left: var(--dc-ax);
+  bottom: -5px;
+  width: 8px;
+  height: 8px;
+  margin-left: -5px;
+  background: rgba(10, 13, 20, 0.94);
+  border: 1px solid var(--dc-accent);
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg);
+}
+#dc-chip.below::after {
+  bottom: auto;
+  top: -5px;
+  border: 1px solid var(--dc-accent);
+  border-bottom: none;
+  border-right: none;
+}
+
+/* Долгое нажатие на карте — это жест, а не выделение текста или меню */
+#ground-viewport,
+#space-viewport {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
