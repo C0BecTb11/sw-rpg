@@ -31,10 +31,26 @@ function showMessage(text, isError) {
   messageEl.className = isError ? 'error' : 'success';
 }
 
+// Куда вернуть после входа: игровая страница, с которой увела проверка
+// сессии. Берём только свои адреса вида game/*.html — чужие ссылки игнорируем.
+function nextUrl() {
+  var m = /[?&]next=([^&]*)/.exec(location.search);
+  var next = '';
+  try { next = m ? decodeURIComponent(m[1]) : ''; } catch (e) { next = ''; }
+  return /^game\/[a-z0-9\-]+\.html([?#][^\s]*)?$/i.test(next) ? next : 'game/galaxy-map.html';
+}
+
 function showSession(user) {
   authBox.style.display = 'none';
   sessionBox.style.display = 'block';
   userEmailEl.textContent = user.email;
+  document.getElementById('enter-btn').setAttribute('href', nextUrl());
+
+  // Ник — чтобы было видно, каким персонажем войдёшь
+  var nickEl = document.getElementById('session-nick');
+  supabase.from('profiles').select('nickname').eq('id', user.id).maybeSingle().then(function(r) {
+    if (nickEl && !r.error && r.data && r.data.nickname) nickEl.textContent = r.data.nickname;
+  });
 }
 
 function showAuthForm() {
@@ -97,7 +113,7 @@ function handleSubmit() {
           showMessage('Аккаунт создан, но профиль не сохранился: ' + profileRes.error.message, true);
           return;
         }
-        window.location.href = 'game/galaxy-map.html';
+        window.location.href = nextUrl();
       });
     });
   } else {
@@ -107,7 +123,7 @@ function handleSubmit() {
         showMessage(res.error.message, true);
         return;
       }
-      window.location.href = 'game/galaxy-map.html';
+      window.location.href = nextUrl();
     });
   }
 }
@@ -144,6 +160,22 @@ function initAuthPage() {
   supabase.auth.getSession().then(function(res) {
     if (res.data.session) {
       showSession(res.data.session.user);
+      // Сюда увела проверка на игровой странице, а сессия на месте —
+      // сразу возвращаем обратно, без лишнего нажатия
+      // Защита от круга: если игровая страница уже вернула нас сюда только
+      // что, второй раз сами не уводим — пусть игрок нажмёт кнопку
+      if (/[?&]next=/.test(location.search)) {
+        var last = 0;
+        try { last = Number(sessionStorage.getItem('sw-auth-bounce')) || 0; } catch (e) {}
+        if (Date.now() - last > 20000) {
+          try { sessionStorage.setItem('sw-auth-bounce', String(Date.now())); } catch (e) {}
+          window.location.replace(nextUrl());
+        } else {
+          document.getElementById('session-note').textContent =
+            'Игра не открылась с первого раза — нажми «В галактику». ' +
+            'Если не поможет, закрой лишние вкладки игры и обнови страницу.';
+        }
+      }
     }
   });
 }

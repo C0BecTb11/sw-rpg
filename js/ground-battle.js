@@ -3657,11 +3657,8 @@ function initGroundBattle() {
   var unitPanelClose = document.getElementById('unit-panel-close');
   if (unitPanelClose) unitPanelClose.addEventListener('click', closeUnitPanel);
 
-  supabase.auth.getSession().then(function(res) {
-    if (!res.data.session) {
-      window.location.href = '../auth.html';
-      return;
-    }
+  // Вход проверяем с повтором: краткий сбой не выкидывает из игры
+  sbSessionGate().then(function(res) {
 
     if (!systemId) {
       // Карта строится от сида системы: без ?system= в адресе строить

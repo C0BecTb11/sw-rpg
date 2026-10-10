@@ -119,8 +119,39 @@ button:disabled {
   color: #4a90d9;
 }
 
+/* Главная кнопка при живой сессии: без неё игрок, попавший сюда уже
+   вошедшим, видел только «Выйти» и не мог попасть в игру */
+#enter-btn {
+  display: block;
+  margin-top: 24px;
+  padding: 13px 12px;
+  background: #4a90d9;
+  color: #0a0d14;
+  text-decoration: none;
+  font-size: 13px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  font-weight: bold;
+  border-radius: 2px;
+}
+
+#session-box .session-nick {
+  min-height: 16px;
+  margin: -4px 0 0;
+  font-size: 12px;
+  color: #d9a940;
+}
+
+#session-note {
+  margin-top: 14px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #d9a940;
+}
+#session-note:empty { display: none; }
+
 #logout-btn {
   background: #2a3644;
   color: #cfd8dc;
-  margin-top: 30px;
+  margin-top: 12px;
 }

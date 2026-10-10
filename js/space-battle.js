@@ -737,11 +737,8 @@ function initSpaceBattle() {
   // Очередь верфи — только пока вкладка на экране
   setInterval(function() { if (!document.hidden && systemId) loadShipOrders(); }, 5000);
 
-  supabase.auth.getSession().then(function(res) {
-    if (!res.data.session) {
-      window.location.href = '../auth.html';
-      return;
-    }
+  // Вход проверяем с повтором: краткий сбой не выкидывает из игры
+  sbSessionGate().then(function(res) {
     if (!systemId) { if (window.sceneLoader) sceneLoader.hide(); return; }
     if (window.sceneLoader) sceneLoader.expect([['station', 'Станция'], ['ships', 'Флот']]);
 

@@ -3,12 +3,9 @@
 // Зависит от window.supabase (см. js/supabase-client.js).
 
 function initGalaxyPage() {
-  supabase.auth.getSession().then(function(res) {
-    if (!res.data.session) {
-      // не авторизован — отправляем на вход
-      window.location.href = '../auth.html';
-    }
-  });
+  // Не авторизован — на вход (с повтором: краткий сбой сессии не выкидывает
+  // из игры, а после входа игрок вернётся сюда же)
+  sbSessionGate();
 }
 
 document.addEventListener('DOMContentLoaded', initGalaxyPage);
