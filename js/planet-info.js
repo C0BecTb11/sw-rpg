@@ -190,9 +190,10 @@ function makePiStat(label, value) {
   return row;
 }
 
-// Кнопка отправки командира появляется, только если есть свободный командир
-// в системе, напрямую связанной нитью с этой. Один прыжок за раз — поэтому
-// пролететь «насквозь» через непокорённую вражескую систему нельзя.
+// Кнопка отправки командира появляется, если у игрока есть свободный
+// командир, до которого есть путь сюда. Дальнюю цель сервер прокладывает
+// по нитям через свои планеты и ведёт командира прыжок за прыжком сам.
+// Пролететь «насквозь» через чужую систему нельзя: чужой бывает только цель.
 //
 // Кто именно летит, игрок выбирает сам в отдельном окне: командиров у него
 // может быть несколько на одной планете, и у каждого свой приписанный флот.
@@ -201,6 +202,7 @@ var moveTargetId = null;
 var moveTargetName = '';
 var moveCandidates = [];
 var moveChosen = null;
+var moveTravelSec = 60;   // длительность одного прыжка, из game_settings
 
 function updateMoveButton(viewerId, targetSystemId) {
   var moveBtn = document.getElementById('pi-move-btn');
@@ -210,7 +212,7 @@ function updateMoveButton(viewerId, targetSystemId) {
   moveBtn.disabled = false;
   moveBtn.textContent = 'Отправить командира';
 
-  supabase.rpc('get_move_candidates', { p_target: targetSystemId }).then(function(res) {
+  supabase.rpc('get_route_candidates', { p_target: targetSystemId }).then(function(res) {
     // Карточка могла смениться, пока шёл запрос
     if (currentPlanetInfoSystemId !== targetSystemId) return;
     if (res.error || !res.data || !res.data.length) return;
@@ -233,7 +235,7 @@ function openMovePanel(targetId, targetName) {
   document.getElementById('move-list').innerHTML = '<div class="feed-empty">Загрузка...</div>';
   paintMoveSend();
 
-  supabase.rpc('get_move_candidates', { p_target: targetId }).then(function(res) {
+  supabase.rpc('get_route_candidates', { p_target: targetId }).then(function(res) {
     if (moveTargetId !== targetId) return;
     var list = document.getElementById('move-list');
     if (res.error) {
@@ -245,7 +247,7 @@ function openMovePanel(targetId, targetName) {
     list.innerHTML = '';
 
     if (!moveCandidates.length) {
-      list.innerHTML = '<div class="feed-empty">Рядом нет свободных командиров</div>';
+      list.innerHTML = '<div class="feed-empty">Нет свободных командиров с путём сюда через свои планеты</div>';
       return;
     }
 
@@ -280,6 +282,18 @@ function makeMoveCard(c) {
         : '<span class="mv-state ok">готов</span>') +
     '</div>';
 
+  // Маршрут: откуда, через какие свои планеты, куда
+  var hops = (c.route || []).length - 1;
+  var names = c.route_names || [];
+  var eta = Math.max(1, Math.round(hops * moveTravelSec / 60));
+  var route = '<div class="mv-label">Маршрут · ' + hops + ' ' + hopWord(hops) +
+      ' · ≈ ' + eta + ' мин</div><div class="mv-route">' +
+    names.map(function(n, i) {
+      var cls = i === 0 ? 'mv-stop from' : (i === names.length - 1 ? 'mv-stop goal' : 'mv-stop');
+      return (i ? '<i class="mv-hop">›</i>' : '') + '<span class="' + cls + '">' + escapeMove(n) + '</span>';
+    }).join('') + '</div>' +
+    (hops > 1 ? '<div class="mv-route-hint">Остановки — только свои планеты; дальше флот прыгает сам</div>' : '');
+
   var fleet = '<div class="mv-label">Приписанный флот</div>';
   if (!c.fleet.length) {
     fleet += '<div class="mv-none">кораблей нет — командир летит один</div>';
@@ -312,7 +326,7 @@ function makeMoveCard(c) {
     ? '<div class="mv-note warn">Выведи флот в зону гиперпрыжка — иначе прыжок не начнётся</div>'
     : '';
 
-  card.innerHTML = head + fleet + cargo + left + warn;
+  card.innerHTML = head + route + fleet + cargo + left + warn;
 
   card.addEventListener('click', function() {
     moveChosen = c.commander_id;
@@ -361,9 +375,10 @@ function sendChosenCommander() {
   btn.disabled = true;
   btn.textContent = 'Отправляем...';
 
-  supabase.rpc('start_commander_move', {
+  // Сосед или дальняя цель — одна функция: путь прокладывает сервер
+  supabase.rpc('start_commander_route', {
     p_commander_id: moveChosen,
-    p_target_system: moveTargetId
+    p_target: moveTargetId
   }).then(function(res) {
     if (res.error) {
       alert('Не удалось отправить: ' + res.error.message);
@@ -373,6 +388,13 @@ function sendChosenCommander() {
     closeMovePanel();
     closePlanetInfo();
   });
+}
+
+function hopWord(n) {
+  var d = n % 10, h = n % 100;
+  if (d === 1 && h !== 11) return 'прыжок';
+  if (d >= 2 && d <= 4 && (h < 12 || h > 14)) return 'прыжка';
+  return 'прыжков';
 }
 
 function shipWord(n) {
@@ -407,6 +429,11 @@ document.addEventListener('DOMContentLoaded', function() {
   if (ground) ground.addEventListener('click', function() {
     if (!currentPlanetInfoSystemId) return;
     window.location.href = 'ground-battle.html?system=' + currentPlanetInfoSystemId;
+  });
+
+  supabase.from('game_settings').select('value').eq('key', 'travel_seconds').maybeSingle().then(function(r) {
+    var v = r && r.data ? parseInt(r.data.value, 10) : NaN;
+    if (v > 0) moveTravelSec = v;
   });
 
   var mvClose = document.getElementById('move-close');

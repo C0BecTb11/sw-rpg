@@ -378,6 +378,25 @@ body {
   margin-top: 2px;
 }
 
+/* Оборвать дальний маршрут — тихая кнопка, не главное действие */
+.route-stop-btn {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 7px 8px;
+  background: transparent;
+  border: 1px dashed rgba(217, 169, 64, 0.5);
+  border-radius: 5px;
+  color: #d9a940;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.route-stop-btn:disabled { opacity: 0.5; }
+
 /* ===== Галактическая карта ===== */
 /* Карта — это «мир» фиксированного размера, который таскают и зумят.
    Раньше ширина задавалась в процентах экрана, и при добавлении планет
@@ -1537,6 +1556,36 @@ body {
 }
 
 .mv-note.warn { color: #d9a940; }
+
+/* Маршрут командира: цепочка планет от стоянки до цели */
+.mv-route {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 5px;
+  margin-bottom: 2px;
+}
+
+.mv-stop {
+  padding: 3px 8px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 7px;
+  font-size: 10px;
+  color: #8fa8c4;
+  white-space: nowrap;
+}
+
+.mv-stop.from { color: #55606c; }
+.mv-stop.goal { color: #5fd968; border-color: rgba(95, 217, 104, 0.45); }
+.mv-hop { font-style: normal; font-size: 11px; color: #2a3644; }
+
+.mv-route-hint {
+  margin-top: 6px;
+  font-size: 9px;
+  line-height: 1.4;
+  color: #55606c;
+}
 
 /* Трюм в списке флота: полный подсвечен, груз — фишками с цветом ресурса */
 .ship-capacity.full { color: #d94a4a; }

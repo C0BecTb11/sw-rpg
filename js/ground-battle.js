@@ -2001,6 +2001,7 @@ function drawScene(grid) {
   drawBuildSlots();
   drawStructures();
   drawDeployZone();
+  drawFog();
   drawPlacementCells();
   drawDropCells();
   drawDisembarkCells();
@@ -2010,6 +2011,57 @@ function drawScene(grid) {
   drawAttackZone();
   drawUnits();
   drawStructureOverlay();
+}
+
+// ===== Туман войны =====
+// Что игрок видит, считает сервер (get_my_vision — те же правила, что и
+// фильтр врагов в базе): обзор своих бойцов и союзников с ретранслятором,
+// радары, узел связи, полоса вторжения. Всё остальное затемняем — иначе
+// туман был невидим и казалось, что он не работает. Маска — картинка
+// клетка-в-точку; при растяжении сглаживание само даёт мягкий край.
+var gbVision = null;
+var gbFogCanvas = null;
+var gbFogDirty = true;
+var GB_FOG_COLOR = 'rgba(4,7,12,0.62)';
+
+function loadVision() {
+  if (!systemId || buildMode) return;
+  supabase.rpc('get_my_vision', { p_system_id: systemId, p_layer: 'ground' }).then(function(res) {
+    if (res.error || !res.data) return;
+    gbVision = res.data;
+    gbFogDirty = true;
+    redrawScene();
+  });
+}
+
+function gbFogMask() {
+  if (gbFogCanvas && !gbFogDirty) return gbFogCanvas;
+  var c = gbFogCanvas || document.createElement('canvas');
+  c.width = GRID_SIZE;
+  c.height = GRID_SIZE;
+  var g = c.getContext('2d');
+  g.clearRect(0, 0, GRID_SIZE, GRID_SIZE);
+  g.fillStyle = GB_FOG_COLOR;
+  g.fillRect(0, 0, GRID_SIZE, GRID_SIZE);
+  gbVision.forEach(function(r) {
+    if (r.kind === 'see') g.clearRect(r.x0, r.y0, r.x1 - r.x0 + 1, r.y1 - r.y0 + 1);
+  });
+  // Закрытое поверх открытого: полосу вторжения обороне не видно никогда
+  gbVision.forEach(function(r) {
+    if (r.kind === 'hide') {
+      g.clearRect(r.x0, r.y0, r.x1 - r.x0 + 1, r.y1 - r.y0 + 1);
+      g.fillRect(r.x0, r.y0, r.x1 - r.x0 + 1, r.y1 - r.y0 + 1);
+    }
+  });
+  gbFogCanvas = c;
+  gbFogDirty = false;
+  return c;
+}
+
+function drawFog() {
+  if (!gbVision || buildMode) return;
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(gbFogMask(), 0, 0, GRID_SIZE, GRID_SIZE, 0, 0, GRID_SIZE * CELL_PX, GRID_SIZE * CELL_PX);
 }
 
 // Зоны высадки — тактическая информация, поэтому видны только своей фракции.
@@ -4158,6 +4210,8 @@ function loadUnits() {
     cbRefreshIntel();
     redrawScene();
     refreshEnemyBuildingsInSight();
+    // Бойцы сдвинулись — обзор поменялся
+    gbSoon('vision', loadVision, 120);
     if (window.sceneLoader) sceneLoader.mark('units');
     cbDiffUnits(prevUnits, unitsOnMap, requestedAt);
     cbReconcileHp(requestedAt);
@@ -7568,6 +7622,8 @@ function loadStructures() {
 
     updateStructTimer();
     redrawScene();
+    // Радар достроили или снесли — обзор поменялся
+    gbSoon('vision', loadVision, 120);
     if (window.sceneLoader) sceneLoader.mark('structures');
   });
 }

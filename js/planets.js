@@ -617,6 +617,49 @@ function renderFlights(commanders) {
     });
   });
 
+  // Дальний маршрут своего командира: пунктир от цели текущего прыжка
+  // через оставшиеся планеты, кружок — конечная точка
+  var routed = commanders.filter(function(c) {
+    return c.user_id === currentUserId && c.moving_to && c.route && c.route.length;
+  });
+  if (routed.length) {
+    var SVGNS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(SVGNS, 'svg');
+    svg.setAttribute('class', 'route-layer');
+    svg.style.position = 'absolute';
+    svg.style.left = '0';
+    svg.style.top = '0';
+    svg.style.width = '100%';
+    svg.style.height = '100%';
+    svg.style.overflow = 'visible';
+    svg.style.pointerEvents = 'none';
+    routed.forEach(function(c) {
+      var pts = [c.moving_to].concat(c.route).map(function(id) { return systemPositions[id]; })
+        .filter(function(p) { return !!p; });
+      if (pts.length < 2) return;
+      var line = document.createElementNS(SVGNS, 'polyline');
+      line.setAttribute('points', pts.map(function(p) { return p.x + ',' + p.y; }).join(' '));
+      line.setAttribute('fill', 'none');
+      line.setAttribute('stroke', OWN_COMMANDER_COLOR);
+      line.setAttribute('stroke-opacity', '0.6');
+      line.setAttribute('stroke-width', '1.2');
+      line.setAttribute('stroke-dasharray', '4,4');
+      svg.appendChild(line);
+      var end = pts[pts.length - 1];
+      var ring = document.createElementNS(SVGNS, 'circle');
+      ring.setAttribute('cx', end.x);
+      ring.setAttribute('cy', end.y);
+      ring.setAttribute('r', '13');
+      ring.setAttribute('fill', 'none');
+      ring.setAttribute('stroke', OWN_COMMANDER_COLOR);
+      ring.setAttribute('stroke-opacity', '0.7');
+      ring.setAttribute('stroke-width', '1.2');
+      ring.setAttribute('stroke-dasharray', '3,3');
+      svg.appendChild(ring);
+    });
+    flightLayer.appendChild(svg);
+  }
+
   if (activeFlights.length > 0 && !flightAnimationRunning) {
     flightAnimationRunning = true;
     requestAnimationFrame(animateFlights);

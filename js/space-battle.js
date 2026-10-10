@@ -303,6 +303,47 @@ function loadOrbitalDropZones() {
   });
 }
 
+// ===== Туман войны =====
+// Что видят свои корабли (get_my_vision — те же правила, что фильтр чужих
+// кораблей в базе). Маска клетка-в-точку растягивается на всё поле:
+// браузер сам сглаживает край, а сама картинка — 150×150, почти бесплатно.
+var spFogEl = null;
+var SP_FOG_COLOR = 'rgba(2,3,8,0.74)';
+
+function loadSpaceVision() {
+  if (!systemId || buildMode || !grid) return;
+  supabase.rpc('get_my_vision', { p_system_id: systemId, p_layer: 'space' }).then(function(res) {
+    if (res.error || !res.data) return;
+    renderSpaceFog(res.data);
+  });
+}
+
+function renderSpaceFog(rects) {
+  if (!spFogEl) {
+    spFogEl = document.createElement('canvas');
+    spFogEl.id = 'space-fog';
+    spFogEl.width = GRID_CELLS;
+    spFogEl.height = GRID_CELLS;
+    spFogEl.style.width = (GRID_CELLS * CELL_PX) + 'px';
+    spFogEl.style.height = (GRID_CELLS * CELL_PX) + 'px';
+  }
+  // Под всем остальным: корабли, станция и полосы рисуются поверх
+  if (grid.firstChild !== spFogEl) grid.insertBefore(spFogEl, grid.firstChild);
+  var g = spFogEl.getContext('2d');
+  g.clearRect(0, 0, GRID_CELLS, GRID_CELLS);
+  g.fillStyle = SP_FOG_COLOR;
+  g.fillRect(0, 0, GRID_CELLS, GRID_CELLS);
+  rects.forEach(function(r) {
+    if (r.kind === 'see') g.clearRect(r.x0, r.y0, r.x1 - r.x0 + 1, r.y1 - r.y0 + 1);
+  });
+  rects.forEach(function(r) {
+    if (r.kind === 'hide') {
+      g.clearRect(r.x0, r.y0, r.x1 - r.x0 + 1, r.y1 - r.y0 + 1);
+      g.fillRect(r.x0, r.y0, r.x1 - r.x0 + 1, r.y1 - r.y0 + 1);
+    }
+  });
+}
+
 function renderHyperspaceZone() {
   var old = grid.querySelector('.hyperspace-zone');
   if (old) old.parentNode.removeChild(old);
@@ -705,6 +746,8 @@ function loadShips() {
     if (shipsInSystem.some(function(sh) { return !shipTypeById[sh.ship_type]; })) shipTypesFresh = false;
     renderShips();
     if (window.sceneLoader) sceneLoader.mark('ships');
+    // Корабли сдвинулись — обзор поменялся
+    spSoon('vision', loadSpaceVision, 120);
     loadShipOrders();
     if (typeof onShipsReloaded === 'function') onShipsReloaded();
     if (typeof sxAfterShips === 'function') sxAfterShips(prevShips, req);

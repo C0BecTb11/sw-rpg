@@ -114,12 +114,31 @@ function loadCommanders(userId) {
         status.textContent = 'Заблокирован';
       } else if (c.moving_to) {
         status.textContent = 'В пути → ' + (systemNames[c.moving_to] || c.moving_to);
+        // Дальний маршрут: куда дальше и конечная цель
+        if (c.route && c.route.length) {
+          status.textContent += ' · далее ' + c.route.map(function(id) { return systemNames[id] || id; }).join(' → ');
+        }
       } else {
         status.textContent = 'В системе: ' + (systemNames[c.current_system] || '—');
       }
       info.appendChild(status);
       head.appendChild(info);
       row.appendChild(head);
+
+      // Маршрут можно оборвать: командир сядет на ближайшей планете пути
+      if (c.moving_to && c.route && c.route.length) {
+        var stop = document.createElement('button');
+        stop.className = 'route-stop-btn';
+        stop.textContent = 'Остановиться: ' + (systemNames[c.moving_to] || c.moving_to);
+        stop.addEventListener('click', function() {
+          stop.disabled = true;
+          supabase.rpc('cancel_commander_route', { p_commander_id: c.id }).then(function(res) {
+            if (res.error) { stop.disabled = false; alert(res.error.message); return; }
+            loadArmyData();
+          });
+        });
+        row.appendChild(stop);
+      }
 
       if (c.unlocked) {
         // Флот командира: список кораблей, каждый раскрывается и показывает,
