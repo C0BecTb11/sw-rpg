@@ -212,7 +212,7 @@ function updateMoveButton(viewerId, targetSystemId) {
   moveBtn.disabled = false;
   moveBtn.textContent = 'Отправить командира';
 
-  supabase.rpc('get_route_candidates', { p_target: targetSystemId }).then(function(res) {
+  moveOptions(targetSystemId).then(function(res) {
     // Карточка могла смениться, пока шёл запрос
     if (currentPlanetInfoSystemId !== targetSystemId) return;
     if (res.error || !res.data || !res.data.length) return;
@@ -235,7 +235,7 @@ function openMovePanel(targetId, targetName) {
   document.getElementById('move-list').innerHTML = '<div class="feed-empty">Загрузка...</div>';
   paintMoveSend();
 
-  supabase.rpc('get_route_candidates', { p_target: targetId }).then(function(res) {
+  moveOptions(targetId).then(function(res) {
     if (moveTargetId !== targetId) return;
     var list = document.getElementById('move-list');
     if (res.error) {
@@ -251,9 +251,10 @@ function openMovePanel(targetId, targetName) {
       return;
     }
 
-    // Один командир — выбор очевиден, но состав всё равно показываем:
-    // игрок должен видеть, что улетит, до нажатия кнопки
-    if (moveCandidates.length === 1) moveChosen = moveCandidates[0].commander_id;
+    // Один свободный командир — выбор очевиден, но состав всё равно
+    // показываем: игрок должен видеть, что улетит, до нажатия кнопки
+    var free = moveCandidates.filter(function(c) { return !c.busy; });
+    if (free.length === 1) moveChosen = free[0].commander_id;
 
     moveCandidates.forEach(function(c) { list.appendChild(makeMoveCard(c)); });
     paintMoveSend();
@@ -264,9 +265,22 @@ function closeMovePanel() {
   document.getElementById('move-panel').style.display = 'none';
 }
 
+// Кандидаты вместе с занятыми (рейс снабжения, конвой): занятого видно
+// с причиной, а не просто нет кнопки. Старая база без get_move_options —
+// прежний список, где занятых нет вовсе.
+function moveOptions(target) {
+  return supabase.rpc('get_move_options', { p_target: target }).then(function(res) {
+    var e = res.error;
+    if (e && (e.code === 'PGRST202' || /could not find the function/i.test(e.message || ''))) {
+      return supabase.rpc('get_route_candidates', { p_target: target });
+    }
+    return res;
+  });
+}
+
 function makeMoveCard(c) {
   var card = document.createElement('div');
-  card.className = 'mv-card';
+  card.className = 'mv-card' + (c.busy ? ' busy' : '');
   card.setAttribute('role', 'button');
   card.setAttribute('data-id', c.commander_id);
 
@@ -277,7 +291,8 @@ function makeMoveCard(c) {
       '<span class="mv-pawn">♟</span>' +
       '<span class="mv-who"><b>' + escapeMove(c.name) + '</b>' +
         '<i>стоит: ' + escapeMove(c.from_name) + '</i></span>' +
-      (notReady > 0
+      (c.busy ? '<span class="mv-state busy">занят</span>'
+        : notReady > 0
         ? '<span class="mv-state warn">' + notReady + ' вне зоны прыжка</span>'
         : '<span class="mv-state ok">готов</span>') +
     '</div>';
@@ -326,9 +341,23 @@ function makeMoveCard(c) {
     ? '<div class="mv-note warn">Выведи флот в зону гиперпрыжка — иначе прыжок не начнётся</div>'
     : '';
 
-  card.innerHTML = head + route + fleet + cargo + left + warn;
+  // Занятый командир: причина и куда идти, чтобы освободить
+  var busy = c.busy
+    ? '<div class="mv-busy"><b>' + escapeMove(c.busy) + '</b>' +
+        '<span>Пока он на задании, отправить его нельзя. Поставь рейс на паузу или заверши его в «Снабжении».</span>' +
+        (typeof window.openSupplyScreen === 'function'
+          ? '<button type="button" class="mv-busy-go">Открыть снабжение</button>' : '') +
+      '</div>'
+    : '';
 
-  card.addEventListener('click', function() {
+  card.innerHTML = head + busy + route + fleet + cargo + left + (c.busy ? '' : warn);
+
+  card.addEventListener('click', function(e) {
+    if (e.target && e.target.classList && e.target.classList.contains('mv-busy-go')) {
+      closeMovePanel();
+      window.openSupplyScreen('routes');
+      return;
+    }
     moveChosen = c.commander_id;
     paintMoveSend();
   });
@@ -363,8 +392,9 @@ function paintMoveSend() {
   var c = null;
   moveCandidates.forEach(function(x) { if (x.commander_id === moveChosen) c = x; });
 
-  btn.disabled = !c || c.ready < c.ships;
+  btn.disabled = !c || !!c.busy || c.ready < c.ships;
   btn.textContent = !c ? 'Выбери командира'
+    : c.busy ? 'Командир занят — сначала освободи'
     : (c.ready < c.ships ? 'Флот не в зоне прыжка' : 'Отправить на ' + moveTargetName);
 }
 

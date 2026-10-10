@@ -1474,6 +1474,37 @@ body {
 
 .mv-state.ok { color: #5fd968; border-color: rgba(95, 217, 104, 0.45); }
 .mv-state.warn { color: #d9a940; border-color: rgba(217, 169, 64, 0.45); }
+.mv-state.busy { color: #8fa8c4; border-color: rgba(143, 168, 196, 0.4); }
+
+/* Командир на задании (рейс снабжения, конвой): виден, но не отправить */
+.mv-card.busy { opacity: 0.86; }
+.mv-card.busy.chosen { border-color: rgba(217, 169, 64, 0.6); background: rgba(217, 169, 64, 0.04); }
+.mv-card.busy .mv-pawn { color: #55606c; }
+.mv-card.busy.chosen .mv-pawn { border-color: #d9a940; color: #d9a940; }
+.mv-busy {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-left: 2px solid #d9a940;
+  border-radius: 6px;
+  background: rgba(217, 169, 64, 0.07);
+  font-size: 10px;
+  line-height: 1.45;
+  color: #8fa8c4;
+}
+.mv-busy b { display: block; margin-bottom: 3px; font-size: 11px; font-weight: normal; color: #e3c37a; }
+.mv-busy-go {
+  margin-top: 8px;
+  padding: 7px 10px;
+  background: none;
+  border: 1px solid rgba(217, 169, 64, 0.55);
+  border-radius: 6px;
+  color: #d9a940;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
 
 .mv-label {
   margin: 8px 0 6px;
