@@ -3910,7 +3910,11 @@ function setUnitButtonsEnabled(on) {
   var panel = document.getElementById('unit-panel');
   if (!panel) return;
   var btns = panel.querySelectorAll('.unit-card-order, .unit-order-btn');
-  for (var i = 0; i < btns.length; i++) btns[i].disabled = !on;
+  for (var i = 0; i < btns.length; i++) {
+    // Кнопку одарённого держит закрытой своя проверка, пока не ответит «можно»
+    var gated = btns[i].getAttribute('data-gate');
+    btns[i].disabled = !on || (!!gated && gated !== 'ok');
+  }
 }
 
 // Что изучено для пехоты: показываем только подходящее этому бойцу
@@ -4236,16 +4240,31 @@ function buildUnitCard(unit) {
   // вместо счётчика количества у него поле имени. Кличку сервер проверит
   // ещё раз: длину и занятость среди живых героев игрока.
   var heroInput = null;
+  var heroGate = null;
+  var nameBox = null;
 
   if (unit.is_hero) {
-    var nameBox = document.createElement('div');
+    // Сначала спрашиваем сервер, можно ли вообще начать обряд (кредиты,
+    // сырьё, занятая постройка, место в зоне высадки), и только потом
+    // даём придумывать кличку — а не после ввода имени и выбора клетки.
+    heroGate = document.createElement('div');
+    heroGate.className = 'hero-gate wait';
+    heroGate.textContent = 'Проверяем, можно ли начать обряд…';
+    body.appendChild(heroGate);
+
+    nameBox = document.createElement('div');
     nameBox.className = 'hero-name-box';
+    nameBox.style.display = 'none';
     heroInput = document.createElement('input');
     heroInput.className = 'hero-name-input';
     heroInput.type = 'text';
     heroInput.maxLength = 24;
     heroInput.placeholder = 'Кличка';
     nameBox.appendChild(heroInput);
+    var look = document.createElement('div');
+    look.className = 'hero-name-note';
+    look.textContent = 'Облик одарённому выпадет при обряде';
+    nameBox.appendChild(look);
     body.appendChild(nameBox);
   }
 
@@ -4329,7 +4348,9 @@ function buildUnitCard(unit) {
 
   function updatePrice() {
     var n = parseInt(val.textContent, 10);
-    order.textContent = 'Нанять · ' + ((unit.cost + upgradeCost()) * n);
+    if (order.getAttribute('data-gate') !== 'bad') {
+      order.textContent = 'Нанять · ' + ((unit.cost + upgradeCost()) * n);
+    }
 
     var sub = body.querySelector('.unit-up-sub');
     if (sub) {
@@ -4342,6 +4363,46 @@ function buildUnitCard(unit) {
   }
   updatePrice();
 
+  // Ответ проверки: можно — открываем поле клички, нельзя — пишем почему
+  function applyHeroGate(reason) {
+    if (!heroGate) return;
+    if (reason) {
+      heroGate.className = 'hero-gate bad';
+      heroGate.style.display = '';
+      heroGate.textContent = reason;
+      nameBox.style.display = 'none';
+      order.setAttribute('data-gate', 'bad');
+      order.disabled = true;
+      order.textContent = 'Обряд недоступен';
+    } else {
+      heroGate.className = 'hero-gate';
+      heroGate.style.display = 'none';
+      nameBox.style.display = '';
+      order.setAttribute('data-gate', 'ok');
+      order.disabled = false;
+      updatePrice();
+    }
+  }
+
+  function checkHeroGate(done) {
+    var bld = unitPanelBuilding;
+    stlSafe(supabase.rpc('hero_hire_check', { p_building_id: bld && bld.id })).then(function(r) {
+      // Панель уже закрыли или открыли другую постройку — ответ не наш
+      if (unitPanelBuilding !== bld || !document.body.contains(card)) return;
+      // Старая база без проверки — ведём себя как раньше: поле сразу
+      if (r.error && stlRpcMissing(r.error)) { applyHeroGate(null); if (done) done(null); return; }
+      var reason = r.error ? ('Не удалось проверить: ' + r.error.message) : (r.data || null);
+      applyHeroGate(reason);
+      if (done) done(reason);
+    });
+  }
+
+  if (unit.is_hero) {
+    order.setAttribute('data-gate', 'wait');
+    order.disabled = true;
+    checkHeroGate();
+  }
+
   order.addEventListener('click', function() {
     var n = parseInt(val.textContent, 10);
 
@@ -4352,8 +4413,13 @@ function buildUnitCard(unit) {
         heroInput.focus();
         return;
       }
-      // Сначала выбираем место на карте, заказ уходит после выбора клетки.
-      startPlacement(unit.id, 1, [], nick);
+      // Пока придумывали кличку, могло что-то измениться — сверяемся ещё раз,
+      // и только потом выбираем место на карте; заказ уходит после клетки.
+      order.disabled = true;
+      order.setAttribute('data-gate', 'wait');
+      checkHeroGate(function(reason) {
+        if (!reason) startPlacement(unit.id, 1, [], nick);
+      });
       return;
     }
 
