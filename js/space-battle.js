@@ -1082,7 +1082,8 @@ function openShipyard() {
     var faction = (!pr.error && pr.data && pr.data.length) ? pr.data[0].faction : null;
 
     Promise.all([
-      supabase.from('ship_types').select('*').eq('is_fighter', false).eq('faction', faction),
+      // От дешёвых к дорогим: корвет, крейсеры, линкоры, дредноут
+      supabase.from('ship_types').select('*').eq('is_fighter', false).eq('faction', faction).order('cost'),
       // Корабли, временно закрытые настройкой (например, на время теста)
       supabase.from('game_settings').select('value').eq('key', 'locked_for_test').maybeSingle()
     ]).then(function(rr) {

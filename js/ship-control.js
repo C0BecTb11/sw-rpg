@@ -59,6 +59,9 @@ function scBox(type, facing) {
     : { w: type.width_cells, h: type.height_cells };
 }
 
+// Классы корпуса для подписи: крейсер — между корветом и крупным кораблём
+var SC_HULL_NAMES = { corvette: 'Корвет', cruiser: 'Крейсер', capital: 'Крупный корабль' };
+
 // Вместимость своего корабля с улучшениями — как ship_stats на сервере.
 // Раньше брали паспорт типа: прокачанный «Провиденс» с шестью
 // истребителями внутри показывал «ангар 6 из 3».
@@ -186,7 +189,7 @@ function scRenderHud() {
 
   var role = scType.is_fighter
     ? (scType.hull_class === 'bomber' ? 'Бомбардировщик' : 'Истребитель')
-    : (scType.hull_class === 'corvette' ? 'Корвет' : 'Крупный корабль');
+    : (SC_HULL_NAMES[scType.hull_class] || 'Крупный корабль');
 
   document.getElementById('sc-sub').textContent =
     role + ' · ' + scShip.x + ':' + scShip.y;
@@ -1542,7 +1545,7 @@ function sxSide(ship) {
 function sxRole(type) {
   if (!type) return 'Корабль';
   if (type.is_fighter) return type.hull_class === 'bomber' ? 'Бомбардировщик' : 'Истребитель';
-  return type.hull_class === 'corvette' ? 'Корвет' : 'Крупный корабль';
+  return SC_HULL_NAMES[type.hull_class] || 'Крупный корабль';
 }
 
 // ---------- Порядок ответов и разница между загрузками ----------
