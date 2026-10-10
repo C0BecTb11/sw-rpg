@@ -38,7 +38,8 @@ function updateShipCapacity() {
   var el = document.getElementById('shipcargo-capacity');
   supabase.rpc('ship_load_used', { p_ship_id: cargoShip.id }).then(function(res) {
     var used = (!res.error && typeof res.data === 'number') ? res.data : 0;
-    var cap = cargoShipType.capacity || 0;
+    // С улучшением трюма корабля — как ship_stats на сервере
+    var cap = (cargoShipType.capacity || 0) + ((cargoShip && cargoShip.bonus_capacity) || 0);
     var freeSlots = Math.max(0, cap - used);
     el.textContent = 'Трюм: ' + used + ' из ' + cap + ' слотов' +
       (freeSlots ? ' · свободно ' + freeSlots +

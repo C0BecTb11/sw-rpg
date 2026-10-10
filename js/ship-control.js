@@ -59,6 +59,17 @@ function scBox(type, facing) {
     : { w: type.width_cells, h: type.height_cells };
 }
 
+// Вместимость своего корабля с улучшениями — как ship_stats на сервере.
+// Раньше брали паспорт типа: прокачанный «Провиденс» с шестью
+// истребителями внутри показывал «ангар 6 из 3».
+function scHangarCap(ship, type) {
+  return ((type && type.hangar_slots) || 0) + ((ship && ship.bonus_hangar) || 0);
+}
+
+function scCargoCap(ship, type) {
+  return ((type && type.capacity) || 0) + ((ship && ship.bonus_capacity) || 0);
+}
+
 // Сколько действий накоплено прямо сейчас
 function scApState(ship) {
   var cd = scSettings.cooldown;
@@ -249,10 +260,10 @@ function scRenderTabs() {
 
   if ((scType.max_shield || 0) > 0) tabs.push({ id: 'shields', label: 'Щиты' });
   // Трюм только у тех, кто возит: у истребителя вместимость ноль
-  if ((scType.capacity || 0) > 0) tabs.push({ id: 'cargo', label: 'Трюм' });
+  if (scCargoCap(scShip, scType) > 0) tabs.push({ id: 'cargo', label: 'Трюм' });
   // Ангар только у носителей. Истребителю он не нужен: возвращаться
   // он умеет, но это действие, а не помещение — ему место среди плиток.
-  if (scType.hangar_slots > 0) tabs.push({ id: 'hangar', label: 'Ангар' });
+  if (scHangarCap(scShip, scType) > 0) tabs.push({ id: 'hangar', label: 'Ангар' });
   tabs.push({ id: 'info', label: 'Описание' });
 
   // Вкладка могла исчезнуть при смене корабля — тогда возвращаемся к действиям
@@ -317,7 +328,7 @@ function scRenderCargo() {
     holds.forEach(function(h) { if (h.ship_id === forShip) used += (h.slots || 0); });
     goods.forEach(function(g) { used += (g.slots || 0); });
 
-    var cap = scType.capacity || 0;
+    var cap = scCargoCap(scShip, scType);
     box.innerHTML = '<div class="sc-hangar-head">Трюм · ' +
       '<span class="' + (cap && used >= cap ? 'sc-cargo-full' : '') + '">' +
       used + ' из ' + cap + '</span></div>';
@@ -686,7 +697,7 @@ function scRenderHangar() {
   // оставался на экране даже в режиме хода.
   // У истребителя ангара нет: возврат к носителю показывается плиткой
   // среди действий, а не отдельным разделом
-  if (!scType.hangar_slots) {
+  if (!scHangarCap(scShip, scType)) {
     box.innerHTML = '';
     return;
   }
@@ -718,7 +729,7 @@ function scRenderHangar() {
     });
 
     var html = '<div class="sc-hangar-head">Ангар · ' +
-      list.length + ' из ' + scType.hangar_slots + '</div>';
+      list.length + ' из ' + scHangarCap(scShip, scType) + '</div>';
     box.innerHTML = html;
 
     if (!list.length) {

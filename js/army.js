@@ -243,7 +243,9 @@ function makeFleetSection(ships, cargoByShip, systemNames, goodsByShip) {
     // а гружёная канонерка — ещё и за свой десант. Груз — тоже слоты.
     var used = cargo.reduce(function(a, c) { return a + (c.slots || c.quantity); }, 0) +
                goods.reduce(function(a, g) { return a + g.slots; }, 0);
-    var cap = type.capacity || 0;
+    // Вместимость с улучшениями корабля, как считает сервер
+    var cap = (type.capacity || 0) + (ship.bonus_capacity || 0);
+    var hangarCap = (type.hangar_slots || 0) + (ship.bonus_hangar || 0);
 
     var block = document.createElement('div');
     block.className = 'ship-block';
@@ -274,7 +276,7 @@ function makeFleetSection(ships, cargoByShip, systemNames, goodsByShip) {
     // Управление трюмом прямо из списка флота: видно, что внутри,
     // и сразу можно догрузить или высадить.
     // Кнопка трюма только там, где трюм есть
-    if (!type.is_fighter && (type.capacity || 0) > 0) {
+    if (!type.is_fighter && cap > 0) {
       var manage = document.createElement('button');
       manage.className = 'ship-manage-btn';
       manage.textContent = 'Заполнить трюм';
@@ -285,7 +287,7 @@ function makeFleetSection(ships, cargoByShip, systemNames, goodsByShip) {
     }
 
     // Зато у носителя показываем ангар: сколько истребителей внутри
-    if (type.hangar_slots > 0) {
+    if (hangarCap > 0) {
       var hangar = document.createElement('div');
       hangar.className = 'ship-hangar-line';
       hangar.textContent = 'Ангар: загрузка…';
@@ -293,7 +295,7 @@ function makeFleetSection(ships, cargoByShip, systemNames, goodsByShip) {
 
       supabase.rpc('get_hangar', { p_ship_id: ship.id }).then(function(res) {
         var n = (!res.error && res.data) ? res.data.length : 0;
-        hangar.textContent = 'Ангар: ' + n + ' из ' + type.hangar_slots;
+        hangar.textContent = 'Ангар: ' + n + ' из ' + hangarCap;
       });
     }
 
