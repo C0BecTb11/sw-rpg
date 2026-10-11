@@ -1577,3 +1577,16 @@
   -webkit-touch-callout: none;
   user-select: none;
 }
+
+/* Куда развернуться нельзя — направление приглушено, тап объяснит почему */
+.sc-dir.blocked { opacity: 0.35; border-style: dashed; }
+.sc-dir.blocked:active { background: #10151e; color: #8fa8c4; }
+
+/* Выпуск истребителя: где он может выйти из ангара */
+.sc-launch-zone {
+  position: absolute;
+  pointer-events: none;
+  border: 2px dashed rgba(217,169,64,0.75);
+  background: rgba(217,169,64,0.07);
+  border-radius: 4px;
+}

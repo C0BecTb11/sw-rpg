@@ -250,6 +250,7 @@ function scRenderHud() {
   scRenderMode();
   scOverwatchStrip();
   scRenderOwZone();
+  scRenderLaunchZone();
 }
 
 // ===== На чеку =====
@@ -815,6 +816,7 @@ function scRenderCommander() {
 // новую сущность, поэтому прочность и повреждения сохраняются.
 
 var scHangarMode = null;   // null | 'launch' | 'land'
+var scLaunchBusy = false;
 var scHangarPick = null;   // выбранный истребитель
 
 function scRenderHangar() {
@@ -1025,7 +1027,40 @@ function scStartLaunch(f) {
   scSetMode(null);
 
   var hint = document.getElementById('sc-hint');
-  hint.textContent = 'Коснись клетки рядом с носителем';
+  hint.textContent = 'Коснись рядом с носителем — встанет на ближайшую свободную клетку';
+  scRenderLaunchZone();
+}
+
+// Где можно выпустить: не дальше двух клеток от корпуса носителя
+// (как в launch_fighter) и не на занятой клетке
+function scLaunchCells() {
+  if (!scShip || !scType) return [];
+  var b = scBox(scType, scShip.facing || 0);
+  var out = [];
+  for (var dx = -2; dx < b.w + 2; dx++) {
+    for (var dy = -2; dy < b.h + 2; dy++) {
+      if (dx >= 0 && dx < b.w && dy >= 0 && dy < b.h) continue;
+      var x = scShip.x + dx, y = scShip.y + dy;
+      if (!scBoxBusy(x, y, 1, 1, null)) out.push({ x: x, y: y });
+    }
+  }
+  return out;
+}
+
+var scLaunchZoneEl = null;
+function scRenderLaunchZone() {
+  if (scLaunchZoneEl && scLaunchZoneEl.parentNode) scLaunchZoneEl.parentNode.removeChild(scLaunchZoneEl);
+  scLaunchZoneEl = null;
+  if (scHangarMode !== 'launch' || !scShip || !scType || typeof grid === 'undefined' || !grid) return;
+  var b = scBox(scType, scShip.facing || 0);
+  var el = document.createElement('div');
+  el.className = 'sc-launch-zone';
+  el.style.left = ((scShip.x - 2) * CELL_PX) + 'px';
+  el.style.top = ((scShip.y - 2) * CELL_PX) + 'px';
+  el.style.width = ((b.w + 4) * CELL_PX) + 'px';
+  el.style.height = ((b.h + 4) * CELL_PX) + 'px';
+  grid.insertBefore(el, grid.querySelector('.ship-sprite'));
+  scLaunchZoneEl = el;
 }
 
 // Посадка идёт на наземной карте: сразу переходим туда с этим
@@ -1034,6 +1069,7 @@ function scStartLaunch(f) {
 function scStartLand(f) {
   scHangarPick = null;
   scHangarMode = null;
+  scRenderLaunchZone();
 
   // Носитель не в площадке сброса — садиться неоткуда, на землю не ведём
   supabase.rpc('get_landable_fighters', { p_system_id: systemId }).then(function(res) {
@@ -1088,8 +1124,13 @@ function scRenderMode() {
 
   var dirs = dial.querySelectorAll('.sc-dir');
   for (var i = 0; i < dirs.length; i++) {
-    var isNow = scShip && parseInt(dirs[i].dataset.deg, 10) === (scShip.facing || 0);
+    var dDeg = parseInt(dirs[i].dataset.deg, 10);
+    var isNow = scShip && dDeg === (scShip.facing || 0);
     dirs[i].classList.toggle('current', !!isNow);
+    // Куда не развернуться — видно сразу, а не отказом после нажатия
+    var block = scMode === 'rotate' && !isNow ? scRotateBlock(dDeg) : null;
+    dirs[i].classList.toggle('blocked', !!block);
+    dirs[i].title = block || (SC_FACINGS[i] ? SC_FACINGS[i].name : '');
   }
 
   var confirmBox = document.getElementById('sc-confirm');
@@ -1111,7 +1152,13 @@ function scRenderMode() {
   } else if (scMode === 'move') {
     hint.textContent = 'Коснись клетки — корабль встанет на неё серединой';
   } else if (scMode === 'rotate') {
-    hint.textContent = 'Стрелка — направление носа';
+    // Тусклые стрелки — туда не развернуться; причину пишем здесь,
+    // на телефоне подсказки по наведению нет
+    var why = null;
+    var bl = dial.querySelectorAll('.sc-dir.blocked');
+    if (bl.length) why = bl[0].title;
+    hint.textContent = why ? 'Стрелка — направление носа · пунктир: ' + why.charAt(0).toLowerCase() + why.slice(1)
+                           : 'Стрелка — направление носа';
   } else if (scMode === 'auto') {
     hint.textContent = typeof amHintText === 'function' ? amHintText() : '';
   } else {
@@ -1217,6 +1264,7 @@ function scDeselect() {
   if (typeof setBottomInset === 'function') setBottomInset(0);
   scRenderRange();
   scRenderOwZone();
+  scRenderLaunchZone();
 }
 
 // Полная очистка разделов: содержимое, состояние режимов и списки
@@ -1231,7 +1279,7 @@ function scResetSections() {
   scPreview = null;
 
   var hud = document.getElementById('ship-hud');
-  if (hud) hud.classList.remove('mode-move', 'mode-rotate', 'mode-attack', 'mode-hangar', 'mode-auto');
+  if (hud) hud.classList.remove('mode-move', 'mode-rotate', 'mode-attack', 'mode-hangar', 'mode-auto', 'mode-watch');
   if (typeof amReset === 'function') amReset();
 
   ['sc-targets', 'sc-hangar'].forEach(function(id) {
@@ -1294,8 +1342,53 @@ function scHasAp() {
   return false;
 }
 
+// Чем помешает разворот — та же геометрия, что в rotate_ship на сервере:
+// новый габарит центрируется на старом и прижимается к краям карты.
+// Видим только то, что на карте; спрятанное в тумане отсечёт сервер.
+function scBoxBusy(x, y, w, h, ignoreId) {
+  if (x < 0 || y < 0 || x + w > GRID_CELLS || y + h > GRID_CELLS) return true;
+  var list = (typeof shipsInSystem !== 'undefined' && shipsInSystem) || [];
+  for (var i = 0; i < list.length; i++) {
+    var o = list[i];
+    if (o.id === ignoreId || o.carrier_ship_id || o.in_transit) continue;
+    if (o.x === null || o.x === undefined || o.y === null || o.y === undefined) continue;
+    var ot = (typeof shipTypeById !== 'undefined') ? shipTypeById[o.ship_type] : null;
+    if (!ot) continue;
+    var ob = scBox(ot, o.facing);
+    if (x < o.x + ob.w && o.x < x + w && y < o.y + ob.h && o.y < y + h) return true;
+  }
+  if (typeof stationSlot !== 'undefined' && stationSlot) {
+    var ss = stationSlot.size || (typeof STATION_SIZE !== 'undefined' ? STATION_SIZE : 8);
+    if (x < stationSlot.x + ss && stationSlot.x < x + w &&
+        y < stationSlot.y + ss && stationSlot.y < y + h) return true;
+  }
+  return false;
+}
+
+function scBandAt(y, h) {
+  var zone = typeof ZONE_HEIGHT !== 'undefined' ? ZONE_HEIGHT : 14;
+  return y < zone || y + h > GRID_CELLS - zone;
+}
+
+function scRotateBlock(deg) {
+  if (!scShip || !scType) return null;
+  if (deg === (scShip.facing || 0)) return null;
+  var o = scBox(scType, scShip.facing || 0);
+  if (scBandAt(scShip.y, o.h)) return 'В зоне гиперпространства корабли стоят строем — сначала выйди из неё';
+  var n = scBox(scType, deg);
+  var nx = scShip.x + Math.floor((o.w - n.w) / 2);
+  var ny = scShip.y + Math.floor((o.h - n.h) / 2);
+  nx = Math.max(0, Math.min(nx, GRID_CELLS - n.w));
+  ny = Math.max(0, Math.min(ny, GRID_CELLS - n.h));
+  if (scBandAt(ny, n.h)) return 'Развернуться вплотную к зоне гиперпространства не выйдет';
+  if (scBoxBusy(nx, ny, n.w, n.h, scShip.id)) return 'Вокруг корабля не хватает места для разворота';
+  return null;
+}
+
 function scDoRotate(deg) {
   if (!scShip || deg === scShip.facing) return;
+  var why = scRotateBlock(deg);
+  if (why) { scFail(why); return; }
   if (!scHasAp()) return;
   scBusy(true);
   supabase.rpc('rotate_ship', { p_ship_id: scShip.id, p_facing: deg }).then(function(res) {
@@ -1533,6 +1626,13 @@ function scDoAttack(target, btn) {
 }
 
 function scFail(msg) {
+  // Корабль погиб или ушёл, пока панель была открыта: повторные приказы
+  // по нему бессмысленны — перечитываем флот и закрываем панель
+  if (msg && /^Корабль не найден/.test(msg)) {
+    if (typeof loadShips === 'function') loadShips();
+    if (typeof scDeselect === 'function') scDeselect();
+    return;
+  }
   var hint = document.getElementById('sc-hint');
   if (!hint) return;
   hint.textContent = msg;
@@ -1567,14 +1667,35 @@ function scInitFieldTap() {
       var lx = Math.floor(((e.clientX - rect0.left - panX) / scale) / CELL_PX);
       var ly = Math.floor(((e.clientY - rect0.top - panY) / scale) / CELL_PX);
 
+      // Палец редко попадает точно — берём ближайшую свободную клетку
+      // у носителя в сторону касания, а не ловим отказ сервера
+      // Тап далеко от носителя — промах, а не приказ: молча выпускать
+      // истребитель куда-то к носителю было бы сюрпризом
+      if (!scShip || !scType) return;
+      var cb = scBox(scType, scShip.facing || 0);
+      var gap = Math.max(scShip.x - lx, lx - (scShip.x + cb.w - 1), scShip.y - ly, ly - (scShip.y + cb.h - 1), 0);
+      if (gap > 4) { scFail('Коснись внутри подсвеченной рамки у носителя'); return; }
+      var cells = scLaunchCells();
+      if (!cells.length) { scFail('Вокруг носителя нет свободных клеток'); return; }
+      cells.sort(function(a, b) {
+        var da = Math.max(Math.abs(a.x - lx), Math.abs(a.y - ly)) * 100 + Math.abs(a.x - lx) + Math.abs(a.y - ly);
+        var db = Math.max(Math.abs(b.x - lx), Math.abs(b.y - ly)) * 100 + Math.abs(b.x - lx) + Math.abs(b.y - ly);
+        return da - db;
+      });
+      var spot = cells[0];
+      if (scLaunchBusy) return;
+      scLaunchBusy = true;
+
       supabase.rpc('launch_fighter', {
-        p_fighter_id: scHangarPick.fighter_id, p_x: lx, p_y: ly
+        p_fighter_id: scHangarPick.fighter_id, p_x: spot.x, p_y: spot.y
       }).then(function(r) {
+        scLaunchBusy = false;
         if (r.error) { scFail(r.error.message); return; }
         scHangarMode = null; scHangarPick = null;
+        scRenderLaunchZone();
         loadShips();
         if (scShip) scRenderHangar();
-      });
+      }, function() { scLaunchBusy = false; });
       return;
     }
 
@@ -2240,7 +2361,7 @@ function sxPing(x, y, w, h) {
 var sdDrag = null;          // поднятый корабль
 var sdArmed = null;         // палец лёг на свой корабль, ждём удержания
 var sdInFlight = {};        // id корабля -> приказ ушёл, ответа ещё нет
-var sdRefused = null;       // поднять не дали (нет действий, луч): отпускание — обычный тап
+var sdRefused = null;       // поднять не дали (нет действий, луч): отпускание ничего не открывает
 var sdNoClickUntil = 0;     // после жеста браузер может прислать клик — гасим
 
 function sdModeBusy() {
@@ -2302,14 +2423,14 @@ function sdArmMoved(cx, cy) {
   sdArmed.lx = cx; sdArmed.ly = cy;
 }
 
-// Отпустили палец, а поднять корабль было нельзя: это обычный тап по нему.
-// После долгого нажатия браузер клик может не прислать — жмём сами.
+// Отпустили палец, а поднять корабль было нельзя (нет действий, луч,
+// приказ в пути). Игрок держал палец ради жеста и ждёт отсчёт — панель
+// корабля здесь только мешала и её приходилось закрывать. Отпускание
+// ничего не открывает, клик браузера после удержания гасим.
 function sdReleaseRefused() {
   var r = sdRefused;
   sdRefused = null;
   if (!r) return;
-  var spr = grid.querySelector('.ship-sprite[data-ship-id="' + r.id + '"]');
-  if (spr) spr.click();
   sdNoClickUntil = Date.now() + 500;
 }
 

@@ -1588,6 +1588,9 @@ function guLeftSec(readyAt) {
 function setBottomInset(px) {
   var delta = px - uiBottomInset;
   uiBottomInset = px;
+  // Снизу открыта панель — кнопка десанта уступает ей место
+  var dropBtn = document.getElementById('drop-btn');
+  if (dropBtn) dropBtn.classList.toggle('tucked', px > 0);
   panY -= delta;
   clampPan();
   applyTransform();
@@ -1657,6 +1660,8 @@ function initBuildSwitcher() {
     '<button class="build-switch-btn" data-go="space">Космос</button>' +
     '<button class="build-switch-btn" data-go="galaxy">Галактика</button>';
   document.body.appendChild(bar);
+  var dropBtn = document.getElementById('drop-btn');
+  if (dropBtn) dropBtn.classList.add('raised');
 
   bar.addEventListener('click', function(e) {
     var target = e.target.getAttribute('data-go');
@@ -2081,6 +2086,8 @@ function drawScene(grid) {
   drawUnits();
   drawStructureOverlay();
   drawDragOverlay();
+  // Десант: полоса вторжения, несомая карточка и места в ожидании ответа
+  if (typeof dtDraw === 'function') dtDraw();
 }
 
 // ===== Туман войны =====
@@ -2433,6 +2440,14 @@ function initPanAndZoom() {
       }
       return;
     }
+    // Удержание без подъёма: гасим и тап, и мышиное эхо касания
+    if (e.touches.length === 0 && gbDragRefused) {
+      gbDragRefused = false;
+      if (e.cancelable) e.preventDefault();
+      lastTouchEndMs = Date.now();
+      isDragging = false;
+      return;
+    }
     if (e.touches.length === 0) {
       if (isDragging && !movedDuringDrag) {
         // Браузер после касания дублирует событие мышью. Оно попадает уже
@@ -2482,6 +2497,7 @@ function initPanAndZoom() {
     if (Date.now() - lastTouchEndMs < 700) { mouseDragging = false; return; }
     gbDragDisarm();
     if (gbDragActive()) { mouseDragging = false; gbDragEnd(); return; }
+    if (gbDragRefused) { gbDragRefused = false; mouseDragging = false; return; }
     if (mouseDragging && !mouseMoved) {
       handleTap(e.clientX, e.clientY);
     }
@@ -2520,6 +2536,23 @@ function handleTap(clientX, clientY) {
   if (placingStructure) {
     handleStructurePlacementTap(cellX, cellY);
     return;
+  }
+
+  // Карточка десанта выбрана тапом: ставим через лоток (проверки,
+  // отметка ожидания, подсказка у пальца)
+  if (typeof dtOpen !== 'undefined' && dtOpen && dtSelKey &&
+      (landingFighter || droppingVehicle || droppingUnit)) {
+    dtTapPlace(cellX, cellY, clientX, clientY);
+    return;
+  }
+  // Лоток открыт, карточка не выбрана: тап в полосе — подсказка,
+  // тап по остальной карте — выход из десанта и обычный тап
+  if (typeof dtOpen !== 'undefined' && dtOpen) {
+    if (cellY >= GRID_SIZE - ATTACK_ZONE_H && cellY < GRID_SIZE) {
+      dcFlash(clientX, clientY, 'Тяни карточку сюда', 'или выбери её тапом в лотке', 'move', 1600);
+      return;
+    }
+    closeDropTray();
   }
 
   if (landingFighter) {
@@ -3874,7 +3907,10 @@ function initGroundBattle() {
       gbDeepLink();
 
       var dropBtn = document.getElementById('drop-btn');
-      if (dropBtn) dropBtn.addEventListener('click', openDropPanel);
+      // Высадка — лоток с перетаскиванием (js/drop-tray.js); старый список — запасной путь
+      if (dropBtn) dropBtn.addEventListener('click', function() {
+        if (typeof openDropTray === 'function') openDropTray(); else openDropPanel();
+      });
       var rsClose = document.getElementById('research-close');
       if (rsClose) rsClose.addEventListener('click', closeResearchPanel);
 
@@ -6257,9 +6293,14 @@ function gbDragCanLift(u) {
   return true;
 }
 
+// Удержание не подняло бойца (нет действий, приказ в пути): следующее
+// отпускание — не тап. Снимается новым касанием и сдвигом пальца
+var gbDragRefused = false;
+
 // Палец лёг на карту. Если под ним свой боец — заводим таймер удержания.
 function gbDragArm(cx, cy) {
   gbDragDisarm();
+  gbDragRefused = false;
   if (gbDrag || gbDragModeBusy()) return;
   var c = gbClientCell(cx, cy);
   var u = gbUnitAtCell(c.x, c.y);
@@ -6299,16 +6340,19 @@ function gbDragLift() {
   var bx0 = unitBox(u);
   if (cell.x < u.x || cell.x >= u.x + bx0.w || cell.y < u.y || cell.y >= u.y + bx0.h) return;
 
-  // Поднять нельзя — подсказка, а отпускание останется обычным тапом
+  // Поднять нельзя — подсказка. Отпускание после этого ничего не
+  // открывает: палец держали ради жеста, панель бойца тут только мешала
   var type = unitTypeById[u.unit_type] || {};
   if (gbDragInFlight[u.id]) {
     dcFlash(px, py, 'Приказ уже отдан', 'ждём ответ сервера', 'wait', 1500);
+    gbDragRefused = true;
     return;
   }
   var st = unitApState(u);
   if (st && st.ap < 1) {
     dcBuzz(8);
     dcFlash(px, py, 'Нет действий', 'восстановится через ' + st.next_in + ' с', 'bad', 1800);
+    gbDragRefused = true;
     return;
   }
 
@@ -6772,11 +6816,30 @@ function dropListFor() {
 function updateDropBtn() {
   var btn = document.getElementById('drop-btn');
   if (!btn) return;
+  // Лоток десанта открыт — у него своя кнопка закрытия, а список свежий
+  if (typeof dtOpen !== 'undefined' && dtOpen) {
+    btn.style.visibility = 'hidden';
+    if (typeof dtRefresh === 'function') dtRefresh();
+    return;
+  }
   var busy = droppingUnit || droppingVehicle || landingFighter;
   var l = dropListFor();
   var show = !busy && iAmAttacker === true &&
              (l.fighters.length + l.vehicles.length + l.cargo.length) > 0;
   btn.style.visibility = show ? 'visible' : 'hidden';
+  if (!show) return;
+
+  // Сколько можно высадить прямо сейчас: носитель в площадке сброса
+  var ready = 0, total = 0;
+  var add = function(row, n) { total += n; if (row.zone !== null && row.zone !== undefined) ready += n; };
+  l.fighters.forEach(function(f) { add(f, 1); });
+  l.vehicles.forEach(function(v) { add(v, 1); });
+  l.cargo.forEach(function(c) { add(c, c.quantity || 0); });
+  var sub = document.getElementById('drop-btn-sub');
+  var txt = ready ? ready + ' к высадке' : 'вне площадки сброса';
+  if (sub && sub.textContent !== txt) sub.textContent = txt;
+  btn.classList.toggle('ready', ready > 0);
+  btn.classList.toggle('idle', ready === 0);
 }
 
 // Куда можно сесть: при вторжении — полоса вторжения, на своей планете —
@@ -6872,6 +6935,8 @@ var droppingVehicle = null;
 var landingFighter = null;
 
 function startFighterLanding(f) {
+  // Отдельный режим (ссылка «на грунт», старый список) — лоток убираем
+  if (typeof dtOpen !== 'undefined' && dtOpen) closeDropTray();
   landingFighter = f;
   droppingUnit = null;
   droppingVehicle = null;
@@ -6938,6 +7003,8 @@ function handleFighterLandingTap(cellX, cellY) {
 }
 
 function startVehicleDrop(v) {
+  // Отдельный режим (ссылка «на грунт», старый список) — лоток убираем
+  if (typeof dtOpen !== 'undefined' && dtOpen) closeDropTray();
   droppingVehicle = v;
   droppingUnit = null;
   closeDropPanel();
@@ -6970,6 +7037,8 @@ function handleVehicleDropTap(cellX, cellY) {
 }
 
 function startDrop(shipId, unitType, name) {
+  // Отдельный режим (ссылка «на грунт», старый список) — лоток убираем
+  if (typeof dtOpen !== 'undefined' && dtOpen) closeDropTray();
   droppingUnit = { shipId: shipId, unitType: unitType, name: name };
   closeDropPanel();
 
@@ -6998,6 +7067,7 @@ function cancelDrop() {
 
   setBottomInset(0);
   redrawScene();
+  if (typeof dtAfterCancel === 'function') dtAfterCancel();
 }
 
 // Подсветка свободных клеток полосы вторжения

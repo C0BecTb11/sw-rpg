@@ -731,7 +731,8 @@ function initPanAndZoom() {
       }
       return;
     }
-    // Поднять не дали (нет действий, луч) и палец не уводили — обычный тап
+    // Поднять не дали (нет действий, луч) и палец не уводили — отпускание
+    // не открывает панель: игрок держал палец ради жеста, а не ради меню
     if (e.touches.length === 0 && typeof sdRefused !== 'undefined' && sdRefused) {
       sdReleaseRefused();
       isDragging = false;
@@ -1156,23 +1157,44 @@ function closeShipInfo() {
 
 // ===== Верфь: заказ кораблей на станции =====
 
-function openShipyard() {
+// Склад планеты и занятость стапеля — чтобы карточка честно говорила
+// «не хватает дюрастали» или «стапель занят» до нажатия, а не отказом
+var syStock = null;      // resource → { name, amount, color }; null — склад не виден
+var syResNames = null;   // справочник названий для тех, кому склад не показан
+var syBusy = null;       // { name, until } — что сейчас строится или чинится
+var sySeq = 0;
+
+// keep — перечитать уже открытую верфь (после заказа в доке, по концу
+// работ): без «Загрузки» и с тем же местом прокрутки
+function openShipyard(keep) {
   if (typeof sxCloseIntel === 'function') sxCloseIntel();
   var panel = document.getElementById('shipyard-panel');
   var list = document.getElementById('shipyard-list');
-  list.innerHTML = '<div class="shipyard-empty">Загрузка...</div>';
+  keep = keep === true && panel.style.display !== 'none';
+  var keepTop = keep ? list.scrollTop : 0;
+  if (!keep) list.innerHTML = '<div class="shipyard-empty">Загрузка...</div>';
   panel.style.display = 'flex';
+  var my = ++sySeq;
 
-  supabase.rpc('get_my_profile').then(function(pr) {
-    var faction = (!pr.error && pr.data && pr.data.length) ? pr.data[0].faction : null;
+  // Фракция уже известна с загрузки карты — лишний запрос не нужен
+  var facReady = spaceMyFaction ? Promise.resolve(spaceMyFaction)
+    : Promise.resolve(supabase.rpc('get_my_profile')).then(function(pr) {
+        return (pr && !pr.error && pr.data && pr.data.length) ? pr.data[0].faction : null;
+      });
 
+  facReady.then(function(faction) {
     Promise.all([
       // От дешёвых к дорогим: корвет, крейсеры, линкоры, дредноут
       supabase.from('ship_types').select('*').eq('is_fighter', false).eq('faction', faction).order('cost'),
       // Корабли, временно закрытые настройкой (например, на время теста)
-      supabase.from('game_settings').select('value').eq('key', 'locked_for_test').maybeSingle()
+      supabase.from('game_settings').select('value').eq('key', 'locked_for_test').maybeSingle(),
+      supabase.rpc('get_planet_stock', { p_system_id: systemId }),
+      supabase.rpc('get_shipyard_state', { p_system_id: systemId }),
+      syResNames ? Promise.resolve(null) : supabase.from('resources').select('id, name, color')
     ]).then(function(rr) {
+      if (my !== sySeq) return;
       var res = rr[0];
+      syApplyState(rr[2], rr[3], rr[4]);
       var locked = (rr[1] && !rr[1].error && rr[1].data && rr[1].data.value)
         ? String(rr[1].data.value).split(',').map(function(x) { return x.trim(); }) : [];
       if (!res.error && res.data) {
@@ -1186,6 +1208,8 @@ function openShipyard() {
 
       // Аренда: кому сейчас принадлежит верфь и сколько осталось
       spPaintShipyardLease(list);
+      // Стапель занят — одна строка сверху вместо отказа на каждой кнопке
+      syPaintBusy(list);
 
       // Док стоит над стапелем: чинить и дооснащать уже построенное
       // обычно нужнее, чем закладывать новый корпус.
@@ -1198,8 +1222,88 @@ function openShipyard() {
       res.data.forEach(function(type) {
         list.appendChild(makeShipCard(type));
       });
+      if (keep) list.scrollTop = keepTop;
     });
   });
+}
+
+function syApplyState(stockRes, busyRes, namesRes) {
+  syStock = null;
+  if (stockRes && !stockRes.error && stockRes.data && stockRes.data.length) {
+    syStock = {};
+    stockRes.data.forEach(function(r) {
+      syStock[r.resource] = { name: r.name, amount: r.amount || 0, color: r.color };
+    });
+  }
+  if (namesRes && !namesRes.error && namesRes.data) {
+    syResNames = {};
+    namesRes.data.forEach(function(r) { syResNames[r.id] = { name: r.name, color: r.color }; });
+  }
+  var b = (busyRes && !busyRes.error && busyRes.data && busyRes.data.length) ? busyRes.data[0] : null;
+  syBusy = b ? { name: b.busy_name, until: Date.now() + (b.seconds_left || 0) * 1000 } : null;
+}
+
+function syBusyLeft() {
+  return syBusy ? Math.max(0, Math.ceil((syBusy.until - Date.now()) / 1000)) : 0;
+}
+
+function syLeftText(sec) {
+  if (sec >= 60) return Math.floor(sec / 60) + ' мин ' + (sec % 60) + ' с';
+  return sec + ' с';
+}
+
+// Строка «Стапель занят» над доком; по нулю перечитываем верфь целиком
+function syPaintBusy(list) {
+  if (!syBusy || syBusyLeft() <= 0) return;
+  var el = document.createElement('div');
+  el.className = 'sy-busy';
+  el.innerHTML = '<span class="sy-busy-ico">⧗</span>' +
+    '<span class="sy-busy-txt"><b>Стапель занят</b><i></i></span>';
+  var txt = el.querySelector('i');
+  var paint = function() {
+    txt.textContent = (syBusy ? syBusy.name : 'работа') + ' · готово через ' + syLeftText(syBusyLeft());
+  };
+  paint();
+  var lease = document.getElementById('shipyard-lease');
+  list.insertBefore(el, lease ? lease.nextSibling : list.firstChild);
+  var my = sySeq;
+  var tick = setInterval(function() {
+    var panel = document.getElementById('shipyard-panel');
+    if (my !== sySeq || !document.body.contains(el) || !panel || panel.style.display === 'none') {
+      clearInterval(tick); return;
+    }
+    if (syBusyLeft() <= 0) { clearInterval(tick); openShipyard(true); return; }
+    paint();
+  }, 1000);
+}
+
+// Сырьё корабля со склада планеты: чипы с подсветкой нехватки.
+// Возвращает названия того, чего не хватает (если склад виден)
+function syResourceLine(costRes, box) {
+  var keys = Object.keys(costRes || {});
+  if (!keys.length) return [];
+  var short = [];
+  var line = document.createElement('div');
+  line.className = 'sy-res';
+  var lbl = document.createElement('span');
+  lbl.className = 'sy-res-lbl';
+  lbl.textContent = 'Со склада';
+  line.appendChild(lbl);
+  keys.forEach(function(k) {
+    var need = costRes[k];
+    var info = (syStock && syStock[k]) || (syResNames && syResNames[k]) || { name: k };
+    var have = syStock && syStock[k] ? syStock[k].amount : null;
+    var lack = have !== null && have < need;
+    if (lack) short.push(info.name);
+    var chip = document.createElement('span');
+    chip.className = 'sy-res-chip' + (lack ? ' short' : '');
+    if (info.color) chip.style.borderLeftColor = info.color;
+    chip.textContent = info.name + ' ' + need + (have !== null ? ' / ' + have : '');
+    chip.title = have !== null ? ('на складе ' + have) : '';
+    line.appendChild(chip);
+  });
+  box.appendChild(line);
+  return short;
 }
 
 // ===== Док: ремонт корпуса, модернизация, пополнение ангара =====
@@ -1251,17 +1355,20 @@ function makeDockCard(s, box) {
 
   // Корабль не у причала или уже в работе — показываем причину
   // и ничего не предлагаем, вместо отказа после нажатия
-  if (s.busy || !s.at_dock) {
+  if (s.busy || !s.at_dock || syBusyLeft() > 0) {
     var lock = document.createElement('div');
     lock.className = 'dock-lock';
     lock.textContent = s.busy
       ? 'Уже в работе'
-      : 'Подведи корабль к станции — док работает только у причала';
+      : !s.at_dock ? 'Подведи корабль к станции — док работает только у причала'
+      : 'Стапель занят — док освободится через ' + syLeftText(syBusyLeft());
     card.appendChild(lock);
     return card;
   }
 
-  var refresh = function() { loadDock(box); };
+  // Док и стапель — одна очередь: после заказа перечитываем верфь целиком,
+  // иначе кнопки постройки остались бы активными до отказа сервера
+  var refresh = function() { openShipyard(true); };
 
   // --- ремонт корпуса ---
   var fix = document.createElement('button');
@@ -1564,6 +1671,9 @@ function makeShipCard(type) {
     '<div><span>Трюм</span><b>' + type.capacity + '</b></div>';
   body.appendChild(stats);
 
+  // Сырьё со склада планеты: нехватку видно сразу
+  var shortRes = syResourceLine(type.cost_resources, body);
+
   // Ангар собирают на стапеле, пристегнуть его потом нельзя. Истребители
   // и бомбардировщики делят одни и те же места, поэтому выбор состава —
   // это выбор между прикрытием и ударной силой.
@@ -1596,6 +1706,14 @@ function makeShipCard(type) {
 
   var updatePrice = function() {
     btn.textContent = 'Построить · ' + (type.cost + extraCost());
+    // Заведомый отказ не шлём: стапель занят или сырья не хватает
+    if (syBusyLeft() > 0) {
+      btn.disabled = true;
+      btn.textContent = 'Стапель занят';
+    } else if (shortRes.length) {
+      btn.disabled = true;
+      btn.textContent = 'Не хватает: ' + shortRes.join(', ');
+    }
 
     // Расширенный ангар добавляет места ещё до постройки: иначе игрок
     // не понял бы, почему третий истребитель вдруг влезает

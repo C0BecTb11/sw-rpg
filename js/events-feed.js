@@ -125,6 +125,7 @@ function setFeedTab(tab) {
 }
 
 function makeFeedRow(e) {
+  if (e.type === 'duel' && e.meta && e.meta.en) return makeDuelRow(e);
   var row = document.createElement('div');
   row.className = 'feed-row tone-' + e.tone + (e.seen ? '' : ' fresh');
 
@@ -250,6 +251,103 @@ function makeFeedRow(e) {
     row.appendChild(review);
   }
 
+  return row;
+}
+
+// ---------- Схватка: одна запись на вражеский юнит ----------
+// Вместо десятков «попадание»/«промах»/«урон» — счёт боя с одним
+// противником: сколько стреляли мы и он, урон в обе стороны, его
+// прочность и итог. Сервер обновляет запись, пока идёт бой.
+
+function duelPic(p, cls) {
+  // Без картинки (мародёры, удалённый тип) — знак вместо пустой плашки
+  var img = p && p.img ? '<img src="../' + escapeFeed(p.img) + '" alt="" onerror="this.style.display=\'none\'">'
+                       : '<span class="duel-glyph">' + (p && p.player === null ? '☠' : '?') + '</span>';
+  return '<span class="duel-pic' + (cls ? ' ' + cls : '') + (p && p.veh ? ' veh' : '') + '">' + img + '</span>';
+}
+
+function duelSide(label, side, cls) {
+  side = side || {};
+  var shots = side.shots || 0, hits = side.hits || 0;
+  return '<div class="duel-side ' + cls + '">' +
+    '<span class="duel-side-lbl">' + label + '</span>' +
+    '<b>' + (shots ? hits + ' из ' + shots : '—') + '</b>' +
+    (side.dmg ? '<em>−' + side.dmg + '</em>' : '<em class="zero">урона нет</em>') +
+    (side.ow ? '<u>◉ ' + side.ow + ' на чеку</u>' : '') +
+  '</div>';
+}
+
+// Пали все наши из сводки. Потери — по записи на гибель, сверяем
+// поштучно: два бойца с одним именем и одна гибель — не «все пали»
+function duelAllLost(us, lost) {
+  if (!us.length) return false;
+  var left = Object.create(null);
+  lost.forEach(function(n) { left[n] = (left[n] || 0) + 1; });
+  for (var i = 0; i < us.length; i++) {
+    if (!left[us[i].name]) return false;
+    left[us[i].name]--;
+  }
+  return true;
+}
+
+function makeDuelRow(e) {
+  var m = e.meta || {};
+  var en = m.en || {};
+  var us = m.us || [];
+  var lost = m.lost || [];
+  var ageSec = Math.max(0, (Date.now() - new Date(e.created_at).getTime()) / 1000);
+
+  var state, tone;
+  if (m.result === 'won') { state = 'уничтожен'; tone = 'good'; }
+  else if (lost.length && duelAllLost(us, lost)) { state = 'наши пали'; tone = 'bad'; }
+  else if (ageSec < 120) { state = 'идёт бой'; tone = 'warn'; }
+  else { state = 'затихла'; tone = 'neutral'; }
+
+  var row = document.createElement('div');
+  row.className = 'feed-row duel tone-' + tone + (e.seen ? '' : ' fresh');
+
+  var max = en.max || 0;
+  var hp = Math.max(0, Math.min(max || 0, en.hp || 0));
+  var pct = max ? hp / max * 100 : 0;
+
+  var ourPics = us.slice(0, 3).map(function(u) { return duelPic(u, 'us'); }).join('');
+  var more = us.length > 3 ? '<span class="duel-more">+' + (us.length - 3) + '</span>' : '';
+
+  var where = e.system_name ? (e.is_deep_space ? e.system_name
+              : (m.layer === 'space' ? 'орбита ' : 'планета ') + e.system_name) : '';
+  var foe = en.player ? en.player : (en.player === null ? 'мародёры' : '');
+
+  row.innerHTML =
+    '<div class="feed-info">' +
+      '<div class="duel-head">' +
+        '<span class="duel-pics">' + ourPics + more + '<span class="duel-vs">⇄</span>' + duelPic(en, 'en') + '</span>' +
+        '<span class="duel-title"><span class="duel-state ' + tone + '">' + state + '</span>' +
+          '<b>' + escapeFeed(en.name || 'Противник') + '</b>' +
+          '<i>' + escapeFeed(foe) + (foe && where ? ' · ' : '') + escapeFeed(where) + '</i></span>' +
+      '</div>' +
+      '<div class="duel-stats">' +
+        duelSide('Мы', m.out, 'out') +
+        duelSide('По нам', m.inc, 'inc') +
+      '</div>' +
+      '<div class="duel-hp"><span>' + (m.layer === 'space' ? 'корпус врага' : 'у врага') + '</span>' +
+        '<div class="duel-track"><i style="width:' + pct.toFixed(1) + '%"></i></div>' +
+        '<em>' + hp + ' / ' + max + '</em></div>' +
+      (lost.length ? '<div class="duel-lost">Потеряны: ' + escapeFeed(lost.join(', ')) + '</div>' : '') +
+      '<div class="feed-meta">' + feedWhen(e.created_at) +
+        (us.length ? ' · наши: ' + escapeFeed(us.map(function(u) { return u.name; }).join(', ')) : '') + '</div>' +
+    '</div>';
+
+  var target = e.jumpable && e.system_id ? feedTarget(e) : null;
+  if (target) {
+    var go = document.createElement('button');
+    go.className = 'feed-go';
+    go.textContent = 'Показать';
+    go.addEventListener('click', function() {
+      closeEventsFeed();
+      window.location.href = target;
+    });
+    row.appendChild(go);
+  }
   return row;
 }
 

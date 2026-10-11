@@ -634,3 +634,41 @@ body.deep-space #space-grid { background-image: none; }
   top: 0;
   pointer-events: none;
 }
+
+/* ===== Верфь: занятый стапель и сырьё со склада ===== */
+.sy-busy {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border: 1px solid rgba(217,169,64,0.4);
+  border-left: 3px solid #d9a940;
+  border-radius: 9px;
+  background: rgba(217,169,64,0.06);
+  font-family: 'Courier New', monospace;
+}
+.sy-busy-ico { flex: none; color: #d9a940; font-size: 15px; }
+.sy-busy-txt { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sy-busy-txt b { font-size: 10px; font-weight: normal; letter-spacing: 1.5px; text-transform: uppercase; color: #d9a940; }
+.sy-busy-txt i { font-style: normal; font-size: 10px; color: #8fa8c4; }
+
+.sy-res {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin: 8px 0 2px;
+  font-family: 'Courier New', monospace;
+}
+.sy-res-lbl { font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: #55606c; }
+.sy-res-chip {
+  padding: 3px 7px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-left: 3px solid #8fa8c4;
+  border-radius: 5px;
+  font-size: 10px;
+  color: #cfd8dc;
+}
+.sy-res-chip.short { border-color: rgba(217,74,74,0.55); color: #ff9a9a; background: rgba(217,74,74,0.07); }
