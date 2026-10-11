@@ -10,7 +10,9 @@ function openShipCargo(ship, type) {
   cargoShipType = type || {};
   cargoTab = 'load';
 
-  document.getElementById('shipcargo-name').textContent = cargoShipType.name || 'Корабль';
+  document.getElementById('shipcargo-name').textContent = ship && ship.name
+    ? '«' + ship.name + '» · ' + (cargoShipType.name || 'корабль')
+    : (cargoShipType.name || 'Корабль');
   document.getElementById('shipcargo-panel').style.display = 'flex';
   setCargoTab('load');
 }

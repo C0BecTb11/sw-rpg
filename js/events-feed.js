@@ -322,8 +322,10 @@ function makeDuelRow(e) {
       '<div class="duel-head">' +
         '<span class="duel-pics">' + ourPics + more + '<span class="duel-vs">⇄</span>' + duelPic(en, 'en') + '</span>' +
         '<span class="duel-title"><span class="duel-state ' + tone + '">' + state + '</span>' +
-          '<b>' + escapeFeed(en.name || 'Противник') + '</b>' +
-          '<i>' + escapeFeed(foe) + (foe && where ? ' · ' : '') + escapeFeed(where) + '</i></span>' +
+          '<b>' + escapeFeed(en.tname ? '«' + en.name + '»' : (en.name || 'Противник')) + '</b>' +
+          // Названный корабль: тип — в подписи, рядом с хозяином
+          '<i>' + (en.tname ? escapeFeed(en.tname) + (foe || where ? ' · ' : '') : '') +
+            escapeFeed(foe) + (foe && where ? ' · ' : '') + escapeFeed(where) + '</i></span>' +
       '</div>' +
       '<div class="duel-stats">' +
         duelSide('Мы', m.out, 'out') +

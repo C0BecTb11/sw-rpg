@@ -5532,7 +5532,7 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
 
   if (type.is_vehicle && lifts.length) {
     lifts.forEach(function(c) {
-      addRow('В ангар ' + c.carrier_name, 'мест ' + c.free_slots, 'ship', function(btn) {
+      addRow('В ангар ' + escHtml(c.carrier_name), 'мест ' + c.free_slots, 'ship', function(btn) {
         btn.disabled = true;
         supabase.rpc('lift_fighter', { p_unit_id: unit.id, p_carrier_id: c.carrier_id })
           .then(function(r) {
@@ -5572,7 +5572,7 @@ function guRenderAbilities(panel, unit, type, ap, ships, carriers, inside, board
   });
 
   ships.forEach(function(sh) {
-    addRow('На ' + sh.ship_name + ' <b>' + sh.x + ':' + sh.y + '</b>',
+    addRow('На ' + escHtml(sh.ship_name) + ' <b>' + sh.x + ':' + sh.y + '</b>',
            'свободно ' + sh.free_slots, 'ship', function(btn) {
       btn.disabled = true;
       var rpc = type.is_vehicle ? 'load_vehicle_to_ship' : 'load_unit_from_ground';
@@ -6867,9 +6867,9 @@ function openDropPanel() {
     item.className = 'drop-item' + (ready ? '' : ' not-ready');
     item.innerHTML =
       '<div class="drop-item-main">' +
-        '<div class="drop-item-name">' + f.name +
+        '<div class="drop-item-name">' + escHtml(f.name) +
           ' <span class="drop-size">' + f.hp + '/' + f.max_hp + '</span></div>' +
-        '<div class="drop-item-sub">' + f.carrier_name +
+        '<div class="drop-item-sub">' + escHtml(f.carrier_name) +
           (ready ? ' · площадка ' + f.zone : ' · носитель не в площадке сброса') + '</div>' +
       '</div>';
     if (ready) { item.addEventListener('click', function() { startFighterLanding(f); }); }
@@ -6893,7 +6893,7 @@ function openDropPanel() {
           ' <span class="drop-size">' + v.width_cells + '×' + v.height_cells + '</span>' +
           (v.passengers ? ' <span class="drop-pax">+' + v.passengers + '</span>' : '') +
         '</div>' +
-        '<div class="drop-item-sub">' + v.ship_name +
+        '<div class="drop-item-sub">' + escHtml(v.ship_name) +
           (ready ? ' · площадка ' + v.zone : ' · не в площадке сброса') + '</div>' +
       '</div>';
     if (ready) { item.addEventListener('click', function() { startVehicleDrop(v); }); }
@@ -6909,7 +6909,7 @@ function openDropPanel() {
     item.innerHTML =
       '<div class="drop-item-main">' +
         '<div class="drop-item-name">' + row.unit_name + ' ×' + row.quantity + '</div>' +
-        '<div class="drop-item-sub">' + row.ship_name + ' ' + row.x + ':' + row.y +
+        '<div class="drop-item-sub">' + escHtml(row.ship_name) + ' ' + row.x + ':' + row.y +
           (ready ? ' · площадка ' + row.zone : ' · не в площадке сброса') + '</div>' +
       '</div>';
 
@@ -6943,7 +6943,7 @@ function startFighterLanding(f) {
   closeDropPanel();
 
   var hint = document.getElementById('placement-hint');
-  hint.innerHTML = '<span>Куда сажать: ' + f.name + '</span>' +
+  hint.innerHTML = '<span>Куда сажать: ' + escHtml(f.name) + '</span>' +
                    '<button id="drop-cancel">Готово</button>';
   hint.style.display = 'flex';
   document.getElementById('drop-cancel').addEventListener('click', cancelDrop);

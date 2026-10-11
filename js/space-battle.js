@@ -1079,7 +1079,7 @@ function renderShips() {
 
 function openShipInfo(ship, type) {
   var panel = document.getElementById('ship-info');
-  document.getElementById('ship-info-name').textContent = type.name;
+  document.getElementById('ship-info-name').textContent = ship.name ? '«' + ship.name + '» · ' + type.name : type.name;
   fillShipCommanders(ship);
   document.getElementById('ship-info-stats').innerHTML =
     '<div><span>Прочность</span><b>' + ship.hp + ' / ' + type.max_hp + '</b></div>' +
@@ -1344,7 +1344,7 @@ function makeDockCard(s, box) {
       (s.image ? '<img src="../' + s.image + '" alt="">' : '') +
     '</div>' +
     '<div class="dock-info">' +
-      '<div class="dock-name">' + s.name + '</div>' +
+      '<div class="dock-name">' + sxEsc(s.name) + '</div>' +
       '<div class="dock-hp">' +
         '<span>' + s.hp + ' / ' + s.full_hp + '</span>' +
         '<div class="dock-track"><i style="width:' + pct + '%"></i></div>' +

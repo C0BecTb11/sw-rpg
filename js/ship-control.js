@@ -103,8 +103,20 @@ function scEnsureHud() {
     '<div class="sc-top">' +
       '<div class="sc-portrait"><img id="sc-portrait-img" alt=""></div>' +
       '<div class="sc-stats">' +
-        '<div class="sc-name" id="sc-name">—</div>' +
+        '<div class="sc-name-row">' +
+          '<div class="sc-name" id="sc-name">—</div>' +
+          '<button type="button" class="sc-rename" id="sc-rename" aria-label="Имя корабля">✎</button>' +
+        '</div>' +
         '<div class="sc-role" id="sc-sub"></div>' +
+        '<div class="sc-rename-box" id="sc-rename-box">' +
+          '<div class="sc-rename-line">' +
+            '<input type="text" id="sc-rename-input" maxlength="24" autocomplete="off" ' +
+              'autocapitalize="sentences" spellcheck="false" enterkeyhint="done" placeholder="Имя корабля">' +
+            '<button type="button" class="sc-rename-ok" id="sc-rename-ok" aria-label="Сохранить">✓</button>' +
+            '<button type="button" class="sc-rename-no" id="sc-rename-no" aria-label="Отмена">✕</button>' +
+          '</div>' +
+          '<div class="sc-rename-hint" id="sc-rename-hint"></div>' +
+        '</div>' +
         '<div class="sc-hp">' +
           '<span class="sc-hp-num" id="sc-hp-num"></span>' +
           '<div class="sc-hp-track"><i id="sc-hp-fill"></i></div>' +
@@ -144,6 +156,13 @@ function scEnsureHud() {
   document.body.appendChild(hud);
 
   document.getElementById('sc-close').addEventListener('click', scDeselect);
+  document.getElementById('sc-rename').addEventListener('click', scRenameOpen);
+  document.getElementById('sc-rename-ok').addEventListener('click', scRenameSave);
+  document.getElementById('sc-rename-no').addEventListener('click', scRenameClose);
+  document.getElementById('sc-rename-input').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); scRenameSave(); }
+    else if (e.key === 'Escape') { e.preventDefault(); scRenameClose(); }
+  });
   document.getElementById('sc-go').addEventListener('click', scConfirmMove);
   document.getElementById('sc-cancel').addEventListener('click', scCancelAim);
 
@@ -185,14 +204,24 @@ function scRenderHud() {
     }, 0);
   }
 
-  document.getElementById('sc-name').textContent = scType.name;
+  // Редактор имени открыт для другого корабля — закрываем
+  if (scRenameFor && scRenameFor !== scShip.id) scRenameClose();
+
+  // Своё имя — крупно, заводское название типа уходит в подпись
+  var named = !!scShip.name;
+  var nameEl = document.getElementById('sc-name');
+  nameEl.textContent = named ? '«' + scShip.name + '»' : scType.name;
+  nameEl.classList.toggle('named', named);
+  var renBtn = document.getElementById('sc-rename');
+  renBtn.title = named ? 'Переименовать корабль' : 'Дать кораблю имя';
+  renBtn.classList.toggle('named', named);
 
   var role = scType.is_fighter
     ? (scType.hull_class === 'bomber' ? 'Бомбардировщик' : 'Истребитель')
     : (SC_HULL_NAMES[scType.hull_class] || 'Крупный корабль');
 
   document.getElementById('sc-sub').textContent =
-    role + ' · ' + scShip.x + ':' + scShip.y;
+    (named ? scType.name + ' · ' : '') + role + ' · ' + scShip.x + ':' + scShip.y;
 
   var img = document.getElementById('sc-portrait-img');
   if (img && scType.image) img.src = '../' + scType.image;
@@ -843,7 +872,7 @@ function scRenderHangar() {
   // содержимое шло через функцию, и любой сбой в ней выглядел как
   // пустой ангар, без всякого объяснения.
   supabase.from('ships')
-    .select('id, hp, ship_type, ship_types(name, image, max_hp)')
+    .select('id, hp, name, ship_type, ship_types(name, image, max_hp)')
     .eq('carrier_ship_id', forShip)
     .then(function(res) {
     if (!scShip || scShip.id !== forShip || scTab !== 'hangar') return;
@@ -856,7 +885,7 @@ function scRenderHangar() {
 
     var list = (res.data || []).map(function(f) {
       var t = f.ship_types || {};
-      return { fighter_id: f.id, name: t.name || f.ship_type,
+      return { fighter_id: f.id, name: f.name || t.name || f.ship_type,
                hp: f.hp, max_hp: t.max_hp || f.hp };
     });
 
@@ -878,7 +907,7 @@ function scRenderHangar() {
       var row = document.createElement('div');
       row.className = 'sc-hangar-row';
       row.innerHTML =
-        '<div class="sc-hangar-line"><span>' + f.name + '</span>' +
+        '<div class="sc-hangar-line"><span>' + sxEsc(f.name) + '</span>' +
         '<em>' + f.hp + '/' + f.max_hp + '</em></div>' +
         '<div class="sc-hangar-track"><i style="width:' + hpPct + '%"></i></div>';
 
@@ -945,7 +974,7 @@ function scRenderTractor(box) {
     targets.forEach(function(t) {
       var b = document.createElement('button');
       b.className = 'sc-hangar-btn wide';
-      b.innerHTML = t.ship_name + ' <b>' + t.x + ':' + t.y + '</b> · ' + t.gap + ' кл.' +
+      b.innerHTML = sxEsc(t.ship_name) + ' <b>' + t.x + ':' + t.y + '</b> · ' + t.gap + ' кл.' +
         (t.held ? ' · уже держим ' + t.held_left + ' с' : '');
       b.disabled = t.held;
 
@@ -1004,7 +1033,7 @@ function scRenderFighterActions(box) {
     list.forEach(function(c) {
       var b = document.createElement('button');
       b.className = 'sc-hangar-btn wide';
-      b.innerHTML = 'В ангар · ' + c.carrier_name +
+      b.innerHTML = 'В ангар · ' + sxEsc(c.carrier_name) +
         ' <b>' + c.x + ':' + c.y + '</b> · мест ' + c.free_slots;
       b.addEventListener('click', function() {
         b.disabled = true;
@@ -1235,6 +1264,83 @@ function scRenderGhost() {
   scGhostEl = el;
 }
 
+// ===== имя корабля =====
+// Хозяин даёт кораблю имя: его видят все, кто видит корабль, — в карточке
+// врага, в сводках боя и списках. Правила и цензуру проверяет сервер
+// (rename_ship); пустое поле возвращает заводское название.
+
+var scRenameFor = null;     // корабль, чьё имя сейчас правят
+var scRenameBusy = false;
+
+// Имя для показа: своё, если дано, иначе название типа
+function scShipName(ship, type) {
+  return (ship && ship.name) || (type && type.name) || 'Корабль';
+}
+
+function scRenameHint(text, bad) {
+  var h = document.getElementById('sc-rename-hint');
+  if (!h) return;
+  h.textContent = text;
+  h.classList.toggle('bad', !!bad);
+}
+
+function scRenameOpen() {
+  if (!scShip || !scType) return;
+  var stats = document.querySelector('#ship-hud .sc-stats');
+  var input = document.getElementById('sc-rename-input');
+  if (!stats || !input) return;
+  scRenameFor = scShip.id;
+  stats.classList.add('renaming');
+  input.value = scShip.name || '';
+  input.placeholder = scType.name;
+  scRenameHint('2–24 символа: буквы, цифры, пробел, дефис. Пусто — «' + scType.name + '»');
+  input.focus();
+  try { input.setSelectionRange(input.value.length, input.value.length); } catch (e) {}
+}
+
+function scRenameClose() {
+  scRenameFor = null;
+  var stats = document.querySelector('#ship-hud .sc-stats');
+  if (stats) stats.classList.remove('renaming');
+  var input = document.getElementById('sc-rename-input');
+  if (input && document.activeElement === input) input.blur();
+}
+
+function scRenameSave() {
+  if (!scShip || scRenameFor !== scShip.id || scRenameBusy) return;
+  var input = document.getElementById('sc-rename-input');
+  var next = (input.value || '').replace(/\s+/g, ' ').replace(/^\s+|\s+$/g, '');
+  if ((next || null) === (scShip.name || null)) { scRenameClose(); return; }
+  if (next && next.length < 2) { scRenameHint('Нужно хотя бы 2 символа', true); return; }
+
+  var shipId = scShip.id;
+  scRenameBusy = true;
+  var ok = document.getElementById('sc-rename-ok');
+  if (ok) ok.disabled = true;
+  scRenameHint('Сохраняем…');
+  Promise.resolve(supabase.rpc('rename_ship', { p_ship_id: shipId, p_name: next }))
+    .then(function(r) {
+      scRenameBusy = false;
+      if (ok) ok.disabled = false;
+      if (r && r.error) {
+        var msg = r.error.message || 'Не вышло';
+        if (/could not find the function|does not exist/i.test(msg)) msg = 'Имена кораблей пока не включены на сервере';
+        scRenameHint(msg, true);
+        return;
+      }
+      var name = r ? r.data : null;
+      // Сразу у себя: реалтайм догонит остальных
+      shipsInSystem.forEach(function(x) { if (x.id === shipId) x.name = name || null; });
+      if (scShip && scShip.id === shipId) scShip.name = name || null;
+      scRenameClose();
+      scRenderHud();
+    }, function(e) {
+      scRenameBusy = false;
+      if (ok) ok.disabled = false;
+      scRenameHint((e && e.message) || 'Нет связи с сервером', true);
+    });
+}
+
 // ===== выбор корабля =====
 
 function onOwnShipTapped(ship, type) {
@@ -1252,6 +1358,7 @@ function onOwnShipTapped(ship, type) {
 }
 
 function scDeselect() {
+  scRenameClose();
   scShip = null;
   scType = null;
   scMode = null;
@@ -1548,7 +1655,7 @@ function scLoadTargets() {
       // до выстрела, а не после
       b.innerHTML =
         '<div class="sc-target-line">' +
-          '<span>' + t.ship_name + ' <b>' + t.x + ':' + t.y + '</b></span>' +
+          '<span>' + sxEsc(t.ship_name) + ' <b>' + t.x + ':' + t.y + '</b></span>' +
           '<em>' + t.chance + '%</em>' +
         '</div>' +
         '<div class="sc-target-track"><i style="width:' + hpPct + '%"></i></div>' +
@@ -1932,7 +2039,7 @@ function sxPic(p) {
 
 function sxShipPic(ship, type, side) {
   return { img: type && type.image, side: side || (ship ? sxSide(ship) : 'enemy'),
-           name: (type && type.name) || 'Корабль' };
+           name: scShipName(ship, type) };
 }
 
 var sxToastShownAt = 0;
@@ -2065,7 +2172,7 @@ function sxReportIncoming(hurt) {
     chips: hurt.slice(0, 4).map(function(h) {
       var t = shipTypeById[h.s.ship_type];
       total += h.hull + h.shield;
-      return { text: ((t && t.name) || 'корабль') + ' −' + (h.hull + h.shield), cls: 'bad' };
+      return { text: scShipName(h.s, t) + ' −' + (h.hull + h.shield), cls: 'bad' };
     })
   });
 }
@@ -2150,7 +2257,7 @@ function sxShowIntel(ship, type, keepView) {
   // Реалтайм дёргает перерисовку на каждое движение в системе. Если
   // у этого корабля ничего не поменялось — не трогаем шторку, иначе
   // прокрутка прыгает наверх посреди боя.
-  var sig = [ship.id, ship.hp, ship.x, ship.y, ship.facing, ship.tractor_until, nick,
+  var sig = [ship.id, ship.name, ship.hp, ship.x, ship.y, ship.facing, ship.tractor_until, nick,
              SX_ARCS.map(function(a) { return sh[a.key]; }).join(',')].join('|');
   if (keepView && el.style.display !== 'none' && el.getAttribute('data-sig') === sig) return;
   var keepScroll = keepView ? el.scrollTop : 0;
@@ -2164,9 +2271,11 @@ function sxShowIntel(ship, type, keepView) {
         '<span class="ui-tag">' + (side === 'enemy' ? 'ВРАГ' : 'СВОЙ') + '</span>' +
       '</div>' +
       '<div class="sc-stats">' +
-        '<div class="sc-name sx-name">' + sxEsc(type.name) + '</div>' +
+        '<div class="sc-name sx-name' + (ship.name ? ' named' : '') + '">' +
+          sxEsc(ship.name ? '«' + ship.name + '»' : type.name) + '</div>' +
         '<div class="sc-role"><b class="sx-side side-' + side + '">' + (side === 'enemy' ? 'Противник' : 'Союзник') + '</b> · ' +
-          sxEsc(sxRole(type)) + ' · ' + box.w + '×' + box.h + ' · ' + ship.x + ':' + ship.y + '</div>' +
+          // Названный корабль: тип в подписи — по нему и судят о силе
+          sxEsc(ship.name ? type.name : sxRole(type)) + ' · ' + box.w + '×' + box.h + ' · ' + ship.x + ':' + ship.y + '</div>' +
         '<div class="sc-hp sx-hp">' +
           '<span class="sc-hp-num">' + ship.hp + ' / ' + max + '</span>' +
           '<div class="sc-hp-track"><i style="width:' + hpPct.toFixed(1) + '%"></i></div>' +
@@ -2540,16 +2649,16 @@ function sdEval(d) {
     var ot = shipTypeById[other.ship_type] || {};
     var side = sxSide(other);
     if (side !== 'enemy') {
-      return { kind: 'bad', tone: 'bad', title: 'Место занято', sub: (side === 'mine' ? 'твой ' : 'союзный ') + (ot.name || 'корабль') };
+      return { kind: 'bad', tone: 'bad', title: 'Место занято', sub: (side === 'mine' ? 'твой ' : 'союзный ') + scShipName(other, ot) };
     }
-    if (!d.loaded) return { kind: 'wait', tone: 'wait', title: 'Цель: ' + (ot.name || 'корабль'), sub: 'проверяем дальность…', target: other };
+    if (!d.loaded) return { kind: 'wait', tone: 'wait', title: 'Цель: ' + scShipName(other, ot), sub: 'проверяем дальность…', target: other };
     var t = null;
     for (var i = 0; i < d.targets.length; i++) {
       if (d.targets[i].target_id === other.id) { t = d.targets[i]; break; }
     }
-    if (!t) return { kind: 'bad', tone: 'bad', title: 'Не достать', sub: (ot.name || 'цель') + ' вне дальности', target: other };
+    if (!t) return { kind: 'bad', tone: 'bad', title: 'Не достать', sub: scShipName(other, ot) + ' вне дальности', target: other };
     return {
-      kind: 'attack', tone: 'attack', title: 'Огонь: ' + (t.ship_name || ot.name || 'цель'),
+      kind: 'attack', tone: 'attack', title: 'Огонь: ' + (t.ship_name || scShipName(other, ot)),
       sub: 'попадание ' + t.chance + '% · урон ' + t.damage, target: other, pick: t
     };
   }

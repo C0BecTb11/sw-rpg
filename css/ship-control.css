@@ -1590,3 +1590,77 @@
   background: rgba(217,169,64,0.07);
   border-radius: 4px;
 }
+
+/* ===== Имя корабля: строка с карандашом и правка на месте ===== */
+.sc-name-row { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.sc-name-row .sc-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sc-rename {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: none;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  color: #55606c;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.sc-rename:active,
+.sc-rename:hover { color: #4a90d9; border-color: #4a90d9; }
+/* Безымянному — подсказка, что имя можно дать */
+.sc-rename:not(.named) { border-style: dashed; }
+
+.sc-rename-box { display: none; }
+.sc-stats.renaming .sc-name-row,
+.sc-stats.renaming .sc-role { display: none; }
+.sc-stats.renaming .sc-rename-box { display: block; }
+
+.sc-rename-line { display: flex; gap: 5px; }
+.sc-rename-line input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 9px;
+  background: #0a0d14;
+  border: 1px solid #4a90d9;
+  border-radius: 7px;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  /* 16px: меньше — и телефон увеличивает страницу при вводе */
+  font-size: 16px;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(74,144,217,0.15);
+}
+.sc-rename-line input::placeholder { color: #3a4654; }
+
+.sc-rename-ok,
+.sc-rename-no {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 7px;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.sc-rename-ok { background: #4a90d9; border: 1px solid #4a90d9; color: #0a0d14; }
+.sc-rename-ok:disabled { opacity: 0.45; }
+.sc-rename-no { background: none; border: 1px solid #2a3644; color: #8fa8c4; }
+
+.sc-rename-hint {
+  margin-top: 4px;
+  font-size: 9px;
+  line-height: 1.35;
+  color: #55606c;
+}
+.sc-rename-hint.bad { color: #d94a4a; }

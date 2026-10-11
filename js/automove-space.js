@@ -83,6 +83,7 @@ function amRangeOf(ship) {
 
 function amName(ship) {
   var t = amType(ship);
+  if (ship && ship.name) return ship.name;
   return (t && t.name) || 'Корабль';
 }
 

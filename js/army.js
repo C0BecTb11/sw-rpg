@@ -256,7 +256,8 @@ function makeFleetSection(ships, cargoByShip, systemNames, goodsByShip) {
     header.innerHTML =
       '<span class="garrison-arrow">▸</span>' +
       '<span class="ship-thumb"><img src="../' + (type.image || '') + '" alt=""></span>' +
-      '<span class="ship-title">' + (type.name || ship.ship_type) +
+      // Имя, данное хозяином, — крупно; тип остаётся в подсказке и в трюме
+      '<span class="ship-title">' + armyEsc(ship.name ? '«' + ship.name + '»' : (type.name || ship.ship_type)) +
         '<em>' + (ship.in_transit
             ? 'в гиперпространстве'
             : (systemNames[ship.system_id] || ship.system_id)) + '</em></span>' +
@@ -482,3 +483,9 @@ document.addEventListener('DOMContentLoaded', function() {
   if (armyButton) armyButton.addEventListener('click', openArmyScreen);
   if (closeButton) closeButton.addEventListener('click', closeArmyScreen);
 });
+
+function armyEsc(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
