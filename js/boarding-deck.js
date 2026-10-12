@@ -1110,9 +1110,20 @@ function bdcSetDeck(dk, faction, place) {
 
 function bdcFocusUnit(u) {
   if (!u || !BDC.dk || u.deck !== BDC.dk.n) return;
-  var p = bdcToScreen(u.x + 0.5, u.y + 0.5);
-  var m = 48;
-  if (p[0] < m || p[1] < m || p[0] > BDC.vw - m || p[1] > BDC.vh - m || bdcIsOverview()) bdcFocus(u.x + 0.5, u.y + 0.5);
+  bdcKeepInView([[u.x, u.y]]);
+}
+
+// Клетки должны быть в кадре: у края или под мини-картой — ведём камеру к их середине
+function bdcKeepInView(cells) {
+  if (!BDC || !BDC.dk || !cells.length) return;
+  var m = 52, mm = BDC.miniRect, bad = bdcIsOverview(), sx = 0, sy = 0;
+  cells.forEach(function(p) {
+    var q = bdcToScreen(p[0] + 0.5, p[1] + 0.5);
+    if (q[0] < m || q[1] < m || q[0] > BDC.vw - m || q[1] > BDC.vh - m) bad = true;
+    if (mm && q[0] > mm.x - 26 && q[1] < mm.y + mm.h + 26) bad = true;
+    sx += p[0] + 0.5; sy += p[1] + 0.5;
+  });
+  if (bad) bdcFocus(sx / cells.length, sy / cells.length);
 }
 
 function bdcDirty() { if (BDC) BDC.dirty = true; }
@@ -1135,11 +1146,23 @@ function bdcBindInput() {
     pts[e.pointerId] = pos(e);
     BDC.vel = null; BDC.fly = null;
     var k = ids();
-    if (k.length === 1) { start = { p: pts[e.pointerId].slice(), t: performance.now(), moved: false }; hist = []; }
+    if (k.length === 1) {
+      start = { p: pts[e.pointerId].slice(), t: performance.now(), moved: false, unit: false };
+      hist = [];
+      // Палец на выбранном своём бойце — тянем бойца, а не карту
+      if (BDC.onDrag && BDC.onDrag.start) {
+        var q = bdcToPlan(start.p[0], start.p[1]);
+        start.unit = !!BDC.onDrag.start([Math.floor(q[0]), Math.floor(q[1])]);
+      }
+    }
     if (k.length === 2) {
       var a = pts[k[0]], b = pts[k[1]];
       pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, s: BDC.cam.s, m: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] };
-      if (start) start.moved = true;
+      if (start) {
+        start.moved = true;
+        if (start.unit && BDC.onDrag.cancel) BDC.onDrag.cancel();
+        start.unit = false;
+      }
     }
   });
 
@@ -1160,6 +1183,13 @@ function bdcBindInput() {
     }
     if (!start) return;
     if (!start.moved && Math.hypot(p[0] - start.p[0], p[1] - start.p[1]) > 7) start.moved = true;
+    if (start.unit) {
+      if (start.moved) {
+        var q2 = bdcToPlan(p[0], p[1]);
+        BDC.onDrag.move([Math.floor(q2[0]), Math.floor(q2[1])], p);
+      }
+      return;
+    }
     if (start.moved) {
       bdcPan(p[0] - prev[0], p[1] - prev[1]);
       var t = performance.now();
@@ -1191,7 +1221,11 @@ function bdcBindInput() {
     // Палец постоял перед отпусканием — старые замеры скорости не в счёт
     var now = performance.now();
     while (hist.length && now - hist[0][0] > 90) hist.shift();
-    if (start && !start.moved && e.type === 'pointerup') {
+    if (start && start.unit && start.moved) {
+      var q3 = bdcToPlan(p[0], p[1]);
+      if (e.type === 'pointerup') BDC.onDrag.end([Math.floor(q3[0]), Math.floor(q3[1])]);
+      else if (BDC.onDrag.cancel) BDC.onDrag.cancel();
+    } else if (start && !start.moved && e.type === 'pointerup') {
       bdcTapAt(p[0], p[1]);
     } else if (start && start.moved && hist.length > 1 && !BDC.reduce) {
       var dt = Math.max(16, hist[hist.length - 1][0] - hist[0][0]), vx = 0, vy = 0;
@@ -1242,10 +1276,21 @@ function bdcTapAt(sx, sy) {
     if (d < bd) { bd = d; best = o; }
   });
   var finger = 18;                          // радиус пальца, px
+  var tur = null;
+  (dk.turrets || []).forEach(function(t) { if (t[0] === cx && t[1] === cy) tur = dk.n + ':' + t[0] + ':' + t[1]; });
+  if (tur) { BDC.onTap({ turret: tur, cell: [cx, cy] }); return; }
   if (cell) {
     // Касание по клетке бойца: дверь — только если попали точно в её середину
     if (best && bd < Math.min(finger, sc * 0.2)) { BDC.onTap({ door: best.d.id }); return; }
     BDC.onTap({ unit: cell.id }); return;
+  }
+  // Пустая подсвеченная клетка хода важнее соседней двери и бойца рядом —
+  // кроме точного попадания в середину двери или в фишку бойца
+  var reach = BDC.ov && BDC.ov.reach ? BDC.ov.reach.cells : null;
+  if (reach && reach.some(function(r) { return r[0] === cx && r[1] === cy; })) {
+    if (best && bd < Math.min(finger, sc * 0.2)) { BDC.onTap({ door: best.d.id }); return; }
+    if (unit && ud < Math.max(6, sc * 0.42)) { BDC.onTap({ unit: unit.id }); return; }
+    BDC.onTap({ cell: [cx, cy] }); return;
   }
   if (unit && ud <= Math.max(finger, sc * 0.45) && (!best || ud <= bd)) { BDC.onTap({ unit: unit.id }); return; }
   if (best && bd <= Math.max(finger, sc * 0.48)) { BDC.onTap({ door: best.d.id }); return; }
@@ -1275,7 +1320,7 @@ function bdcFrame(t) {
     if (Math.abs(BDC.vel[0]) + Math.abs(BDC.vel[1]) < 0.3) BDC.vel = null;
     moving = true;
   }
-  var anim = bdcDoorStep();
+  var anim = bdcDoorStep() || bdcFxBusy();
   // Без движения — живой фон ~20 кадров в секунду
   var ambient = !BDC.reduce && t - BDC.last > 50;
   if (!(BDC.dirty || moving || anim || ambient)) return;
@@ -1347,6 +1392,9 @@ function bdcDraw(T) {
   // Туман
   bdcFog(c, dk, g, vis, T);
 
+  // Куда дойдёт выбранный боец и путь до выбранной клетки
+  bdcDrawReach(c, s, T);
+
   // Двери
   var u = bdSel ? bdUnitById(bdSel) : null;
   var adj = {};
@@ -1356,7 +1404,11 @@ function bdcDraw(T) {
   g.doors.forEach(function(o) { if (o.d.kind !== 'lift') bdcDoor(c, o, T, adj[o.d.id], bdSelDoor === o.d.id, s); });
 
   // Турели защиты
-  (dk.turrets || []).forEach(function(tr, i) { bdcTurret(c, tr, side, T, i); });
+  (dk.turrets || []).forEach(function(tr, i) { bdcTurret(c, tr, side, T, i, dk.n); });
+
+  // Выстрелы, взрывы, переходы
+  var nowMs = performance.now();
+  bdcDrawFxPlan(c, s, nowMs);
 
   // Клетка выбранного бойца
   if (u && u.deck === dk.n) {
@@ -1371,6 +1423,8 @@ function bdcDraw(T) {
   var units = bdUnits(dk.n).slice().sort(function(a, b) { return (a.id === bdSel) - (b.id === bdSel); });
   units.forEach(function(x) { bdcToken(c, x, s, T, 1); });
   units.forEach(function(x) { bdcToken(c, x, s, T, 2); });
+  bdcDrawTargets(c, s, T);
+  bdcDrawPlanCost(c, s);
 
   // Тревога: красная кромка экрана
   if (alarm && !BDC.reduce) {
@@ -1385,6 +1439,8 @@ function bdcDraw(T) {
   c.fillStyle = vg2; c.fillRect(0, 0, vw, vh);
 
   bdcMini(c, dk, g, vis);
+  // Цифры урона — поверх мини-карты и виньетки, чтобы не терялись у края
+  bdcDrawFxScreen(c, s, nowMs);
 
   // Кнопка масштаба: «+» — к своим, «−» — вся палуба
   var ov = bdcIsOverview();
@@ -1685,9 +1741,17 @@ function bdcDoorRing(c, o, T, selected, s) {
 }
 
 // Турель: купол стороны хозяина, ствол водит по сторонам
-function bdcTurret(c, t, side, T, i) {
+function bdcTurretState(deck, t) {
+  var key = deck + ':' + t[0] + ':' + t[1], list = (bdState && bdState.turrets) || [];
+  for (var i = 0; i < list.length; i++) if (list[i].k === key) return list[i];
+  return { k: key, hp: 150, max: 150 };
+}
+
+function bdcTurret(c, t, side, T, i, deck) {
   var cx = t[0] + 0.5, cy = t[1] + 0.5;
   var col = side === 'def' ? BDC_SIDE.mine : BDC_SIDE.foe;
+  var ts = bdcTurretState(deck, t);
+  if (ts.hp <= 0) { bdcTurretWreck(c, cx, cy, T, i); return; }
   var a = BDC.reduce ? i : Math.sin(T * 0.6 + i * 1.7) * 1.4 + i * 2;
   c.save();
   c.shadowColor = 'rgba(0,0,0,0.7)'; c.shadowBlur = 6;
@@ -1700,6 +1764,33 @@ function bdcTurret(c, t, side, T, i) {
   gr.addColorStop(0, '#8fa3b8'); gr.addColorStop(1, '#2d3a49');
   c.fillStyle = gr; c.beginPath(); c.arc(0, 0, 0.24, 0, 7); c.fill();
   c.fillStyle = bdcAlpha(col, 0.95); c.beginPath(); c.arc(0.1, 0, 0.05, 0, 7); c.fill();
+  c.restore();
+  // Прочность — полоской под куполом, когда турель уже задета
+  if (ts.hp < ts.max) {
+    var k = Math.max(0, ts.hp / ts.max);
+    c.fillStyle = 'rgba(0,0,0,0.75)'; c.fillRect(cx - 0.4, cy + 0.5, 0.8, 0.12);
+    c.fillStyle = k > 0.5 ? col : k > 0.25 ? '#e3a24a' : '#ff5a4f'; c.fillRect(cx - 0.38, cy + 0.52, 0.76 * k, 0.08);
+  }
+}
+
+// Разбитая турель: обгоревшее основание, обломок ствола, дымок
+function bdcTurretWreck(c, cx, cy, T, i) {
+  c.save();
+  var g = c.createRadialGradient(cx, cy, 0, cx, cy, 0.6);
+  g.addColorStop(0, 'rgba(0,0,0,0.7)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+  c.fillStyle = g; c.fillRect(cx - 0.6, cy - 0.6, 1.2, 1.2);
+  c.fillStyle = '#1a1f26'; c.beginPath(); c.arc(cx, cy, 0.36, 0, 7); c.fill();
+  c.strokeStyle = '#3a2a22'; c.lineWidth = 0.05;
+  c.beginPath(); c.moveTo(cx - 0.25, cy - 0.1); c.lineTo(cx, cy + 0.05); c.lineTo(cx + 0.2, cy - 0.2);
+  c.moveTo(cx - 0.05, cy + 0.25); c.lineTo(cx + 0.05, cy); c.stroke();
+  c.fillStyle = '#4a4f57'; c.save(); c.translate(cx, cy); c.rotate(0.9 + i); c.fillRect(0.1, -0.04, 0.22, 0.08); c.restore();
+  if (!BDC.reduce) {
+    for (var k = 0; k < 3; k++) {
+      var ph = (T * 0.35 + k / 3 + i * 0.13) % 1;
+      c.fillStyle = 'rgba(90,96,108,' + 0.35 * (1 - ph) + ')';
+      c.beginPath(); c.arc(cx + Math.sin(ph * 6 + k) * 0.12, cy - ph * 0.9, 0.12 + ph * 0.25, 0, 7); c.fill();
+    }
+  }
   c.restore();
 }
 
@@ -1854,7 +1945,7 @@ function bdcImg(src) {
 // Жетон бойца: портрет в круге, кольцо стороны, дуга здоровья, значки
 // pass 1 — жетон, pass 2 — значки поверх соседей
 function bdcToken(c, u, s, T, pass) {
-  var p = bdcToScreen(u.x + 0.5, u.y + 0.5);
+  var pp = bdcUnitPos(u), p = bdcToScreen(pp[0], pp[1]);
   var x = p[0], y = p[1];
   if (x < -40 || y < -40 || x > BDC.vw + 40 || y > BDC.vh + 40) return;
   var kind = u.mine ? 'mine' : (u.side === bdMine() ? 'ally' : 'foe');
@@ -1919,6 +2010,14 @@ function bdcToken(c, u, s, T, pass) {
 
 // Значки жетона: герой, инженер, огоньки действий
 function bdcBadges(c, u, x, y, r) {
+  // «На чеку» — глаз слева сверху
+  if (u.watch && r >= 9) {
+    var wx = x - r * 0.72, wy = y - r * 0.72, wr = Math.max(4.5, r * 0.34);
+    c.fillStyle = '#0a0d14'; c.beginPath(); c.arc(wx, wy, wr, 0, 7); c.fill();
+    c.strokeStyle = '#e3a24a'; c.lineWidth = Math.max(1.2, wr * 0.22);
+    c.beginPath(); c.ellipse(wx, wy, wr * 0.68, wr * 0.4, 0, 0, 7); c.stroke();
+    c.fillStyle = '#e3a24a'; c.beginPath(); c.arc(wx, wy, wr * 0.2, 0, 7); c.fill();
+  }
   // Герой — звезда
   if (u.hero && r >= 9) {
     var bx = x + r * 0.72, by = y - r * 0.72, br = Math.max(4.5, r * 0.34);

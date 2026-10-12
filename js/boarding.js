@@ -126,10 +126,42 @@ function bdRender(place) {
   bdDk = bdPrepDeck(bdTpl.decks[bdDeck - 1]);
   var foe = bdState.defender || {};
   bdcSetDeck(bdDk, foe.faction || 'other', place || null);
+  bdSyncOverlay();
   bdcDirty();
 }
 
+// После загрузки: выбранная клетка и цель ещё годятся?
+function bdCheckOrders() {
+  var u = bdActor();
+  if (!u) { bdClearOrders(); return; }
+  if (bdPlan) {
+    var r = bdPlan.unit === u.id ? bdReachFor(u) : null, path = r ? bdrPath(r, bdPlan.x, bdPlan.y) : null;
+    if (!path) bdPlan = null;
+    else { bdPlan.path = path; bdPlan.cost = Math.ceil(path.length / bdMr(u)); }
+  }
+  if (bdAim) {
+    var ok = bdAim.unit === u.id && bdTargetsFor(u).some(function(t) { return t.key === bdAim.key; });
+    if (!ok) bdAim = null;
+  }
+}
+
 // ---------- шапка, вкладки, нижняя панель ----------
+
+// Где группа атакующих: 'in' — кто-то уже прошёл на борт, 'open' — все в шлюзе,
+// но его дверь открыта или выбита, 'lock' — заперты в шлюзе
+function bdAttWhere() {
+  var where = 'lock';
+  bdState.units.forEach(function(x) {
+    if (x.side !== 'att' || where === 'in') return;
+    var dk = bdPrepDeck(bdTpl.decks[x.deck - 1]), z = bdZoneAt(dk, x.x, x.y);
+    if (!z || z.kind !== 'lock') { where = 'in'; return; }
+    (dk.doors || []).forEach(function(d) {
+      if (d.kind !== 'lock' || bdDoorState(d) === 'closed' || bdDoorState(d) === 'locked') return;
+      if (bdZoneAt(dk, d.c1[0], d.c1[1]) === z || bdZoneAt(dk, d.c2[0], d.c2[1]) === z) where = 'open';
+    });
+  });
+  return where;
+}
 
 function bdPortDeck() {
   for (var i = 0; i < bdTpl.decks.length; i++) if ((bdTpl.decks[i].ports || []).length) return i + 1;
@@ -249,6 +281,8 @@ function bdRenderHud() {
       '<button class="bd-x" data-act="unsel" aria-label="Закрыть">✕</button>' +
     '</div>';
 
+    html += bdOrdersHtml(u);
+
     var doors = bdAdjDoors(u);
     if (doors.length && s.status === 'active') {
       html += '<div class="bd-sec">Двери рядом</div>';
@@ -266,8 +300,6 @@ function bdRenderHud() {
           }).join('') : '<span class="bd-door-none">' + (st === 'broken' ? 'не закрывается' : 'не твоя дверь') + '</span>') + '</div>' +
         '</div>';
       });
-    } else if (s.status === 'active') {
-      html += '<div class="bd-note">Рядом нет дверей. Ход по палубам и стрельба появятся в следующем обновлении.</div>';
     }
   } else if (u) {
     var pct2 = u.max_hp ? Math.round(100 * u.hp / u.max_hp) : 100;
@@ -290,11 +322,17 @@ function bdRenderHud() {
       (!att && s.vehicles ? '<div class="bd-stat dim"><b>' + s.vehicles + '</b><span>техника стоит</span></div>' : '') +
     '</div>';
     if (s.status === 'active') {
+      var where = att ? bdAttWhere() : '';
       html += '<div class="bd-note">' + (att
-        ? 'Группа в шлюзе. Внутренняя дверь заперта по тревоге — коснись бойца у двери и вскрой её.'
-        : 'Тревога: переборки и бронедвери заперты. Твоя пехота в трюме, техника в бою не участвует.') +
-        ' Ход и стрельба на борту появятся в следующем обновлении.</div>';
+        ? (where === 'in' || !mineN
+          ? 'Группа на борту. Коснись бойца: зелёные клетки — ход за одно действие, жёлтые — за два, враг в рамке — выстрел.'
+          : where === 'open'
+            ? 'Дверь шлюза вскрыта. Коснись бойца и клетки за дверью — группа пойдёт на борт.'
+            : 'Группа в шлюзе. Внутренняя дверь заперта по тревоге — коснись бойца у двери и вскрой её.')
+        : 'Тревога: переборки и бронедвери заперты. Коснись бойца: подсвечено, куда он дойдёт; турели бьют по чужим сами.') +
+        '</div>';
     }
+    html += bdReinfHtml();
   }
 
   if (s.status === 'active' && att) {
@@ -311,17 +349,23 @@ function bdApText(u) {
   return '+1 через ' + Math.ceil(left / 1000) + ' с';
 }
 
-// Высоты шапки и панели — карте остаётся середина
+// Высоты шапки и панели — карте остаётся середина.
+// Телефон боком: панель уходит вправо на всю высоту, карта — слева
 function bdLayout() {
   var view = document.getElementById('bd-view');
   var top = document.getElementById('bd-top'), tabs = document.getElementById('bd-tabs'), hud = document.getElementById('bd-hud');
-  tabs.style.top = Math.round(top.getBoundingClientRect().bottom + 6) + 'px';
+  var land = window.innerWidth > window.innerHeight && window.innerHeight < 560;
+  document.body.classList.toggle('bd-land', land);
+  var hudW = land ? Math.round(Math.min(340, Math.max(260, window.innerWidth * 0.4))) : 0;
+  document.body.style.setProperty('--bd-hud-w', hudW + 'px');
+  tabs.style.top = Math.round(top.getBoundingClientRect().bottom + (land ? 4 : 6)) + 'px';
   var t = tabs.getBoundingClientRect().bottom + 4;
-  var b = hud.getBoundingClientRect().height + 4;
+  var b = land ? 0 : hud.getBoundingClientRect().height + 4;
   view.style.top = Math.round(t) + 'px';
   view.style.bottom = Math.round(b) + 'px';
+  view.style.right = hudW + 'px';
   var zoom = document.getElementById('bd-zoom');
-  if (zoom) zoom.style.bottom = Math.round(b + 10) + 'px';
+  if (zoom) { zoom.style.bottom = Math.round(b + 10) + 'px'; zoom.style.right = (hudW + 14) + 'px'; }
   var toast = document.getElementById('bd-toast');
   if (toast) toast.style.bottom = Math.round(b + 14) + 'px';
   bdcResize();
@@ -335,11 +379,18 @@ function bdLoad(keepView) {
     if (my !== bdSeq) return;
     if (res.error || !res.data) { bdFail(res.error ? res.error.message : 'Абордаж не найден'); return; }
     var s = res.data;
+    var prevById = {};
+    if (bdState) bdState.units.forEach(function(u) { prevById[u.id] = u; });
     bdOffset = new Date(s.server_now).getTime() - Date.now();
     s.units.forEach(function(u) {
       if (u.next_in !== null && u.next_in !== undefined) u._nextAt = Date.now() + u.next_in * 1000;
     });
     bdState = s;
+    // Ход уже показан, ответ сервера ещё в пути — не дёргаем бойца назад
+    if (bdPendingMove) {
+      var pu = bdUnitById(bdPendingMove.id);
+      if (pu) { pu.x = bdPendingMove.x; pu.y = bdPendingMove.y; }
+    }
     if (bdSel && !bdUnitById(bdSel)) { bdSel = null; bdSelDoor = null; }
     var ready = bdTpl && bdTpl.id === s.template ? Promise.resolve() : bdLoadTemplate(s.template);
     return ready.then(function() {
@@ -350,7 +401,15 @@ function bdLoad(keepView) {
         bdDeck = mine.length ? mine[0].deck : (s.side === 'att' ? bdPortDeck() : bdHoldDeck());
         bdSetLoaderName(s);
       }
+      bdCheckOrders();
+      bdReinfClamp();
       bdPaint(!keepView);
+      if (bdFocusAfter) {
+        var fu = bdUnitById(bdFocusAfter);
+        if (fu && fu.deck === bdDeck) { bdcFocusUnit(fu); bdFocusAfter = null; }
+        else if (!fu) bdFocusAfter = null;
+      }
+      bdPlayFx(s, prevById);
       if (window.sceneLoader) sceneLoader.mark('state');
       if (s.status !== 'active') bdShowEnd();
     });
@@ -396,6 +455,7 @@ function bdFail(msg) {
 var BD_END = {
   withdrawn: { att: ['Отход', 'Бойцы вернулись в свой трюм.'], def: ['Абордаж отбит', 'Противник отступил со всей группой.'] },
   timeout:   { att: ['Время вышло', 'Тридцать минут прошли — группа вернулась в трюм.'], def: ['Абордаж отбит', 'Время вышло, противник отошёл.'] },
+  repelled:  { att: ['Абордаж отбит', 'Вся абордажная группа погибла на борту.'], def: ['Абордаж отбит', 'Группа противника уничтожена.'] },
   broken:    { att: ['Абордаж прерван', ''], def: ['Абордаж прерван', ''] }
 };
 
@@ -407,7 +467,7 @@ function bdShowEnd() {
   var why = s.status === 'broken'
     ? (s.result === 'target_lost' ? 'Корабль-цель уничтожен.' : s.result === 'attacker_lost' ? 'Корабль атакующего уничтожен.' : 'Корабли расцепились.')
     : t[1];
-  var good = (s.side === 'def' && (s.status === 'withdrawn' || s.status === 'timeout'));
+  var good = (s.side === 'def' && (s.status === 'withdrawn' || s.status === 'timeout' || s.status === 'repelled'));
   var box = document.getElementById('bd-end');
   box.innerHTML = '<div class="bd-end-card ' + (good ? 'good' : '') + '">' +
     '<div class="bd-end-kicker">Абордаж окончен</div>' +
@@ -439,7 +499,7 @@ function bdDoor(doorId, act) {
   if (bdBusy || !bdSel) return;
   bdBusy = true;
   var u = bdUnitById(bdSel);
-  supabase.rpc('boarding_door', { p_boarding_id: bdId, p_unit_id: bdSel, p_door: doorId, p_action: act }).then(function(res) {
+  bdRpc('boarding_door', { p_boarding_id: bdId, p_unit_id: bdSel, p_door: doorId, p_action: act }).then(function(res) {
     bdBusy = false;
     if (res.error) { bdToast(res.error.message, true); bdLoad(true); return; }
     var word = { broken: act === 'breach' ? 'Дверь вскрыта' : 'Выбита', open: 'Открыта', closed: 'Закрыта', locked: 'Заперта', timeout: 'Время вышло' }[res.data] || 'Готово';
@@ -454,7 +514,7 @@ function bdRetreat() {
   var go = function() {
     if (bdBusy) return;
     bdBusy = true;
-    supabase.rpc('boarding_withdraw', { p_id: bdId }).then(function(res) {
+    bdRpc('boarding_withdraw', { p_id: bdId }).then(function(res) {
       bdBusy = false;
       if (res.error) { bdToast(res.error.message, true); return; }
       bdLoad(true);
@@ -475,11 +535,20 @@ function bdRetreat() {
 // Касание плана (js/boarding-deck.js): { unit } | { door } | { cell }
 function bdOnMapTap(hit) {
   if (!bdState || !bdTpl) return;
+  // Ход и выстрел выбранного бойца
+  if (bdOrderTap(hit)) return;
+  if (hit.turret) {
+    var ts = null;
+    (bdState.turrets || []).forEach(function(t) { if (t.k === hit.turret) ts = t; });
+    bdToast(ts && ts.hp <= 0 ? 'Турель разбита' : 'Турель защиты · ' + (ts ? ts.hp + '/' + ts.max : '') + ' · бьёт на 5 клеток');
+    return;
+  }
   if (hit.unit) {
     var id = hit.unit;
     bdSel = bdSel === id ? null : id;
     bdSelDoor = null;
-    bdRenderHud(); bdcDirty();
+    bdClearOrders();
+    bdRenderHud(); bdSyncOverlay();
     if (bdSel) bdcFocusUnit(bdUnitById(bdSel));
     return;
   }
@@ -494,17 +563,20 @@ function bdOnMapTap(hit) {
       return;
     }
     bdSelDoor = did;
-    bdRenderHud(); bdcDirty();
+    bdClearOrders();
+    bdRenderHud(); bdSyncOverlay();
     return;
   }
-  if (bdSel) { bdSel = null; bdSelDoor = null; bdRenderHud(); bdcDirty(); }
+  if (bdPlan || bdAim) { bdClearOrders(); bdRenderHud(); bdSyncOverlay(); return; }
+  if (bdSel) { bdSel = null; bdSelDoor = null; bdRenderHud(); bdSyncOverlay(); }
 }
 
 function bdHudClick(e) {
   var b = e.target.closest ? e.target.closest('[data-act]') : null;
   if (!b || b.disabled) return;
+  if (bdOrdersClick(b)) return;
   var act = b.getAttribute('data-act');
-  if (act === 'unsel') { bdSel = null; bdSelDoor = null; bdRenderHud(); bdcDirty(); }
+  if (act === 'unsel') { bdSel = null; bdSelDoor = null; bdClearOrders(); bdRenderHud(); bdSyncOverlay(); }
   else if (act === 'door') bdDoor(b.getAttribute('data-door'), b.getAttribute('data-do'));
   else if (act === 'retreat') bdRetreat();
   else if (act === 'orbit') location.href = bdOrbitUrl();
@@ -537,6 +609,7 @@ function bdInit() {
   bdId = qs.get('id');
   document.getElementById('bd-back').addEventListener('click', function() { location.href = bdOrbitUrl(); });
   bdcInit(document.getElementById('bd-view'), bdOnMapTap);
+  BDC.onDrag = bdDrag;
   document.getElementById('bd-hud').addEventListener('click', bdHudClick);
   document.getElementById('bd-end').addEventListener('click', bdHudClick);
   document.getElementById('bd-tabs').addEventListener('click', function(e) {
@@ -546,6 +619,7 @@ function bdInit() {
     if (n === bdDeck) return;
     bdDeck = n;
     bdSelDoor = null;
+    bdClearOrders();
     bdPaint(true);
   });
   // Вся палуба ↔ крупно к своим
