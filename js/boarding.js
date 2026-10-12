@@ -33,6 +33,9 @@ function bdNow() { return Date.now() + bdOffset; }
 
 function bdMine() { return bdState ? bdState.side : null; }
 
+// Учебный абордаж (js/boarding-drill.js): бой идёт в браузере, без сервера
+function bdDrill() { return typeof BDD !== 'undefined' && !!BDD; }
+
 function bdUnits(deck) {
   if (!bdState) return [];
   return bdState.units.filter(function(u) { return deck === undefined || u.deck === deck; });
@@ -185,7 +188,7 @@ function bdRenderTop() {
   top.className = 'bd-top ' + (att ? 'att' : 'def');
   top.innerHTML =
     '<div class="bd-top-row">' +
-      '<span class="bd-side">' + (att ? 'Абордаж · атака' : 'Абордаж · оборона') + '</span>' +
+      '<span class="bd-side">' + (s.drill ? 'Учебный абордаж' : att ? 'Абордаж · атака' : 'Абордаж · оборона') + '</span>' +
       (active && s.alarm ? '<span class="bd-alarm">Тревога</span>' : '') +
       '<span class="bd-timer' + (left < 300 && active ? ' warn' : '') + '" id="bd-timer">' + (active ? bdClock(left) : 'окончен') + '</span>' +
     '</div>' +
@@ -209,6 +212,8 @@ function bdClock(sec) {
 function bdRenderTabs() {
   var tabs = document.getElementById('bd-tabs');
   var pd = bdPortDeck(), hd = bdHoldDeck();
+  // Подсказка учения ведёт на другую палубу — вкладка мигает
+  var coach = bdDrill() && typeof bddCoachDeck === 'function' ? bddCoachDeck() : null;
   var html = '';
   bdTpl.decks.forEach(function(dk, i) {
     var n = i + 1;
@@ -218,7 +223,7 @@ function bdRenderTabs() {
       if (u.side === bdMine()) mine++; else foe++;
     });
     var tag = n === pd ? 'шлюзы' : n === hd ? 'трюм' : '';
-    html += '<button class="bd-tab' + (n === bdDeck ? ' active' : '') + '" data-deck="' + n + '">' +
+    html += '<button class="bd-tab' + (n === bdDeck ? ' active' : '') + (coach === n && n !== bdDeck ? ' coach' : '') + '" data-deck="' + n + '">' +
       '<span class="bd-tab-n">П' + n + '</span>' +
       '<span class="bd-tab-name">' + bdEsc(dk.name) + (tag ? ' · ' + tag : '') + '</span>' +
       '<span class="bd-tab-dots">' + (mine ? '<i class="m">' + mine + '</i>' : '') + (foe ? '<i class="f">' + foe + '</i>' : '') + '</span>' +
@@ -238,7 +243,7 @@ function bdAdjDoors(u) {
 // Что этот боец может сделать с дверью: [{ act, label, cost }]
 function bdDoorActs(d, u) {
   var st = bdDoorState(d), side = bdMine(), acts = [];
-  if (st === 'broken') return acts;
+  if (st === 'broken' || bdJammed(d)) return acts;
   if (d.kind === 'door') {
     if (st === 'open') { acts.push({ act: 'close', label: 'Закрыть', cost: 1 }); acts.push({ act: 'lock', label: 'Запереть', cost: 1 }); }
     if (st === 'closed') { acts.push({ act: 'open', label: 'Открыть', cost: 0 }); acts.push({ act: 'lock', label: 'Запереть', cost: 1 }); }
@@ -256,6 +261,9 @@ function bdDoorActs(d, u) {
   }
   return acts;
 }
+
+// Учение: двери к мостику заклинены — путь лежит через лифт и люк
+function bdJammed(d) { return !!(bdState && bdState.jam && bdState.jam[d.id]); }
 
 function bdApDots(u) {
   var max = u.ap_max || 2, ap = u.ap || 0, s = '';
@@ -298,7 +306,7 @@ function bdRenderHud() {
             return '<button class="bd-btn' + (a.act === 'breach' ? ' hot' : '') + '"' + (short ? ' disabled' : '') +
               ' data-act="door" data-door="' + d.id + '" data-do="' + a.act + '">' + a.label +
               '<small>' + (a.cost ? a.cost + ' д.' : 'свободно') + '</small></button>';
-          }).join('') : '<span class="bd-door-none">' + (st === 'broken' ? 'не закрывается' : 'не твоя дверь') + '</span>') + '</div>' +
+          }).join('') : '<span class="bd-door-none">' + (st === 'broken' ? 'не закрывается' : bdJammed(d) ? 'заклинило' : 'не твоя дверь') + '</span>') + '</div>' +
         '</div>';
       });
     }
@@ -318,7 +326,7 @@ function bdRenderHud() {
     var seen = s.units.filter(function(x) { return x.side !== s.side; }).length;
     html += '<div class="bd-sum">' +
       '<div class="bd-stat"><b>' + mineN + '</b><span>' + (att ? 'в абордаже' : 'защитников') + '</span></div>' +
-      (att ? '<div class="bd-stat"><b>' + s.reserve + '</b><span>в своём трюме</span></div>' : '') +
+      (att && !s.drill ? '<div class="bd-stat"><b>' + s.reserve + '</b><span>в своём трюме</span></div>' : '') +
       '<div class="bd-stat ' + (seen ? 'foe' : '') + '"><b>' + seen + '</b><span>врагов видно</span></div>' +
       (!att && s.vehicles ? '<div class="bd-stat dim"><b>' + s.vehicles + '</b><span>техника стоит</span></div>' : '') +
     '</div>';
@@ -330,16 +338,18 @@ function bdRenderHud() {
           : where === 'open'
             ? 'Дверь шлюза вскрыта. Коснись бойца и клетки за дверью — группа пойдёт на борт.'
             : 'Группа в шлюзе. Внутренняя дверь заперта по тревоге — коснись бойца у двери и вскрой её.')
-        : 'Держи мостик и реактор: враг на мостике 3 минуты — корабль его, заряд в реакторе не сняли за 5 — корабль взорван. Турели бьют по чужим сами.') +
+        : 'Держи мостик и реактор: враг на мостике ' + bdgNeedText() + ' — корабль его, заряд в реакторе не сняли за 5 минут — корабль взорван. Турели бьют по чужим сами.') +
         '</div>';
     }
-    html += bdgDefHtml();
-    html += bdReinfHtml();
-    html += bdgPanelHtml();
+    if (!s.drill) {
+      html += bdgDefHtml();
+      html += bdReinfHtml();
+      html += bdgPanelHtml();
+    }
   }
 
   if (s.status === 'active' && att) {
-    html += '<button class="bd-retreat" data-act="retreat">Отход · вернуть бойцов в трюм</button>';
+    html += '<button class="bd-retreat" data-act="retreat">' + (s.drill ? 'Закончить учение' : 'Отход · вернуть бойцов в трюм') + '</button>';
   }
   hud.innerHTML = html;
   bdLayout();
@@ -372,13 +382,15 @@ function bdLayout() {
   var toast = document.getElementById('bd-toast');
   if (toast) toast.style.bottom = Math.round(b + 14) + 'px';
   bdcResize();
+  if (bdDrill()) bddCoachPlace();
 }
 
 // ---------- загрузка и обновления ----------
 
 function bdLoad(keepView) {
   var my = ++bdSeq;
-  return supabase.rpc('get_boarding', { p_id: bdId }).then(function(res) {
+  var ask = bdDrill() ? bddGet() : supabase.rpc('get_boarding', { p_id: bdId });
+  return ask.then(function(res) {
     if (my !== bdSeq) return;
     if (res.error || !res.data) { bdFail(res.error ? res.error.message : 'Абордаж не найден'); return; }
     var s = res.data;
@@ -444,6 +456,7 @@ function bdPaint(toMine) {
   bdRenderTabs();
   bdRenderHud();
   bdRender(toMine ? 'mine' : null);
+  if (bdDrill()) bddCoachRender();
 }
 
 function bdFail(msg) {
@@ -452,7 +465,9 @@ function bdFail(msg) {
   box.innerHTML = '<div class="bd-end-card">' +
     '<div class="bd-end-kicker">Абордаж</div>' +
     '<div class="bd-end-title">' + bdEsc(msg) + '</div>' +
-    '<button class="bd-btn wide" data-act="galaxy">На карту галактики</button></div>';
+    (bdId === 'drill'
+      ? '<button class="bd-btn wide" data-act="orbit">На орбиту</button></div>'
+      : '<button class="bd-btn wide" data-act="galaxy">На карту галактики</button></div>');
   box.classList.add('open');
 }
 
@@ -469,6 +484,13 @@ function bdShowEnd() {
   if (bdShownEnd) return;
   bdShownEnd = true;
   var s = bdState;
+  if (s.drill) {
+    var dbox = document.getElementById('bd-end');
+    dbox.innerHTML = bddEndHtml(s);
+    dbox.classList.add('open');
+    bddCoachRender();
+    return;
+  }
   var t = (BD_END[s.status] || BD_END.broken)[s.side];
   var why = s.status === 'broken'
     ? (s.result === 'target_lost' ? 'Корабль-цель уничтожен.' : s.result === 'attacker_lost' ? 'Корабль атакующего уничтожен.' : 'Корабли расцепились.')
@@ -501,12 +523,15 @@ function bdToast(msg, bad) {
 
 function bdOrbitUrl() {
   var s = bdState;
+  // Учение не началось — назад, откуда пришли (панель корабля на орбите)
+  if (!s && bdId === 'drill' && /space-battle\.html/.test(document.referrer || '')) return document.referrer;
   if (!s) return 'galaxy-map.html';
   var own = s.side === 'att' ? s.attacker : s.defender;
   var ship = own && own.ship_id;
   // После захвата — к трофею; потерянного корабля на орбите уже нет
   if (s.status === 'captured' && s.side === 'att') ship = s.defender.ship_id;
   if ((s.status === 'captured' || s.status === 'destroyed') && s.side === 'def') ship = null;
+  if (s.drill) ship = s.attacker.ship_id;
   return 'space-battle.html?system=' + encodeURIComponent(s.system_id) +
     (ship ? '&ship=' + encodeURIComponent(ship) : '');
 }
@@ -529,6 +554,21 @@ function bdDoor(doorId, act) {
 function bdRetreat() {
   var s = bdState;
   var n = s.units.filter(function(u) { return u.side === 'att'; }).length;
+  if (s.drill) {
+    var stop = function() {
+      bdRpc('boarding_withdraw', { p_id: bdId }).then(function() { bdLoad(true); });
+    };
+    if (typeof gameConfirm !== 'function') { stop(); return; }
+    gameConfirm({
+      kicker: 'Учебный абордаж',
+      title: 'Закончить учение?',
+      image: s.defender.image ? '../' + s.defender.image : null,
+      sub: '«' + s.defender.name + '» · на борту ' + n,
+      note: 'Копии бойцов уйдут, настоящие и так в трюме. Пройти учение заново можно в любой момент.',
+      ok: 'Закончить', cancel: 'Продолжить'
+    }, stop);
+    return;
+  }
   var go = function() {
     if (bdBusy) return;
     bdBusy = true;
@@ -558,7 +598,7 @@ function bdOnMapTap(hit) {
   if (hit.turret) {
     var ts = null;
     (bdState.turrets || []).forEach(function(t) { if (t.k === hit.turret) ts = t; });
-    bdToast(ts && ts.hp <= 0 ? 'Турель разбита' : 'Турель защиты · ' + (ts ? ts.hp + '/' + ts.max : '') + ' · бьёт на 5 клеток');
+    bdToast(ts && ts.off ? 'Турель отключена — в учении не стреляет' : ts && ts.hp <= 0 ? 'Турель разбита' : 'Турель защиты · ' + (ts ? ts.hp + '/' + ts.max : '') + ' · бьёт на 5 клеток');
     return;
   }
   if (hit.unit) {
@@ -594,6 +634,7 @@ function bdHudClick(e) {
   if (!b || b.disabled) return;
   if (bdOrdersClick(b)) return;
   if (bdgClick(b)) return;
+  if (bdDrill() && bddClick(b)) return;
   var act = b.getAttribute('data-act');
   if (act === 'unsel') { bdSel = null; bdSelDoor = null; bdClearOrders(); bdRenderHud(); bdSyncOverlay(); }
   else if (act === 'door') bdDoor(b.getAttribute('data-door'), b.getAttribute('data-do'));
@@ -627,6 +668,8 @@ function bdTick() {
 function bdInit() {
   var qs = new URLSearchParams(location.search);
   bdId = qs.get('id');
+  var drillShip = qs.get('drill');
+  if (drillShip) bdId = 'drill';
   document.getElementById('bd-back').addEventListener('click', function() { location.href = bdOrbitUrl(); });
   bdcInit(document.getElementById('bd-view'), bdOnMapTap);
   BDC.onDrag = bdDrag;
@@ -657,6 +700,15 @@ function bdInit() {
   if (window.sceneLoader) sceneLoader.expect([['plan', 'План палуб'], ['state', 'Бойцы на борту']]);
 
   sbSessionGate().then(function() {
+    if (drillShip) {
+      // Учение: сервер отдаёт копии бойцов, дальше всё здесь — без реалтайма и опроса
+      bddStart(drillShip).then(function(ok) {
+        if (!ok) return;
+        bdLoad(false).then(function() { if (bdState && bdState.status === 'active') bddIntro(); });
+      });
+      setInterval(bdTick, 1000);
+      return;
+    }
     bdLoad(false);
     // Двери, тревога, итог: сервер меняет строку абордажа — перечитываем
     var soon = null;

@@ -9,8 +9,8 @@ var bdsTimer = null;
 var bdsUnitTypes = null;   // id → { name, image, is_vehicle, is_hero, can_build }
 var bdsPick = null;        // { ship, target, rows: [...], counts: {} } — сборка группы
 var bdsBusy = false;
-// Бойцов в шлюзе: у крупного корабля (3 палубы) шлюз 6×5, у малого (2 палубы) — 5×4
-function bdsLock(t) { return t && t.deck_count >= 3 ? 30 : 20; }
+// Бойцов в шлюзе: у флагмана (4 палубы) шлюз 6×6, у крупного (3) — 6×5, у малого (2) — 5×4
+function bdsLock(t) { var n = t ? t.deck_count : 0; return n >= 4 ? 36 : n >= 3 ? 30 : 20; }
 
 function bdsEsc(s) {
   return String(s === null || s === undefined ? '' : s)
@@ -198,10 +198,7 @@ function bdsTargets(box) {
       bdsMeta(box, 'В трюме нет пехоты. Абордажная группа набирается из трюма — техника в бой на палубах не идёт.', true);
       return;
     }
-    if (!targets.length) {
-      bdsMeta(box, 'Рядом нет целей. Подойди к вражескому кораблю вплотную — не дальше 1 клетки.');
-      return;
-    }
+    if (!targets.length) bdsMeta(box, 'Рядом нет целей. Подойди к вражескому кораблю вплотную — не дальше 1 клетки.');
 
     targets.forEach(function(t) {
       var b = document.createElement('button');
@@ -217,7 +214,23 @@ function bdsTargets(box) {
       });
       box.appendChild(b);
     });
+    bdsDrillButton(box, forShip);
   });
+}
+
+// Учебный абордаж: копии бойцов из трюма против слабой охраны, бой — в браузере
+function bdsDrillButton(box, shipId) {
+  var done = false;
+  try { done = localStorage.getItem('bd-drill-done') === '1'; } catch (e) {}
+  var b = document.createElement('button');
+  b.className = 'sc-hangar-btn wide bds-drill' + (done ? ' done' : '');
+  b.innerHTML = '<span class="bds-drill-ico" aria-hidden="true"></span>' +
+    '<span class="bds-t-body"><b>Учебный абордаж</b>' +
+    '<i>' + (done ? 'пройдено · можно повторить' : 'копии бойцов из трюма · без потерь') + '</i></span>';
+  b.addEventListener('click', function() {
+    location.href = 'boarding.html?drill=' + encodeURIComponent(shipId);
+  });
+  box.appendChild(b);
 }
 
 function bdsMeta(box, text, warn) {

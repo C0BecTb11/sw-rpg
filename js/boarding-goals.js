@@ -1,6 +1,6 @@
 // Абордаж: цели и отсеки корабля.
 //
-// Мостик: атакующие одни внутри 3 минуты подряд — корабль становится их трофеем.
+// Мостик: атакующие одни внутри 3 минуты подряд (флагман — 5) — корабль становится их трофеем.
 // Реактор: инженер атакующего ставит заряд вплотную к реактору; не сняли за
 // 5 минут — корабль взорван. Остальные отсеки с ролью что-то дают тому, кто
 // их держит (чьи бойцы внутри одни): щиты, батареи и ангар цели в космосе,
@@ -71,6 +71,14 @@ function bdgEff() { return (bdState && bdState.status === 'active' && bdState.ef
 // Палуба во тьме (энергоузел у атакующего) — дальность не больше 2 клеток
 function bdgDark(deck) { return bdgEff().dark === deck; }
 
+// Сколько держать мостик: у флагмана дольше, сервер присылает цифру
+function bdgNeedSec() { return (bdState && (bdState.bridge_need || (bdState.bridge && bdState.bridge.need))) || 180; }
+function bdgNeedText() {
+  var sec = bdgNeedSec(), m = Math.floor(sec / 60), r = sec % 60;
+  if (!r && m) return m + (m === 1 ? ' минуту' : m < 5 ? ' минуты' : ' минут');
+  return sec + ' с';
+}
+
 function bdgBridgeLeft() {
   var b = bdState && bdState.status === 'active' && bdState.bridge;
   if (!b) return null;
@@ -139,7 +147,7 @@ function bdgRoomText(r) {
     var bl = bdgBridgeLeft();
     if (bl !== null) return (mine ? 'захват' : 'потеря') + ' через <b data-g="bridge">' + bdClock(bl) + '</b>';
     if (who) return mine ? 'держим' : 'держит враг';
-    return s.side === 'att' ? 'цель: удержать 3 минуты' : 'не пускай врага';
+    return s.side === 'att' ? 'цель: удержать ' + bdgNeedText() : 'не пускай врага';
   }
   if (r.role === 'reactor') {
     var cl = bdgChargeLeft();
@@ -249,7 +257,8 @@ function bdgWelded(id) { return !!(bdState && bdState.doors && bdState.doors[id]
 // Кнопки для панели бойца: [{ act, label, cost, hot, dis, sub }]
 function bdgUnitActs(u) {
   var s = bdState, out = [];
-  if (s.status !== 'active' || !u.mine) return out;
+  // В учении ни заряда, ни насосов, ни сварки — цель одна: мостик
+  if (s.status !== 'active' || !u.mine || s.drill) return out;
   var dk = bdPrepDeck(bdTpl.decks[u.deck - 1]), z = bdZoneAt(dk, u.x, u.y);
   var role = z ? z.role : null, ch = s.charge;
   if (s.side === 'att' && u.engineer && role === 'reactor' && !ch) {

@@ -752,3 +752,96 @@ body.bd-land .bd-end-title { margin: 4px 0 4px; }
 body.bd-land .bd-end-text { margin-bottom: 10px; }
 body.bd-land .bd-end-stats { grid-template-columns: repeat(6, 1fr); }
 body.bd-land .bd-end-trophy { margin-bottom: 10px; }
+
+/* ---------- учебный абордаж (js/boarding-drill.js) ---------- */
+
+/* Подсказка шага: над планом, слева от мини-карты */
+#bd-coach-box { position: fixed; z-index: 950; pointer-events: none; }
+#bd-coach-box:empty { display: none; }
+.bd-coach {
+  pointer-events: auto;
+  max-width: 440px;
+  padding: 7px 10px 8px;
+  background: linear-gradient(180deg, rgba(13,17,25,0.95) 0%, rgba(8,11,17,0.95) 100%);
+  border: 1px solid rgba(217,169,64,0.42);
+  border-left: 3px solid #d9a940;
+  border-radius: 9px;
+  box-shadow: 0 8px 22px rgba(0,0,0,0.5);
+  cursor: pointer;
+}
+.bd-coach-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.bd-coach-n { flex: none; font-size: 8px; letter-spacing: 1.5px; text-transform: uppercase; color: #d9a940; }
+.bd-coach-head b {
+  flex: 1; min-width: 0;
+  font-weight: normal; font-size: 11px; letter-spacing: 0.5px; color: #e8d9a8;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.bd-coach-deck {
+  flex: none; padding: 1px 6px;
+  border: 1px solid rgba(240,212,138,0.6); border-radius: 8px;
+  font-size: 8px; letter-spacing: 1px; color: #f0d48a;
+  animation: bd-coach-pulse 1.4s ease-in-out infinite;
+}
+.bd-coach-dots { flex: none; display: flex; gap: 3px; }
+.bd-coach-dots i { width: 5px; height: 5px; border-radius: 50%; background: #2a3644; }
+.bd-coach-dots i.done { background: #5fd968; }
+.bd-coach-dots i.skip { background: #3d5a45; }
+.bd-coach-dots i.now { background: #f0d48a; box-shadow: 0 0 6px rgba(240,212,138,0.7); }
+.bd-coach-fold {
+  flex: none; width: 7px; height: 7px; margin: 0 1px 0 2px;
+  border-right: 1.5px solid #8fa8c4; border-bottom: 1.5px solid #8fa8c4;
+  transform: translateY(2px) rotate(-135deg);
+}
+.bd-coach.shut .bd-coach-fold { transform: translateY(-2px) rotate(45deg); }
+.bd-coach-text { margin-top: 5px; font-size: 10.5px; line-height: 1.45; color: #b8c7d6; }
+.bd-coach.shut .bd-coach-text { display: none; }
+.bd-coach.fresh { animation: bd-coach-fresh 1.3s ease-out 1; }
+@keyframes bd-coach-fresh {
+  0% { border-color: rgba(95,217,104,0.95); box-shadow: 0 0 0 0 rgba(95,217,104,0.5); }
+  35% { border-color: rgba(95,217,104,0.8); box-shadow: 0 0 20px 3px rgba(95,217,104,0.35); }
+  100% { border-color: rgba(217,169,64,0.42); box-shadow: 0 8px 22px rgba(0,0,0,0.5); }
+}
+@keyframes bd-coach-pulse { 50% { border-color: rgba(240,212,138,0.95); box-shadow: 0 0 10px rgba(240,212,138,0.35); } }
+
+/* Вкладка палубы, куда ведёт подсказка */
+.bd-tab.coach { border-color: rgba(240,212,138,0.7); color: #e8d9a8; animation: bd-coach-pulse 1.4s ease-in-out infinite; }
+
+/* Вступление и итог учения */
+.bd-end-card.drill { border-top-color: #d9a940; }
+.bd-end-card.drill.good { border-top-color: #5fd968; }
+.bd-drill-ship {
+  display: flex; align-items: center; gap: 10px;
+  margin: 2px 0 12px; padding: 6px 10px;
+  background: #0a0d14; border: 1px solid #1c2530; border-radius: 8px;
+  font-size: 9px; letter-spacing: 0.5px; color: #8fa8c4; text-align: left;
+}
+.bd-drill-ship img { flex: none; width: 54px; height: 34px; object-fit: contain; }
+.bd-drill-party { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.bd-drill-pic {
+  width: 38px; height: 38px; border-radius: 50%; overflow: hidden;
+  background: #0a0d14; border: 2px solid #5fd968;
+  box-shadow: 0 0 0 2px rgba(95,217,104,0.15);
+}
+.bd-drill-pic.hero { border-color: #d9a940; box-shadow: 0 0 0 2px rgba(217,169,64,0.2); }
+.bd-drill-pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.bd-drill-goals { list-style: none; margin: 0 0 14px; padding: 0; text-align: left; }
+.bd-drill-goals li {
+  display: flex; gap: 10px; align-items: baseline;
+  padding: 6px 2px; border-top: 1px solid #1c2530;
+  font-size: 10px; line-height: 1.4; color: #b8c7d6;
+}
+.bd-drill-goals li:last-child { border-bottom: 1px solid #1c2530; }
+.bd-drill-goals b { flex: none; width: 46px; font-weight: normal; font-size: 8px; letter-spacing: 1.5px; text-transform: uppercase; color: #d9a940; }
+.bd-btn.wide.go { padding: 11px 6px; }
+.bd-drill-later { margin-top: 8px; background: none; border-color: #1c2530; color: #8fa8c4; }
+.bd-end-card.drill .bd-acts .bd-btn { padding: 10px 6px; }
+
+body.bd-land .bd-coach { padding: 5px 9px 6px; }
+body.bd-land .bd-coach-text { margin-top: 3px; font-size: 10px; line-height: 1.35; }
+body.bd-land .bd-drill-goals { margin-bottom: 10px; }
+body.bd-land .bd-drill-goals li { padding: 4px 2px; }
+body.bd-land .bd-drill-party { margin-bottom: 8px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .bd-coach.fresh, .bd-coach-deck, .bd-tab.coach { animation: none; }
+}

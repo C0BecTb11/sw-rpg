@@ -17,6 +17,7 @@ var bdFocusAfter = null;  // боец, к которому вести камер
 
 // Вызов сервера, который никогда не «повисает»: обрыв связи — та же ошибка
 function bdRpc(name, args) {
+  if (bdDrill()) return bddRpc(name, args);
   return supabase.rpc(name, args).then(null, function() {
     return { data: null, error: { message: 'Нет связи с сервером' } };
   });
@@ -135,6 +136,7 @@ function bdOrderTap(hit) {
       var ts = null;
       (bdState.turrets || []).forEach(function(x) { if (x.k === hit.turret) ts = x; });
       bdToast(u.side !== 'att' ? 'Своя турель: бьёт по чужим сама'
+        : ts && ts.off ? 'Турель отключена — в учении не стреляет'
         : ts && ts.hp <= 0 ? 'Турель разбита'
         : (u.ap || 0) < 1 ? 'Нет готовых действий'
         : 'Турель вне досягаемости: нужна линия огня и ' + (bdgDark(u.deck) ? Math.min(2, bdRangeOf(u)) + ' клет. — на палубе темно' : bdRangeOf(u) + ' клет.'));

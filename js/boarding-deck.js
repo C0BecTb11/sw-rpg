@@ -1436,6 +1436,8 @@ function bdcDraw(T) {
   bdcDrawTargets(c, s, T);
   bdcDrawPlanCost(c, s);
   bdcGoalsScreen(c, dk, g, s, T);
+  // Учение: маяк у цели текущего шага (js/boarding-drill.js)
+  if (typeof bddBeacon === 'function' && bdDrill()) bddBeacon(c, dk, s, T);
 
   // Тревога: красная кромка экрана
   if (alarm && !BDC.reduce) {
@@ -1763,6 +1765,7 @@ function bdcTurret(c, t, side, T, i, deck) {
   var cx = t[0] + 0.5, cy = t[1] + 0.5;
   var col = side === 'def' ? BDC_SIDE.mine : BDC_SIDE.foe;
   var ts = bdcTurretState(deck, t);
+  if (ts.off) { bdcTurretOff(c, cx, cy, i); return; }
   if (ts.hp <= 0) { bdcTurretWreck(c, cx, cy, T, i); return; }
   var a = BDC.reduce ? i : Math.sin(T * 0.6 + i * 1.7) * 1.4 + i * 2;
   c.save();
@@ -1783,6 +1786,18 @@ function bdcTurret(c, t, side, T, i, deck) {
     c.fillStyle = 'rgba(0,0,0,0.75)'; c.fillRect(cx - 0.4, cy + 0.5, 0.8, 0.12);
     c.fillStyle = k > 0.5 ? col : k > 0.25 ? '#e3a24a' : '#ff5a4f'; c.fillRect(cx - 0.38, cy + 0.52, 0.76 * k, 0.08);
   }
+}
+
+// Отключённая турель (учение): купол цел, стволы опущены, огней нет
+function bdcTurretOff(c, cx, cy, i) {
+  c.save();
+  c.fillStyle = '#151b23'; c.beginPath(); c.arc(cx, cy, 0.42, 0, 7); c.fill();
+  c.strokeStyle = 'rgba(85,96,108,0.7)'; c.lineWidth = 0.05; c.setLineDash([0.12, 0.1]);
+  c.beginPath(); c.arc(cx, cy, 0.4, 0, 7); c.stroke(); c.setLineDash([]);
+  c.translate(cx, cy); c.rotate(i * 2 + 0.6);
+  c.fillStyle = '#3a4552'; c.fillRect(0.05, -0.07, 0.36, 0.06); c.fillRect(0.05, 0.01, 0.36, 0.06);
+  c.fillStyle = '#2a333e'; c.beginPath(); c.arc(0, 0, 0.24, 0, 7); c.fill();
+  c.restore();
 }
 
 // Разбитая турель: обгоревшее основание, обломок ствола, дымок
