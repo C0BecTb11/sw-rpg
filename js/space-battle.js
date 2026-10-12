@@ -944,6 +944,8 @@ function loadShips() {
     spSoon('vision', loadSpaceVision, 120);
     loadShipOrders();
     if (typeof onShipsReloaded === 'function') onShipsReloaded();
+    // Сцепленные абордажем пары — значок между кораблями (js/boarding-space.js)
+    if (typeof bdsLoad === 'function') bdsLoad();
     if (typeof sxAfterShips === 'function') sxAfterShips(prevShips, req);
     if (typeof amAfterShips === 'function') amAfterShips(prevShips);
   });
@@ -1075,6 +1077,7 @@ function renderShips() {
 
   // Поднятый жестом корабль и его цели остаются отмеченными после перерисовки
   if (typeof sdDecorate === 'function') sdDecorate();
+  if (typeof bdsRender === 'function') bdsRender();
 }
 
 function openShipInfo(ship, type) {
@@ -1331,6 +1334,47 @@ function loadDock(box) {
   });
 }
 
+// Разобрать трофей: 40% сырья его стоимости — на склад планеты
+function makeScrapButton(s, stype) {
+  var cr = (stype && stype.cost_resources) || {};
+  var parts = [];
+  Object.keys(cr).forEach(function(k) {
+    var n = Math.floor((Number(cr[k]) || 0) * 0.4);
+    if (n <= 0) return;
+    var info = (syStock && syStock[k]) || (syResNames && syResNames[k]) || { name: k };
+    parts.push(info.name + ' +' + n);
+  });
+  var b = document.createElement('button');
+  b.className = 'dock-go dock-scrap';
+  b.textContent = 'Разобрать на сырьё' + (parts.length ? ' · ' + parts.join(', ') : '');
+  b.addEventListener('click', function() {
+    var go = function() {
+      b.disabled = true;
+      supabase.rpc('scrap_trophy', { p_ship_id: s.ship_id }).then(function(r) {
+        b.disabled = false;
+        if (r.error) { alert('Не вышло: ' + r.error.message); return; }
+        var got = (r.data && r.data.got) || {}, lost = [];
+        Object.keys(cr).forEach(function(k) {
+          var want = Math.floor((Number(cr[k]) || 0) * 0.4);
+          if (want > 0 && (got[k] || 0) < want) lost.push(((syStock && syStock[k]) || (syResNames && syResNames[k]) || { name: k }).name);
+        });
+        if (lost.length) alert('Трофей разобран. Склад полон — не поместилось: ' + lost.join(', '));
+        if (typeof loadShips === 'function') loadShips();
+        openShipyard(true);
+      });
+    };
+    if (typeof gameConfirm !== 'function') { go(); return; }
+    gameConfirm({
+      tone: 'danger', kicker: 'Верфь', title: 'Разобрать «' + s.name + '»?',
+      image: s.image ? '../' + s.image : null,
+      sub: 'Корабль уйдёт с орбиты насовсем',
+      note: parts.length ? 'На склад планеты: ' + parts.join(', ') + '. Что не влезет в склад — пропадёт.' : 'Сырья с этой модели не вернуть.',
+      ok: 'Разобрать', cancel: 'Оставить'
+    }, go);
+  });
+  return b;
+}
+
 function makeDockCard(s, box) {
   var card = document.createElement('div');
   card.className = 'dock-card';
@@ -1353,6 +1397,21 @@ function makeDockCard(s, box) {
     '</div>';
   card.appendChild(head);
 
+  // Трофей абордажа: дебафы до ремонта, разборка на сырьё
+  var row = typeof sxShipById === 'function' ? sxShipById(s.ship_id) : null;
+  var trophy = !!(row && row.trophy);
+  var stype = shipTypeById[s.ship_type] || null;
+  var foreign = !!(row && stype && stype.faction && stype.faction !== row.faction);
+  if (trophy) {
+    var left = row.jump_lock_until ? new Date(row.jump_lock_until).getTime() - Date.now() : 0;
+    var tn = document.createElement('div');
+    tn.className = 'dock-trophy';
+    tn.innerHTML = '<b>Трофей</b><span>Щиты выключены, ход и урон вдвое ниже' +
+      (left > 0 ? ', прыжки закрыты ещё ' + Math.ceil(left / 3600000) + ' ч' : '') +
+      '. Ремонт снимет всё это' + (foreign ? '; улучшать чужую модель нельзя' : '') + '.</span>';
+    card.appendChild(tn);
+  }
+
   // Корабль не у причала или уже в работе — показываем причину
   // и ничего не предлагаем, вместо отказа после нажатия
   if (s.busy || !s.at_dock || syBusyLeft() > 0) {
@@ -1363,6 +1422,8 @@ function makeDockCard(s, box) {
       : !s.at_dock ? 'Подведи корабль к станции — док работает только у причала'
       : 'Стапель занят — док освободится через ' + syLeftText(syBusyLeft());
     card.appendChild(lock);
+    // Разборке стапель не нужен — её можно и пока он занят
+    if (trophy && s.at_dock && !s.busy) card.appendChild(makeScrapButton(s, stype));
     return card;
   }
 
@@ -1373,8 +1434,8 @@ function makeDockCard(s, box) {
   // --- ремонт корпуса ---
   var fix = document.createElement('button');
   fix.className = 'dock-go';
-  if (s.missing > 0) {
-    fix.textContent = 'Починить · ' + s.repair_cost + ' · ' + formatDockLeft(s.repair_seconds);
+  if (s.missing > 0 || (trophy && s.repair_cost > 0)) {
+    fix.textContent = (trophy ? 'Ремонт трофея · ' : 'Починить · ') + s.repair_cost + ' · ' + formatDockLeft(s.repair_seconds);
     fix.addEventListener('click', function() {
       fix.disabled = true;
       supabase.rpc('start_ship_repair', { p_ship_id: s.ship_id }).then(function(r) {
@@ -1389,9 +1450,13 @@ function makeDockCard(s, box) {
   }
   card.appendChild(fix);
 
+  // Разборка трофея на сырьё
+  if (trophy) card.appendChild(makeScrapButton(s, stype));
+
   // --- модернизация: только изученное, подходящее и ещё не стоящее ---
+  // Трофей чужой фракции не улучшают
   var installed = s.upgrades || [];
-  var mine = shipyardUpgrades.filter(function(r) {
+  var mine = foreign ? [] : shipyardUpgrades.filter(function(r) {
     return (r.applies_to || []).indexOf(s.ship_type) !== -1
         && installed.indexOf(r.id) === -1;
   });

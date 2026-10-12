@@ -66,7 +66,9 @@ function bdReachFor(u) {
 function bdTargetsFor(u) {
   var out = [];
   var reach = u ? bdRangeOf(u) : 0;
+  if (u && bdgDark(u.deck)) reach = Math.min(reach, 2);
   if (!u || (u.ap || 0) < 1 || reach <= 0 || !(u.dmg > 0)) return out;
+  var arm = bdgEff().armory === u.side ? 1.15 : 1;
   var g = bdGeoFor(u.deck), acc = u.acc === null || u.acc === undefined ? 75 : u.acc;
   var ok = function(x, y) {
     return Math.max(Math.abs(x - u.x), Math.abs(y - u.y)) <= reach && bdrLos(g, bdState.doors, u.x, u.y, x, y);
@@ -76,13 +78,14 @@ function bdTargetsFor(u) {
     var cover = bdrCover(g, u.x, u.y, t.x, t.y);
     out.push({ key: t.id, target: t.id, x: t.x, y: t.y, cover: cover,
                chance: Math.max(5, Math.min(95, acc - (t.eva || 0))),
-               dmg: Math.max(1, Math.round((u.dmg || 0) * (100 - cover) / 100)), name: t.name, hp: t.hp, max: t.max_hp, image: t.image });
+               dmg: Math.max(1, Math.round(Math.max(1, Math.round((u.dmg || 0) * (100 - cover) / 100)) * arm)),
+               name: t.name, hp: t.hp, max: t.max_hp, image: t.image });
   });
   if (u.side === 'att') {
     (bdState.turrets || []).forEach(function(t) {
       if (t.deck !== u.deck || t.hp <= 0 || !ok(t.x, t.y)) return;
       out.push({ key: t.k, turret: t.k, x: t.x, y: t.y, cover: 0, chance: Math.max(5, Math.min(95, acc)),
-                 dmg: u.dmg || 0, name: 'Турель', hp: t.hp, max: t.max });
+                 dmg: Math.max(1, Math.round((u.dmg || 0) * arm)), name: 'Турель', hp: t.hp, max: t.max });
     });
   }
   return out;
@@ -107,7 +110,7 @@ function bdSyncOverlay() {
   bdcSetOverlay({ reach: { cells: cells }, plan: plan, targets: bdTargetsFor(u), aim: bdAim && bdAim.unit === u.id ? bdAim.key : null });
 }
 
-function bdClearOrders() { bdPlan = null; bdAim = null; }
+function bdClearOrders() { bdPlan = null; bdAim = null; bdgVent = null; }
 
 // ---------- касания по палубе ----------
 
@@ -134,7 +137,7 @@ function bdOrderTap(hit) {
       bdToast(u.side !== 'att' ? 'Своя турель: бьёт по чужим сама'
         : ts && ts.hp <= 0 ? 'Турель разбита'
         : (u.ap || 0) < 1 ? 'Нет готовых действий'
-        : 'Турель вне досягаемости: нужна линия огня и ' + bdRangeOf(u) + ' клет.');
+        : 'Турель вне досягаемости: нужна линия огня и ' + (bdgDark(u.deck) ? Math.min(2, bdRangeOf(u)) + ' клет. — на палубе темно' : bdRangeOf(u) + ' клет.'));
       return true;
     }
     return false;
@@ -280,7 +283,10 @@ function bdPassOptions(u) {
     });
   }
   (dk.hatches || []).forEach(function(h) {
-    if (h.x === u.x && h.y === u.y && h.to) out.push({ kind: 'hatch', deck: h.to[0], cost: 2, label: 'Люк ' + (h.to[0] < u.deck ? '↑' : '↓') + ' П' + h.to[0] });
+    if (h.x !== u.x || h.y !== u.y || !h.to) return;
+    var welded = bdgWelded(h.id);
+    out.push({ kind: 'hatch', deck: h.to[0], cost: 2, dis: welded, sub: welded ? 'заварен' : null,
+               label: 'Люк ' + (h.to[0] < u.deck ? '↑' : '↓') + ' П' + h.to[0] });
   });
   (dk.ducts || []).forEach(function(d) {
     if ((d.a[0] === u.x && d.a[1] === u.y) || (d.b[0] === u.x && d.b[1] === u.y)) out.push({ kind: 'duct', cost: 2, label: 'Лаз' });
@@ -316,9 +322,11 @@ function bdOrdersHtml(u) {
     (!u.watch && (bdRangeOf(u) <= 0 || !(u.dmg > 0)) ? ' disabled' : '') + '>' + (u.watch ? 'Снять «На чеку»' : 'На чеку') + '<small>' + (u.watch ? 'ждёт врага' : 'свободно') + '</small></button>';
   bdPassOptions(u).forEach(function(o) {
     tools += '<button class="bd-btn" data-act="pass" data-kind="' + o.kind + '" data-deck="' + (o.deck || '') + '"' +
-      (o.cost > ap ? ' disabled' : '') + '>' + bdEsc(o.label) + '<small>' + o.cost + ' д.</small></button>';
+      (o.cost > ap || o.dis ? ' disabled' : '') + '>' + bdEsc(o.label) + '<small>' + bdEsc(o.sub || o.cost + ' д.') + '</small></button>';
   });
+  tools += bdgUnitToolsHtml(u);
   h += '<div class="bd-tools">' + tools + '</div>';
+  if (bdgVent && bdgVent.unit === u.id) return h + bdgVentHtml(u);
   if (!bdPlan && !bdAim) {
     var n = bdTargetsFor(u).length;
     h += '<div class="bd-hint">' + (ap < 1 ? 'Действия на перезарядке' :
@@ -445,6 +453,14 @@ function bdPlayFx(s, prevById) {
     } else if (e.k === 'tp') {
       bdcFxWarp(e.d, e.f[0], e.f[1], delay);
       bdcFxWarp(e.d2, e.t[0], e.t[1], delay + 150);
+    } else if (e.k === 'vt') {
+      bdgFx(e, s, delay);
+      delay += 300;
+      (e.hits || []).forEach(function(h) {
+        if (h.kill && h.side === s.side) { var p = prevById[h.u]; lost.push(p ? p.name : 'боец'); }
+      });
+    } else if (e.k === 'cg' || e.k === 'hl' || e.k === 'wd') {
+      bdgFx(e, s, delay);
     }
   });
   if (lost.length) bdToast(lost.length === 1 ? 'Погиб: ' + lost[0] : 'Погибли: ' + lost.length, true);

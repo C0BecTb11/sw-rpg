@@ -231,11 +231,23 @@ function scRenderHud() {
   document.getElementById('sc-hp-num').textContent = scShip.hp + ' / ' + hpMaxOwn;
   document.getElementById('sc-hp-fill').style.width = hpPct + '%';
 
+  var tro = !!scShip.trophy;
   document.getElementById('sc-props').innerHTML =
-    '<span title="урон">◎ ' + (scType.damage || 0) + '</span>' +
+    '<span title="урон"' + (tro ? ' class="sc-trophy-low"' : '') + '>◎ ' + sxTrophyDmg(scShip, scType.damage || 0) + '</span>' +
     '<span title="дальность огня">➶ ' + (scType.weapon_range || 0) + '</span>' +
-    '<span title="ход">⇢ ' + (scType.move_range || 0) + '</span>' +
+    '<span title="ход"' + (tro ? ' class="sc-trophy-low"' : '') + '>⇢ ' + sxTrophyMove(scShip, scType.move_range || 0) + '</span>' +
     '<span title="обзор">◈ ' + (scType.vision_range || 0) + '</span>';
+  var bm = document.getElementById('sc-board-marks');
+  if (!bm) {
+    bm = document.createElement('div');
+    bm.id = 'sc-board-marks';
+    bm.className = 'ui-marks sc-board-marks';
+    var props = document.getElementById('sc-props');
+    if (props && props.parentNode) props.parentNode.insertBefore(bm, props.nextSibling);
+  }
+  var bml = sxBoardMarks(scShip);
+  bm.innerHTML = bml.map(function(m) { return '<span class="ui-mark ' + m.cls + '">' + sxEsc(m.text) + '</span>'; }).join('');
+  bm.style.display = bml.length ? '' : 'none';
 
   scRenderTabs();
 
@@ -722,6 +734,9 @@ function scRenderTiles() {
     });
   }
 
+  // Абордаж: цель вплотную, группа из трюма (js/boarding-space.js)
+  if (typeof bdsAddTile === 'function') bdsAddTile(add, describe);
+
   // Истребителю нужен путь домой, и это именно действие
   if (scType.is_fighter) {
     add('recall', '⇤', 'В ангар', true, function() {
@@ -916,8 +931,11 @@ function scRenderHangar() {
 
       var launch = document.createElement('button');
       launch.className = 'sc-hangar-btn';
-      launch.textContent = 'Выпустить';
-      launch.addEventListener('click', function() { scStartLaunch(f); });
+      // Ангар у абордажной группы — машины не взлетают (как launch_fighter)
+      var seized = !!(scShip && scShip.boarding_eff && scShip.boarding_eff.hangar);
+      launch.textContent = seized ? 'Ангар захвачен' : 'Выпустить';
+      launch.disabled = seized;
+      launch.addEventListener('click', function() { if (!seized) scStartLaunch(f); });
       acts.appendChild(launch);
 
       var land = document.createElement('button');
@@ -1190,6 +1208,8 @@ function scRenderMode() {
                            : 'Стрелка — направление носа';
   } else if (scMode === 'auto') {
     hint.textContent = typeof amHintText === 'function' ? amHintText() : '';
+  } else if (scMode === 'board') {
+    hint.textContent = typeof bdsHint === 'function' ? bdsHint() : '';
   } else {
     // Без режима подсказываем быстрый жест — его не видно из кнопок
     hint.textContent = 'Быстрее: зажми корабль на карте и веди — на клетку или на врага';
@@ -1885,9 +1905,11 @@ function sxShields(ship, type, atMs) {
     regen = Math.max(0, Math.floor((at - new Date(ship.shields_updated_at).getTime()) / step)) * type.shield_regen;
   }
   var res = { max: max, maxFore: maxFore };
+  // Трофей до ремонта и корабль, чей генератор держит абордажная группа, — без щитов (как на сервере)
+  var off = !!(ship && (ship.trophy || (ship.boarding_eff && ship.boarding_eff.shields)));
   SX_ARCS.forEach(function(a) {
     var cap = a.key === 'shield_fore' ? maxFore : max;
-    res[a.key] = Math.max(0, Math.min(cap, (Number(ship && ship[a.key]) || 0) + regen));
+    res[a.key] = off ? 0 : Math.max(0, Math.min(cap, (Number(ship && ship[a.key]) || 0) + regen));
   });
   return res;
 }
@@ -2234,18 +2256,20 @@ function sxShowIntel(ship, type, keepView) {
   if (ship.tractor_until && new Date(ship.tractor_until).getTime() > now) {
     marks.push({ text: 'Удержан лучом захвата', cls: 'mind' });
   }
-  if (shieldMax > 0) {
+  var shOff = !!(ship.trophy || (ship.boarding_eff && ship.boarding_eff.shields));
+  if (shieldMax > 0 && !shOff) {
     var down = SX_ARCS.filter(function(a) { return sh[a.key] <= 0; }).length;
     if (down) marks.push({ text: 'Щит пробит: секторов ' + down, cls: 'reveal' });
   }
   if (ship.hp < max * 0.35) marks.push({ text: 'Корпус на исходе', cls: 'wound' });
+  marks = marks.concat(sxBoardMarks(ship));
 
   var range = type.weapon_range || 0;
   var stats = [
-    ['Урон', type.damage || 0, '◎'],
+    ['Урон', sxTrophyDmg(ship, type.damage || 0), '◎'],
     ['Дальность', range, '➶'],
     ['Обзор', type.vision_range || 0, '◈'],
-    ['Ход', type.move_range || 0, '⇢'],
+    ['Ход', sxTrophyMove(ship, type.move_range || 0), '⇢'],
     ['Точность', (type.accuracy || 0) + '%', '⌖'],
     ['Уклонение', (type.evasion || 0) + '%', '↯']
   ];
@@ -2258,7 +2282,8 @@ function sxShowIntel(ship, type, keepView) {
   // у этого корабля ничего не поменялось — не трогаем шторку, иначе
   // прокрутка прыгает наверх посреди боя.
   var sig = [ship.id, ship.name, ship.hp, ship.x, ship.y, ship.facing, ship.tractor_until, nick,
-             SX_ARCS.map(function(a) { return sh[a.key]; }).join(',')].join('|');
+             SX_ARCS.map(function(a) { return sh[a.key]; }).join(','),
+             ship.trophy ? 1 : 0, ship.jump_lock_until || '', JSON.stringify(ship.boarding_eff || null)].join('|');
   if (keepView && el.style.display !== 'none' && el.getAttribute('data-sig') === sig) return;
   var keepScroll = keepView ? el.scrollTop : 0;
 
@@ -2504,7 +2529,33 @@ function sdShipAtCell(x, y, skipId) {
 }
 
 function sdRange(ship, type) {
-  return (type.move_range || 0) + (ship.bonus_move || 0);
+  return sxTrophyMove(ship, (type.move_range || 0) + (ship.bonus_move || 0));
+}
+
+// Трофей до ремонта ходит и бьёт вдвое слабее — как ship_stats на сервере
+function sxTrophyMove(ship, v) { return ship && ship.trophy ? Math.max(1, Math.floor(v / 2)) : v; }
+function sxTrophyDmg(ship, v) { return ship && ship.trophy ? Math.max(1, Math.ceil(v / 2)) : v; }
+
+// Что делает с кораблём трофейный статус и абордаж: строки для панели
+function sxBoardMarks(ship) {
+  var out = [];
+  if (!ship) return out;
+  if (ship.trophy) {
+    var left = ship.jump_lock_until ? new Date(ship.jump_lock_until).getTime() - scServerNow() : 0;
+    out.push({ text: 'Трофей: щиты выключены, ход и урон ×½' + (left > 0 ? ', прыжки закрыты ещё ' + Math.ceil(left / 3600000) + ' ч' : '') + ' · ремонт в доке снимет', cls: 'reveal' });
+  }
+  var e = ship.boarding_eff;
+  if (e) {
+    var w = [];
+    if (e.shields) w.push('щиты погашены');
+    if (e.gun_port && e.gun_star) w.push('борта не стреляют');
+    else if (e.gun_port) w.push('левый борт не стреляет');
+    else if (e.gun_star) w.push('правый борт не стреляет');
+    if (e.hangar) w.push('ангар захвачен');
+    if (e.engine) w.push('машинное захвачено');
+    if (w.length) out.push({ text: 'Абордаж: ' + w.join(', '), cls: 'wound' });
+  }
+  return out;
 }
 
 function sdActive() { return !!sdDrag; }

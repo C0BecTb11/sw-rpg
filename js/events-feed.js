@@ -201,6 +201,19 @@ function makeFeedRow(e) {
     row.appendChild(go);
   }
 
+  // Абордаж: прямо на палубы — там же видно, если бой уже окончен;
+  // по итоговым записям открывается сводка боя
+  if (e.meta && e.meta.boarding_id && (FEED_BOARD_LIVE[e.type] || FEED_BOARD_END[e.type])) {
+    var board = document.createElement('button');
+    board.className = 'feed-go';
+    board.textContent = FEED_BOARD_END[e.type] ? 'Итог боя' : 'На борт';
+    board.addEventListener('click', function() {
+      closeEventsFeed();
+      window.location.href = 'boarding.html?id=' + encodeURIComponent(e.meta.boarding_id);
+    });
+    row.appendChild(board);
+  }
+
   // Передача войск: карты тут нет, зато есть меню, где её подтверждают
   if (e.meta && e.meta.transfer_id && typeof openTransferPanel === 'function') {
     var open = document.createElement('button');
@@ -374,6 +387,11 @@ var FEED_SPACE = feedSet(['ship_built', 'ship_lost', 'ship_destroyed', 'ship_hit
   'hangar_restocked', 'fleet_arrived', 'fleet_pushed_out', 'fleet_stranded', 'cargo_delivered',
   'cargo_lost', 'overwatch_space']);
 var FEED_STATION = feedSet(['station_built', 'station_started']);
+
+// Абордаж: начало ведёт на палубы, итог — к сводке боя
+var FEED_BOARD_LIVE = feedSet(['boarding_started', 'boarding_launched']);
+var FEED_BOARD_END = feedSet(['boarding_captured', 'boarding_lost', 'boarding_blown', 'boarding_destroyed',
+  'boarding_failed', 'boarding_held', 'boarding_broken']);
 
 // Поселение: открываем его панель
 var FEED_SETTLEMENT = feedSet(['district_built', 'district_started', 'settlement_upgrade',

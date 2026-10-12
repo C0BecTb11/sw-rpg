@@ -519,15 +519,18 @@ html, body {
   inset: 0;
   z-index: 2500;
   display: none;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   padding: 24px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   background: rgba(3,4,8,0.72);
 }
 #bd-end.open { display: flex; }
 .bd-end-card {
   width: 100%;
   max-width: 340px;
+  margin: auto;
   padding: 20px 18px 16px;
   background: linear-gradient(180deg, #0d1119 0%, #080b11 100%);
   border: 1px solid #1c2530;
@@ -541,8 +544,166 @@ html, body {
 .bd-end-title { margin: 8px 0 6px; font-size: 18px; letter-spacing: 1.5px; color: #e8d9a8; }
 .bd-end-text { margin-bottom: 14px; font-size: 11px; line-height: 1.5; color: #8fa8c4; }
 
+/* ---------- цели: мостик и заряд (полоса в шапке) ---------- */
+
+.bd-goal {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+  padding: 6px 9px 8px;
+  background: rgba(217,169,64,0.07);
+  border: 1px solid rgba(217,169,64,0.4);
+  border-radius: 8px;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  color: #e8d9a8;
+  overflow: hidden;
+}
+.bd-goal.bad { background: rgba(217,74,74,0.08); border-color: rgba(255,90,79,0.5); color: #ffb3a8; }
+.bd-goal span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bd-goal b { flex: none; font-weight: normal; font-size: 14px; letter-spacing: 1px; font-variant-numeric: tabular-nums; }
+.bd-goal em { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(0,0,0,0.35); }
+.bd-goal em u { display: block; height: 100%; background: #d9a940; transition: width 0.9s linear; }
+.bd-goal.bad em u { background: #ff5a4f; }
+.bd-goal.charge { animation: bd-goal-hot 1.2s ease-in-out infinite; }
+@keyframes bd-goal-hot { 50% { box-shadow: 0 0 14px rgba(255,70,50,0.35); } }
+.bd-goal-ico { flex: none; width: 12px; height: 12px; position: relative; }
+.bd-goal-ico.br::before {
+  content: ''; position: absolute; inset: 2px; transform: rotate(45deg);
+  background: currentColor; border-radius: 1px;
+}
+.bd-goal-ico.ch::before {
+  content: ''; position: absolute; inset: 1px; border-radius: 50%;
+  border: 2px solid currentColor; box-sizing: border-box;
+}
+.bd-goal-ico.ch::after {
+  content: ''; position: absolute; left: 4px; top: 4px; width: 4px; height: 4px; border-radius: 50%;
+  background: #ff3b2a; animation: bd-blink 0.8s steps(2, start) infinite;
+}
+@keyframes bd-blink { to { visibility: hidden; } }
+
+/* ---------- отсеки корабля ---------- */
+
+.bd-rooms { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+.bd-room {
+  display: block;
+  min-width: 0;
+  padding: 6px 7px 6px 8px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-left: 3px solid #2a3644;
+  border-radius: 7px;
+  font-family: 'Courier New', monospace;
+  text-align: left;
+  color: #8fa8c4;
+  cursor: pointer;
+}
+.bd-room:active { background: #10151e; }
+.bd-room.own { border-left-color: #5fd968; }
+.bd-room.foe { border-left-color: #ff5a4f; }
+.bd-room.goal { border-color: rgba(217,169,64,0.35); }
+.bd-room.goal.own, .bd-room.goal.foe { border-color: rgba(217,169,64,0.55); }
+.bd-room.on.own { background: rgba(95,217,104,0.07); }
+.bd-room.on.foe { background: rgba(255,90,79,0.07); }
+.bd-room.hot { animation: bd-room-hot 1.4s ease-in-out infinite; }
+@keyframes bd-room-hot { 50% { border-color: rgba(240,200,106,0.9); box-shadow: 0 0 10px rgba(240,200,106,0.25); } }
+.bd-room-name { display: flex; align-items: center; gap: 5px; font-size: 10px; letter-spacing: 0.5px; color: #cfd8dc; }
+.bd-room-name i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #2a3644; }
+.bd-room.goal .bd-room-name i { border-radius: 1px; transform: rotate(45deg); background: #d9a940; }
+.bd-room.own .bd-room-name i { background: #5fd968; }
+.bd-room.foe .bd-room-name i { background: #ff5a4f; }
+.bd-room.fight { border-left-color: #e3a24a; }
+.bd-room.fight .bd-room-name i { background: #e3a24a; animation: bd-blink 0.9s steps(2, start) infinite; }
+.bd-room.fight .bd-room-eff { color: #f3c98a; }
+.bd-room-name em { margin-left: auto; font-style: normal; font-size: 8px; color: #55606c; }
+.bd-room-eff { display: block; margin-top: 3px; font-size: 8.5px; line-height: 1.35; color: #55606c; }
+.bd-room.on .bd-room-eff { color: #b9c9db; }
+.bd-room.own.on .bd-room-eff { color: #9fe8a6; }
+.bd-room.foe.on .bd-room-eff { color: #ffb3a8; }
+.bd-room-eff b { font-weight: normal; color: #f0d48a; font-variant-numeric: tabular-nums; }
+
+/* ---------- защитник: тревога, подкрепление ---------- */
+
+.bd-alarm-btn {
+  width: 100%;
+  margin-top: 10px;
+  padding: 9px 10px;
+  background: rgba(227,162,74,0.07);
+  border: 1px solid rgba(227,162,74,0.55);
+  border-radius: 8px;
+  color: #f3c98a;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+.bd-alarm-btn small { display: block; margin-top: 2px; font-size: 8px; letter-spacing: 0.5px; color: #8a7a5c; }
+.bd-alarm-btn:active { background: rgba(227,162,74,0.22); }
+.bd-alarm-btn:disabled { background: none; border-color: #2a3644; color: #55606c; cursor: default; }
+.bd-alarm-btn:disabled small { color: #55606c; }
+.bd-reinf-open.def { background: rgba(74,144,217,0.07); border-color: rgba(74,144,217,0.5); color: #b8d6f5; }
+.bd-reinf-open.def:active { background: rgba(74,144,217,0.2); }
+.bd-ship-pick { display: flex; gap: 6px; margin-bottom: 6px; }
+
+/* ---------- насосная: выбор отсека ---------- */
+
+.bd-vents { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+.bd-vent {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 8px 8px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 7px;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  color: #cfd8dc;
+  text-align: left;
+  cursor: pointer;
+}
+.bd-vent span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bd-vent i {
+  flex: none; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px;
+  font-style: normal; font-size: 9px; line-height: 15px; text-align: center; color: #0a0d14;
+}
+.bd-vent i.f { background: #ff5a4f; color: #fff; }
+.bd-vent i.m { background: #5fd968; }
+.bd-vent:active { border-color: #9fd3ff; background: rgba(159,211,255,0.08); }
+
+/* ---------- итог боя ---------- */
+
+.bd-end-card.captured { border-top-color: #d9a940; }
+.bd-end-card.destroyed { border-top-color: #ff6b4a; }
+.bd-end-card.captured.good .bd-end-title { color: #f0d48a; }
+.bd-end-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 0 0 12px; }
+.bd-end-stat {
+  padding: 8px 4px 7px;
+  background: #0a0d14;
+  border: 1px solid #1c2530;
+  border-radius: 8px;
+}
+.bd-end-stat b { display: block; font-size: 16px; font-weight: normal; color: #e8d9a8; font-variant-numeric: tabular-nums; }
+.bd-end-stat span { display: block; margin-top: 3px; font-size: 7.5px; letter-spacing: 0.4px; line-height: 1.3; color: #55606c; }
+.bd-end-stat.good b { color: #5fd968; }
+.bd-end-stat.bad b { color: #ff6b4a; }
+.bd-end-extra { margin: -4px 0 12px; font-size: 9px; color: #8fa8c4; }
+.bd-end-trophy {
+  margin-bottom: 14px;
+  padding: 9px 10px;
+  background: rgba(217,169,64,0.07);
+  border: 1px solid rgba(217,169,64,0.4);
+  border-radius: 8px;
+  text-align: left;
+}
+.bd-end-trophy b { display: block; font-weight: normal; font-size: 11px; letter-spacing: 1px; color: #f0d48a; }
+.bd-end-trophy span { display: block; margin-top: 4px; font-size: 9.5px; line-height: 1.5; color: #b9a982; }
+
 @media (prefers-reduced-motion: reduce) {
-  .bd-alarm { animation: none; }
+  .bd-alarm, .bd-goal.charge, .bd-room.hot, .bd-goal-ico.ch::after, .bd-room.fight .bd-room-name i { animation: none; }
 }
 
 /* ---------- телефон боком: панель справа, карта на всю высоту ----------
@@ -583,3 +744,11 @@ body.bd-land #bd-hud {
 }
 body.bd-land #bd-hud:empty { display: block; }
 body.bd-land #bd-toast { left: calc((100% - var(--bd-hud-w, 330px)) / 2); }
+body.bd-land .bd-goal { margin-top: 5px; padding: 4px 8px 6px; }
+body.bd-land .bd-goal b { font-size: 12px; }
+body.bd-land #bd-end { padding: 12px; }
+body.bd-land .bd-end-card { max-width: 520px; padding: 14px 16px 12px; }
+body.bd-land .bd-end-title { margin: 4px 0 4px; }
+body.bd-land .bd-end-text { margin-bottom: 10px; }
+body.bd-land .bd-end-stats { grid-template-columns: repeat(6, 1fr); }
+body.bd-land .bd-end-trophy { margin-bottom: 10px; }

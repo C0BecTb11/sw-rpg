@@ -189,6 +189,7 @@ function bdRenderTop() {
       (active && s.alarm ? '<span class="bd-alarm">Тревога</span>' : '') +
       '<span class="bd-timer' + (left < 300 && active ? ' warn' : '') + '" id="bd-timer">' + (active ? bdClock(left) : 'окончен') + '</span>' +
     '</div>' +
+    bdgTopHtml() +
     '<div class="bd-ships">' +
       '<div class="bd-ship own">' + bdShipPic(own) + '<div><b>' + bdEsc(own.name) + '</b><i>' + bdEsc(own.player || '') + '</i></div></div>' +
       '<span class="bd-vs">⟫⟪</span>' +
@@ -329,10 +330,12 @@ function bdRenderHud() {
           : where === 'open'
             ? 'Дверь шлюза вскрыта. Коснись бойца и клетки за дверью — группа пойдёт на борт.'
             : 'Группа в шлюзе. Внутренняя дверь заперта по тревоге — коснись бойца у двери и вскрой её.')
-        : 'Тревога: переборки и бронедвери заперты. Коснись бойца: подсвечено, куда он дойдёт; турели бьют по чужим сами.') +
+        : 'Держи мостик и реактор: враг на мостике 3 минуты — корабль его, заряд в реакторе не сняли за 5 — корабль взорван. Турели бьют по чужим сами.') +
         '</div>';
     }
+    html += bdgDefHtml();
     html += bdReinfHtml();
+    html += bdgPanelHtml();
   }
 
   if (s.status === 'active' && att) {
@@ -403,6 +406,7 @@ function bdLoad(keepView) {
       }
       bdCheckOrders();
       bdReinfClamp();
+      bdgDefClamp();
       bdPaint(!keepView);
       if (bdFocusAfter) {
         var fu = bdUnitById(bdFocusAfter);
@@ -456,6 +460,8 @@ var BD_END = {
   withdrawn: { att: ['Отход', 'Бойцы вернулись в свой трюм.'], def: ['Абордаж отбит', 'Противник отступил со всей группой.'] },
   timeout:   { att: ['Время вышло', 'Тридцать минут прошли — группа вернулась в трюм.'], def: ['Абордаж отбит', 'Время вышло, противник отошёл.'] },
   repelled:  { att: ['Абордаж отбит', 'Вся абордажная группа погибла на борту.'], def: ['Абордаж отбит', 'Группа противника уничтожена.'] },
+  captured:  { att: ['Корабль захвачен', 'Мостик удержан — корабль теперь твой трофей.'], def: ['Корабль потерян', 'Противник удержал мостик: корабль ушёл к нему, экипаж и всё в трюме погибли.'] },
+  destroyed: { att: ['Корабль взорван', 'Заряд в реакторе сработал. Кто не успел в шлюз — погиб вместе с кораблём.'], def: ['Корабль погиб', 'Заряд в реакторе не сняли — корабль взорван вместе с экипажем.'] },
   broken:    { att: ['Абордаж прерван', ''], def: ['Абордаж прерван', ''] }
 };
 
@@ -467,13 +473,21 @@ function bdShowEnd() {
   var why = s.status === 'broken'
     ? (s.result === 'target_lost' ? 'Корабль-цель уничтожен.' : s.result === 'attacker_lost' ? 'Корабль атакующего уничтожен.' : 'Корабли расцепились.')
     : t[1];
-  var good = (s.side === 'def' && (s.status === 'withdrawn' || s.status === 'timeout' || s.status === 'repelled'));
+  var good = (s.side === 'def' && (s.status === 'withdrawn' || s.status === 'timeout' || s.status === 'repelled'))
+          || (s.side === 'att' && (s.status === 'captured' || s.status === 'destroyed'));
+  var trophy = s.status === 'captured' && s.side === 'att'
+    ? '<div class="bd-end-trophy"><b>Трофей «' + bdEsc(s.defender.name) + '»</b>' +
+      '<span>Корпус не выше 25%, щиты выключены, ход и урон вдвое ниже, прыжки закрыты на 12 часов. ' +
+      'Ремонт в своём доке снимет всё это, но обойдётся дороже обычного; на верфи трофей можно разобрать на 40% сырья.' +
+      (s.defender.faction !== s.attacker.faction ? ' Чужую модель в бой вводить можно, улучшать — нет.' : '') + '</span></div>'
+    : '';
   var box = document.getElementById('bd-end');
-  box.innerHTML = '<div class="bd-end-card ' + (good ? 'good' : '') + '">' +
+  box.innerHTML = '<div class="bd-end-card ' + (good ? 'good' : '') + ' ' + bdEsc(s.status) + '">' +
     '<div class="bd-end-kicker">Абордаж окончен</div>' +
     '<div class="bd-end-title">' + bdEsc(t[0]) + '</div>' +
     '<div class="bd-end-text">' + bdEsc(why) + '</div>' +
-    '<button class="bd-btn wide" data-act="orbit">На орбиту</button></div>';
+    bdgStatsHtml(s) + trophy +
+    '<button class="bd-btn wide" data-act="orbit">' + (s.status === 'captured' && s.side === 'att' ? 'К трофею на орбиту' : 'На орбиту') + '</button></div>';
   box.classList.add('open');
 }
 
@@ -489,8 +503,12 @@ function bdOrbitUrl() {
   var s = bdState;
   if (!s) return 'galaxy-map.html';
   var own = s.side === 'att' ? s.attacker : s.defender;
+  var ship = own && own.ship_id;
+  // После захвата — к трофею; потерянного корабля на орбите уже нет
+  if (s.status === 'captured' && s.side === 'att') ship = s.defender.ship_id;
+  if ((s.status === 'captured' || s.status === 'destroyed') && s.side === 'def') ship = null;
   return 'space-battle.html?system=' + encodeURIComponent(s.system_id) +
-    (own && own.ship_id ? '&ship=' + encodeURIComponent(own.ship_id) : '');
+    (ship ? '&ship=' + encodeURIComponent(ship) : '');
 }
 
 // ---------- приказы ----------
@@ -575,6 +593,7 @@ function bdHudClick(e) {
   var b = e.target.closest ? e.target.closest('[data-act]') : null;
   if (!b || b.disabled) return;
   if (bdOrdersClick(b)) return;
+  if (bdgClick(b)) return;
   var act = b.getAttribute('data-act');
   if (act === 'unsel') { bdSel = null; bdSelDoor = null; bdClearOrders(); bdRenderHud(); bdSyncOverlay(); }
   else if (act === 'door') bdDoor(b.getAttribute('data-door'), b.getAttribute('data-do'));
@@ -586,6 +605,7 @@ function bdHudClick(e) {
 // Каждую секунду: часы и «+1 через N с» у выбранного бойца
 function bdTick() {
   if (!bdState) return;
+  bdgTick();
   var el = document.getElementById('bd-timer');
   if (el && bdState.status === 'active') {
     var left = Math.max(0, Math.floor((new Date(bdState.ends_at).getTime() - bdNow()) / 1000));

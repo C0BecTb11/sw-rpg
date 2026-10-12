@@ -663,6 +663,8 @@
   font-size: 11px;
   color: #8fa8c4;
 }
+.sc-props .sc-trophy-low { color: #e3a24a; }
+.sc-board-marks { margin-top: 7px; }
 
 .sc-close {
   flex: none;

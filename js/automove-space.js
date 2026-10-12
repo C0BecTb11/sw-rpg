@@ -78,7 +78,9 @@ function amBoxOf(ship) {
 
 function amRangeOf(ship) {
   var t = amType(ship);
-  return ((t && t.move_range) || 0) + ((ship && ship.bonus_move) || 0);
+  var r = ((t && t.move_range) || 0) + ((ship && ship.bonus_move) || 0);
+  // Трофей до ремонта ходит вдвое короче — как ship_stats на сервере
+  return ship && ship.trophy ? Math.max(1, Math.floor(r / 2)) : r;
 }
 
 function amName(ship) {

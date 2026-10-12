@@ -211,6 +211,7 @@ function bdcDrawFxPlan(c, s, now) {
     if (f.k === 'bolt') bdcFxBolt(c, f, t, s);
     else if (f.k === 'boom') bdcFxBoom(c, f, t);
     else if (f.k === 'warp') bdcFxWarpDraw(c, f, t);
+    else if (f.k === 'charge' || f.k === 'vent' || f.k === 'weld') bdcFxGoals(c, f, t, s);
   });
   c.restore();
 }
@@ -323,4 +324,206 @@ function bdcDrawFxScreen(c, s, now) {
     }
     c.restore();
   });
+}
+
+// ---------- цели и отсеки (js/boarding-goals.js) ----------
+
+var BDC_HOLD = { own: '#5fd968', foe: '#ff5a4f' };
+
+function bdcAreaPath(a) {
+  if (a._path) return a._path;
+  var p = new Path2D();
+  a.runs.forEach(function(r) { p.rect(r[0], r[1], r[2], r[3]); });
+  a._path = p;
+  return p;
+}
+
+// План: кто держит отсеки с ролью, мостик под захватом, заряд в реакторе
+function bdcGoalsPlan(c, dk, g, s, T) {
+  if (!bdState || bdState.status !== 'active' || typeof bdgList !== 'function') return;
+  var mine = bdMine(), pulse = BDC.reduce ? 0.5 : 0.5 + 0.5 * Math.sin(T * 3);
+  c.save();
+  bdgList().forEach(function(r) {
+    if (r.deck !== dk.n) return;
+    var a = g.areas[r.area], who = bdgHolder(r.role);
+    if (!a || !who) return;
+    var col = who === mine ? BDC_HOLD.own : BDC_HOLD.foe;
+    var on = bdgOn(r.role);
+    c.fillStyle = bdcAlpha(col, on ? 0.07 + 0.04 * pulse : 0.05);
+    c.fill(bdcAreaPath(a));
+  });
+  // Мостик: атакующие одни внутри — золото с бегущей штриховкой
+  if (bdgBridgeLeft() !== null) {
+    bdgList().forEach(function(r) {
+      if (r.role !== 'bridge' || r.deck !== dk.n) return;
+      var a = g.areas[r.area];
+      if (!a) return;
+      var path = bdcAreaPath(a);
+      c.fillStyle = 'rgba(240,200,106,' + (0.07 + 0.08 * pulse) + ')'; c.fill(path);
+      c.save();
+      c.clip(path);
+      c.strokeStyle = 'rgba(240,200,106,0.16)'; c.lineWidth = 0.18;
+      var off = BDC.reduce ? 0 : (T * 1.2) % 1.2;
+      for (var k = a.minx - (a.maxy - a.miny) - 2; k < a.maxx + 2; k += 1.2) {
+        c.beginPath(); c.moveTo(k + off, a.maxy + 1.5); c.lineTo(k + off + (a.maxy - a.miny) + 3, a.miny - 1.5); c.stroke();
+      }
+      c.restore();
+    });
+  }
+  // Заряд: пульсирующий красный маяк
+  var ch = bdState.charge;
+  if (ch && ch.deck === dk.n) {
+    var x = ch.x + 0.5, y = ch.y + 0.5;
+    var left = bdgChargeLeft() || 0;
+    var fast = left < 60 ? 9 : left < 120 ? 6 : 3.4;
+    var k2 = BDC.reduce ? 0.6 : 0.5 + 0.5 * Math.sin(T * fast);
+    var gr = c.createRadialGradient(x, y, 0, x, y, 1.6);
+    gr.addColorStop(0, 'rgba(255,70,50,' + (0.45 + 0.35 * k2) + ')');
+    gr.addColorStop(0.45, 'rgba(255,40,30,' + (0.18 + 0.12 * k2) + ')');
+    gr.addColorStop(1, 'rgba(255,30,20,0)');
+    c.fillStyle = gr; c.fillRect(x - 1.6, y - 1.6, 3.2, 3.2);
+    c.save();
+    c.translate(x, y);
+    if (!BDC.reduce) c.rotate(T * 1.4);
+    c.strokeStyle = 'rgba(255,120,100,0.9)'; c.lineWidth = Math.max(0.05, 1.8 / s);
+    c.setLineDash([0.18, 0.12]);
+    c.beginPath(); c.arc(0, 0, 0.55, 0, 7); c.stroke();
+    c.restore();
+    // Сам заряд: шайба с мигающим огнём
+    c.fillStyle = '#2a0f0d'; c.beginPath(); c.arc(x, y, 0.26, 0, 7); c.fill();
+    c.strokeStyle = '#ff6b4a'; c.lineWidth = Math.max(0.04, 1.4 / s); c.stroke();
+    c.fillStyle = k2 > 0.5 ? '#ffe1d6' : '#ff3b2a';
+    c.beginPath(); c.arc(x, y, 0.09, 0, 7); c.fill();
+  }
+  c.restore();
+}
+
+// Экран: отсчёты над зарядом и мостиком
+function bdcGoalsScreen(c, dk, g, s, T) {
+  if (!bdState || bdState.status !== 'active' || typeof bdgList !== 'function') return;
+  var pill = function(x, y, txt, col, fill, pct) {
+    c.font = 'bold 11px "Courier New", monospace';
+    var w = c.measureText(txt).width + 16;
+    c.fillStyle = fill; bdcRR(c, x - w / 2, y - 9, w, 18, 9); c.fill();
+    c.strokeStyle = col; c.lineWidth = 1.2; c.stroke();
+    if (pct !== undefined) {
+      c.save(); bdcRR(c, x - w / 2, y - 9, w, 18, 9); c.clip();
+      c.fillStyle = bdcAlpha(col, 0.28); c.fillRect(x - w / 2, y - 9, w * Math.max(0, Math.min(1, pct)), 18);
+      c.restore();
+    }
+    c.fillStyle = col; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText(txt, x, y + 0.5);
+    c.textAlign = 'left'; c.textBaseline = 'alphabetic';
+  };
+  var ch = bdState.charge;
+  if (ch && ch.deck === dk.n) {
+    var left = bdgChargeLeft() || 0;
+    var p = bdcToScreen(ch.x + 0.5, ch.y + 0.5);
+    pill(p[0], p[1] - Math.max(18, s * 0.9), 'ЗАРЯД ' + bdClock(left), '#ff8a75', 'rgba(60,8,6,0.92)', 1 - left / bdgChargeTotal());
+  }
+  var bl = bdgBridgeLeft();
+  if (bl !== null) {
+    bdgList().forEach(function(r) {
+      if (r.role !== 'bridge' || r.deck !== dk.n) return;
+      var a = g.areas[r.area];
+      if (!a) return;
+      var q = bdcToScreen(a.big[0] + a.big[2] / 2, a.big[1] + a.big[3] / 2);
+      var mine = bdState.side === 'att';
+      pill(q[0], q[1], (mine ? 'ЗАХВАТ ' : 'ПОТЕРЯ ') + bdClock(bl), mine ? '#f0d48a' : '#ff8a75',
+           mine ? 'rgba(40,30,8,0.92)' : 'rgba(60,8,6,0.92)', 1 - bl / bdState.bridge.need);
+    });
+  }
+}
+
+// Тьма: энергоузел у атакующего — видно только около своих бойцов
+function bdcDarkness(c, dk, s, T) {
+  if (typeof bdgDark !== 'function' || !bdgDark(dk.n)) return;
+  var vw = BDC.vw, vh = BDC.vh, dpr = BDC.dpr;
+  var cv = BDC.darkCv || (BDC.darkCv = document.createElement('canvas'));
+  var W = Math.round(vw * dpr), H = Math.round(vh * dpr);
+  if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+  var x = cv.getContext('2d');
+  x.setTransform(dpr, 0, 0, dpr, 0, 0);
+  x.globalCompositeOperation = 'source-over';
+  x.clearRect(0, 0, vw, vh);
+  var flick = BDC.reduce ? 0 : 0.03 * Math.sin(T * 7.3) * Math.sin(T * 2.1);
+  x.fillStyle = 'rgba(2,4,10,' + (0.84 + flick) + ')';
+  x.fillRect(0, 0, vw, vh);
+  x.globalCompositeOperation = 'destination-out';
+  var R = Math.max(26, s * 2.6), mine = bdMine();
+  bdUnits(dk.n).forEach(function(u) {
+    if (u.side !== mine) return;
+    var p = bdcToScreen.apply(null, bdcUnitPos(u));
+    var gr = x.createRadialGradient(p[0], p[1], R * 0.2, p[0], p[1], R);
+    gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(0.55, 'rgba(0,0,0,0.8)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    x.fillStyle = gr; x.fillRect(p[0] - R, p[1] - R, R * 2, R * 2);
+  });
+  c.drawImage(cv, 0, 0, vw, vh);
+  // Аварийные огни: тусклый красный по краю
+  if (!BDC.reduce) {
+    var k = 0.05 + 0.05 * (0.5 + 0.5 * Math.sin(T * 1.7));
+    var vg = c.createRadialGradient(vw / 2, vh / 2, Math.min(vw, vh) * 0.4, vw / 2, vh / 2, Math.max(vw, vh) * 0.75);
+    vg.addColorStop(0, 'rgba(160,20,10,0)'); vg.addColorStop(1, 'rgba(160,20,10,' + k + ')');
+    c.fillStyle = vg; c.fillRect(0, 0, vw, vh);
+  }
+}
+
+// Плашка тьмы — поверх подписей, чтобы читалась
+function bdcDarkBadge(c, dk) {
+  if (typeof bdgDark !== 'function' || !bdgDark(dk.n)) return;
+  c.font = 'bold 10px "Courier New", monospace';
+  var txt = 'БЕЗ СВЕТА · ОБЗОР 2 КЛЕТКИ · ТУРЕЛИ МОЛЧАТ';
+  var w = c.measureText(txt).width + 18;
+  var x = 10, y = 10;
+  if (BDC.miniRect && x + w > BDC.miniRect.x - 8) w = Math.max(60, BDC.miniRect.x - 8 - x);
+  c.save();
+  c.fillStyle = 'rgba(30,14,4,0.94)'; bdcRR(c, x, y, w, 18, 9); c.fill();
+  c.strokeStyle = 'rgba(227,162,74,0.8)'; c.lineWidth = 1; c.stroke();
+  c.beginPath(); bdcRR(c, x, y, w, 18, 9); c.clip();
+  c.fillStyle = '#e3a24a'; c.textBaseline = 'middle'; c.fillText(txt, x + 9, y + 9.5);
+  c.restore();
+}
+
+// Эффекты отсеков на плане: заряд, продувка, сварка
+function bdcFxGoals(c, f, t, s) {
+  if (f.k === 'charge') {
+    var x = f.x + 0.5, y = f.y + 0.5, plant = f.act === 'plant';
+    var col = plant ? '255,80,60' : '120,200,255';
+    for (var i = 0; i < 3; i++) {
+      var r = 0.2 + ((t * 1.6 + i * 0.33) % 1) * 1.6;
+      c.strokeStyle = 'rgba(' + col + ',' + 0.8 * (1 - t) + ')'; c.lineWidth = 0.08;
+      c.beginPath(); c.arc(x, y, r, 0, 7); c.stroke();
+    }
+    var g = c.createRadialGradient(x, y, 0, x, y, 1.2);
+    g.addColorStop(0, 'rgba(' + col + ',' + 0.7 * (1 - t) + ')'); g.addColorStop(1, 'rgba(' + col + ',0)');
+    c.fillStyle = g; c.fillRect(x - 1.2, y - 1.2, 2.4, 2.4);
+  } else if (f.k === 'vent') {
+    var a = bdcGeom(BDC.dk).areas[f.area];
+    if (!a) return;
+    c.save();
+    c.clip(bdcAreaPath(a));
+    var op = t < 0.15 ? t / 0.15 : 1 - (t - 0.15) / 0.85;
+    c.fillStyle = 'rgba(190,225,255,' + 0.22 * op + ')';
+    c.fill(bdcAreaPath(a));
+    // Порывы: косые полосы, сдуваемые к шлюзу продувки
+    c.strokeStyle = 'rgba(225,245,255,' + 0.55 * op + ')'; c.lineCap = 'round';
+    var w = a.maxx - a.minx + 1, h = a.maxy - a.miny + 1;
+    for (var k = 0; k < 26; k++) {
+      var sx = a.minx + ((k * 7.31 + f.seed) % w), sy = a.miny + ((k * 3.17 + f.seed * 0.7) % h);
+      var len = 0.6 + (k % 4) * 0.35, run = ((t * 2.4 + k * 0.137) % 1) * (w + 2) - 1;
+      c.lineWidth = 0.05 + (k % 3) * 0.03;
+      c.beginPath(); c.moveTo(sx + run, sy); c.lineTo(sx + run + len, sy - len * 0.25); c.stroke();
+    }
+    c.restore();
+  } else if (f.k === 'weld') {
+    var wx = f.x + 0.5, wy = f.y + 0.5;
+    for (var j = 0; j < 14; j++) {
+      var ang = (f.seed * 1.3 + j * 0.71) % (Math.PI * 2), rr = 0.1 + t * (0.5 + (j % 3) * 0.25);
+      c.fillStyle = 'rgba(255,' + (190 + (j % 3) * 20) + ',90,' + (1 - t) + ')';
+      c.beginPath(); c.arc(wx + Math.cos(ang) * rr, wy + Math.sin(ang) * rr + t * t * 0.5, 0.04, 0, 7); c.fill();
+    }
+    var gw = c.createRadialGradient(wx, wy, 0, wx, wy, 0.6);
+    gw.addColorStop(0, 'rgba(255,250,220,' + 0.9 * (1 - t) + ')'); gw.addColorStop(1, 'rgba(255,170,60,0)');
+    c.fillStyle = gw; c.fillRect(wx - 0.6, wy - 0.6, 1.2, 1.2);
+  }
 }

@@ -161,9 +161,10 @@ function bdcGeom(dk) {
     var a = g.areas[z.area];
     if (!a) {
       a = g.areas[z.area] = { id: z.area, kind: z.kind, label: z.label || (z.kind === 'lock' ? 'Шлюз' : ''), runs: [], cells: 0,
-                              minx: 1e9, miny: 1e9, maxx: -1, maxy: -1, zones: [] };
+                              minx: 1e9, miny: 1e9, maxx: -1, maxy: -1, zones: [], role: null };
       g.areaList.push(a);
     }
+    if (z.role) a.role = z.role;
     a.zones.push(z.id);
   });
   for (y = 0; y < H; y++) {
@@ -1392,6 +1393,15 @@ function bdcDraw(T) {
   // Туман
   bdcFog(c, dk, g, vis, T);
 
+  // Чьи отсеки, мостик под захватом, заряд в реакторе
+  bdcGoalsPlan(c, dk, g, s, T);
+
+  // Без света — темнота поверх палубы; подсветка хода, двери и бойцы — над ней
+  c.save();
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  bdcDarkness(c, dk, s, T);
+  c.restore();
+
   // Куда дойдёт выбранный боец и путь до выбранной клетки
   bdcDrawReach(c, s, T);
 
@@ -1425,6 +1435,7 @@ function bdcDraw(T) {
   units.forEach(function(x) { bdcToken(c, x, s, T, 2); });
   bdcDrawTargets(c, s, T);
   bdcDrawPlanCost(c, s);
+  bdcGoalsScreen(c, dk, g, s, T);
 
   // Тревога: красная кромка экрана
   if (alarm && !BDC.reduce) {
@@ -1439,6 +1450,7 @@ function bdcDraw(T) {
   c.fillStyle = vg2; c.fillRect(0, 0, vw, vh);
 
   bdcMini(c, dk, g, vis);
+  bdcDarkBadge(c, dk);
   // Цифры урона — поверх мини-карты и виньетки, чтобы не терялись у края
   bdcDrawFxScreen(c, s, nowMs);
 
@@ -1863,7 +1875,7 @@ function bdcLabels(c, dk, g, vis, s) {
     var lh = f + 3, hgt = rows.length * lh + (goal ? 0 : 0);
     if (hgt > r.h - 4 && !goal) return;
     var inset = Math.max(5, s * 0.18);
-    var gw = w + (goal ? 10 : 0);
+    var gw = w + (goal || (a.role && a.role !== 'hold') ? 10 : 0);
     var cands = [[r.x + inset, r.y + inset], [r.x + r.w - inset - gw, r.y + inset],
                  [r.x + inset, r.y + r.h - inset - hgt], [r.x + r.w - inset - gw, r.y + r.h - inset - hgt]];
     var pick = null;
@@ -1885,16 +1897,27 @@ function bdcLabels(c, dk, g, vis, s) {
     placed.push([pick[0], pick[1], gw, hgt]);
     var fogged = a.zones.every(function(z) { return !vis[dk.n + ':' + z]; });
     var col = goal ? '#f0d48a' : a.kind === 'lock' ? '#5fe0cb' : a.kind === 'corr' ? '#7f93a8' : '#a9bccf';
+    // Отсек с ролью: кружок цвета держащей стороны (серый — пусто)
+    var who = a.role && a.role !== 'hold' && typeof bdgHolder === 'function' ? bdgHolder(a.role) : null;
+    var holdCol = who ? (who === bdMine() ? '#5fd968' : '#ff5a4f') : null;
+    var mark = !goal && a.role && a.role !== 'hold' && typeof BDG_ROLE !== 'undefined' && BDG_ROLE[a.role];
     c.globalAlpha = fogged ? 0.55 : 1;
     rows.forEach(function(t, i) {
       var x0 = pick[0];
       if (goal && i === 0) {
-        // Ромб цели
+        // Ромб цели: золото, а если держат — цвет стороны
         var dy = pick[1] + f * 0.55;
-        c.fillStyle = '#d9a940';
+        c.fillStyle = holdCol || '#d9a940';
         c.beginPath(); c.moveTo(x0 - 1, dy); c.lineTo(x0 + 3, dy - 4); c.lineTo(x0 + 7, dy); c.lineTo(x0 + 3, dy + 4); c.closePath(); c.fill();
         x0 += 10;
       } else if (goal) x0 += 10;
+      else if (mark && i === 0) {
+        var my = pick[1] + f * 0.55;
+        c.fillStyle = holdCol || 'rgba(143,168,196,0.35)';
+        c.strokeStyle = holdCol ? 'rgba(0,0,0,0.6)' : 'rgba(143,168,196,0.8)'; c.lineWidth = 1;
+        c.beginPath(); c.arc(x0 + 3, my, 3.2, 0, 7); c.fill(); c.stroke();
+        x0 += 10;
+      } else if (mark) x0 += 10;
       bdcText(c, t, x0, pick[1] + f + i * lh - 1, f, col, 1);
     });
     c.globalAlpha = 1;
@@ -1908,13 +1931,23 @@ function bdcMarks(c, dk, s) {
   (dk.hatches || []).forEach(function(h) {
     var p = bdcToScreen(h.x + 0.5, h.y + 0.5);
     var up = h.to && h.to[0] < dk.n;
-    var txt = (up ? '↑' : '↓') + (h.to ? 'П' + h.to[0] : '');
+    var welded = typeof bdgWelded === 'function' && bdgWelded(h.id);
+    var txt = welded ? 'ЗАВАРЕН' : (up ? '↑' : '↓') + (h.to ? 'П' + h.to[0] : '');
+    if (welded) {
+      // Шов крест-накрест поверх крышки люка
+      var r = s * 0.34;
+      c.save();
+      c.strokeStyle = 'rgba(255,170,70,0.95)'; c.lineWidth = Math.max(2, s * 0.08); c.lineCap = 'round';
+      c.shadowColor = 'rgba(255,140,40,0.8)'; c.shadowBlur = 6;
+      c.beginPath(); c.moveTo(p[0] - r, p[1] - r); c.lineTo(p[0] + r, p[1] + r); c.moveTo(p[0] + r, p[1] - r); c.lineTo(p[0] - r, p[1] + r); c.stroke();
+      c.restore();
+    }
     c.font = 'bold ' + fs + 'px "Courier New", monospace';
     var w = c.measureText(txt).width + 8;
     var y = p[1] + s * 0.5 + 3;
-    c.fillStyle = 'rgba(13,11,22,0.88)'; bdcRR(c, p[0] - w / 2, y, w, fs + 5, 4); c.fill();
-    c.strokeStyle = 'rgba(154,126,230,0.8)'; c.lineWidth = 1; c.stroke();
-    c.fillStyle = '#cbb8ff'; c.textAlign = 'center'; c.fillText(txt, p[0], y + fs + 1);
+    c.fillStyle = welded ? 'rgba(30,14,4,0.92)' : 'rgba(13,11,22,0.88)'; bdcRR(c, p[0] - w / 2, y, w, fs + 5, 4); c.fill();
+    c.strokeStyle = welded ? 'rgba(227,162,74,0.9)' : 'rgba(154,126,230,0.8)'; c.lineWidth = 1; c.stroke();
+    c.fillStyle = welded ? '#f3c98a' : '#cbb8ff'; c.textAlign = 'center'; c.fillText(txt, p[0], y + fs + 1);
     c.textAlign = 'left';
   });
   (dk.lifts || []).forEach(function(l) {
@@ -2083,6 +2116,24 @@ function bdcMini(c, dk, g, vis) {
     var b = z.box, a = toMini(b[0], b[1]), e = toMini(b[0] + b[2], b[1] + b[3]);
     c.fillRect(Math.min(a[0], e[0]), Math.min(a[1], e[1]), Math.abs(a[0] - e[0]), Math.abs(a[1] - e[1]));
   });
+  // Отсеки с ролью — цветом держащей стороны
+  if (typeof bdgList === 'function' && bdState.status === 'active') {
+    bdgList().forEach(function(r) {
+      if (r.deck !== dk.n) return;
+      var who = bdgHolder(r.role), a = g.areas[r.area];
+      if (!who || !a) return;
+      c.fillStyle = bdcAlpha(who === bdMine() ? '#5fd968' : '#ff5a4f', 0.42);
+      a.rects.forEach(function(b) {
+        var p0 = toMini(b[0], b[1]), p1 = toMini(b[0] + b[2], b[1] + b[3]);
+        c.fillRect(Math.min(p0[0], p1[0]), Math.min(p0[1], p1[1]), Math.abs(p0[0] - p1[0]), Math.abs(p0[1] - p1[1]));
+      });
+    });
+    var chm = bdState.charge;
+    if (chm && chm.deck === dk.n) {
+      var cq = toMini(chm.x + 0.5, chm.y + 0.5);
+      c.fillStyle = '#ff3b2a'; c.beginPath(); c.arc(cq[0], cq[1], 3, 0, 7); c.fill();
+    }
+  }
   bdUnits(dk.n).forEach(function(u) {
     var q = toMini(u.x + 0.5, u.y + 0.5);
     c.fillStyle = BDC_SIDE[u.mine ? 'mine' : (u.side === bdMine() ? 'ally' : 'foe')];
