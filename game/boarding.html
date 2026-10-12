@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Абордаж — Star Wars: Global Conflict</title>
+<link rel="stylesheet" href="../css/shared-ui.css">
+<link rel="stylesheet" href="../css/boarding.css">
+</head>
+<body class="bd-page">
+
+<!-- Экран перехода: стыковка, пока грузятся палубы (js/scene-loader.js) -->
+<div id="scene-loader" aria-live="polite">
+  <div class="sl-globe-wrap"><div class="sl-orbit"></div><div class="sl-globe bd-sl-ship"></div></div>
+  <div class="sl-kicker">Стыковка</div>
+  <div class="sl-name">…</div>
+  <div class="sl-bar"><i></i></div>
+  <div class="sl-step"></div>
+</div>
+
+<button id="bd-back">← Орбита</button>
+
+<div id="bd-top" class="bd-top"></div>
+<div id="bd-tabs"></div>
+
+<div id="bd-view"></div>
+
+<button id="bd-zoom" aria-label="Крупнее">+</button>
+<div id="bd-hud"></div>
+<div id="bd-toast"></div>
+<div id="bd-end"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../js/supabase-client.js"></script>
+<script src="../js/scene-loader.js"></script>
+<script src="../js/credits-bar.js"></script>
+<script src="../js/game-confirm.js"></script>
+<script src="../js/boarding-deck.js"></script>
+<script src="../js/boarding.js"></script>
+</body>
+</html>

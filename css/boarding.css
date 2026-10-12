@@ -1,0 +1,450 @@
+/* Абордаж: палубы цели (js/boarding.js).
+   Язык тот же, что у карт: тёмные панели, моноширинный шрифт, свои —
+   зелёные, противник — красный, золото — цели и важное. */
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: #05060a;
+  background-image: url('../assets/ui/galaxy-bg-tile.png');
+  background-repeat: repeat;
+  font-family: 'Courier New', monospace;
+  color: #cfd8dc;
+}
+
+/* Загрузка: вместо планеты — силуэт цели */
+#scene-loader .bd-sl-ship {
+  background-color: #0b1018;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 62% auto;
+}
+#scene-loader .bd-sl-ship::after { display: none; }
+
+#bd-back {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 1000;
+  background: rgba(5,6,10,0.75);
+  border: 1px solid rgba(28,37,48,0.9);
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  padding: 8px 14px;
+  border-radius: 20px;
+  cursor: pointer;
+}
+
+/* ---------- шапка: стороны, тревога, время ---------- */
+
+.bd-top {
+  position: fixed;
+  top: 54px;
+  left: 10px;
+  right: 10px;
+  z-index: 900;
+  max-width: 460px;
+  margin: 0 auto;
+  padding: 9px 12px 10px;
+  background: linear-gradient(180deg, rgba(13,17,25,0.96) 0%, rgba(8,11,17,0.96) 100%);
+  border: 1px solid #1c2530;
+  border-left: 3px solid #d94a4a;
+  border-radius: 10px;
+  box-shadow: 0 8px 26px rgba(0,0,0,0.5);
+}
+.bd-top.def { border-left-color: #4a90d9; }
+.bd-top:empty { display: none; }
+
+.bd-top-row { display: flex; align-items: center; gap: 8px; }
+
+.bd-side {
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #d94a4a;
+}
+.bd-top.def .bd-side { color: #4a90d9; }
+
+.bd-alarm {
+  padding: 2px 7px;
+  border: 1px solid rgba(217,144,42,0.6);
+  border-radius: 9px;
+  color: #e3a24a;
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  background: rgba(217,144,42,0.1);
+  animation: bd-alarm 1.6s ease-in-out infinite;
+}
+@keyframes bd-alarm { 50% { background: rgba(217,144,42,0.28); box-shadow: 0 0 10px rgba(217,144,42,0.35); } }
+
+.bd-timer {
+  margin-left: auto;
+  font-size: 15px;
+  letter-spacing: 1px;
+  color: #e8d9a8;
+  font-variant-numeric: tabular-nums;
+}
+.bd-timer.warn { color: #e3a24a; }
+
+.bd-ships { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+
+.bd-ship {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.bd-ship.foe { flex-direction: row-reverse; text-align: right; }
+.bd-ship b {
+  display: block;
+  font-size: 11px;
+  font-weight: normal;
+  letter-spacing: 1px;
+  color: #cfd8dc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bd-ship i {
+  display: block;
+  font-style: normal;
+  font-size: 9px;
+  color: #55606c;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bd-ship > div { min-width: 0; }
+
+.bd-ship-pic {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  background: #0a0d14;
+  border: 1px solid #2a3644;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.bd-ship.own .bd-ship-pic { border-color: rgba(95,217,104,0.55); }
+.bd-ship.foe .bd-ship-pic { border-color: rgba(217,74,74,0.6); }
+.bd-ship-pic img { max-width: 86%; max-height: 86%; display: block; }
+
+.bd-vs { flex: none; color: #55606c; font-size: 12px; letter-spacing: -2px; }
+
+/* ---------- вкладки палуб ---------- */
+
+#bd-tabs {
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  z-index: 900;
+  max-width: 460px;
+  margin: 0 auto;
+  display: flex;
+  gap: 6px;
+  /* под шапкой; точное место ставит bdLayout через top шапки + высоту */
+  top: 146px;
+}
+#bd-tabs:empty { display: none; }
+
+.bd-tab {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 6px 8px 6px;
+  background: rgba(10,13,20,0.92);
+  border: 1px solid #1c2530;
+  border-radius: 8px;
+  color: #55606c;
+  font-family: 'Courier New', monospace;
+  text-align: left;
+  cursor: pointer;
+  position: relative;
+}
+.bd-tab.active {
+  background: #16202e;
+  border-color: #4a90d9;
+  color: #cfd8dc;
+  box-shadow: 0 0 0 2px rgba(74,144,217,0.18);
+}
+.bd-tab-n { font-size: 13px; letter-spacing: 1px; color: inherit; }
+.bd-tab.active .bd-tab-n { color: #4a90d9; }
+.bd-tab-name {
+  font-size: 8px;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.bd-tab-dots { position: absolute; top: 6px; right: 6px; display: flex; gap: 3px; }
+.bd-tab-dots i {
+  font-style: normal;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  font-size: 9px;
+  line-height: 15px;
+  text-align: center;
+  color: #0a0d14;
+}
+.bd-tab-dots i.m { background: #5fd968; }
+.bd-tab-dots i.f { background: #d94a4a; color: #fff; }
+
+/* ---------- поле палубы ---------- */
+
+#bd-view {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 190px;
+  bottom: 160px;
+  overflow: hidden;
+  background: #04060b;
+}
+/* Палуба на холсте (js/boarding-deck.js): тянуть — двигать, щипок и колесо — масштаб */
+#bd-cv {
+  display: block;
+  touch-action: none;
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+}
+#bd-cv:active { cursor: grabbing; }
+
+/* Вся палуба ↔ крупно к своим */
+#bd-zoom {
+  position: fixed;
+  right: 14px;
+  bottom: 180px;
+  z-index: 940;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: rgba(10,13,20,0.92);
+  border: 1px solid #2a3644;
+  color: #8fa8c4;
+  font-family: 'Courier New', monospace;
+  font-size: 20px;
+  line-height: 1;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+  cursor: pointer;
+}
+#bd-zoom:active { background: #4a90d9; color: #0a0d14; }
+
+/* ---------- нижняя панель ---------- */
+
+#bd-hud {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 950;
+  max-width: 460px;
+  margin: 0 auto;
+  padding: 12px 14px calc(14px + env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, #0d1119 0%, #080b11 100%);
+  border: 1px solid #1c2530;
+  border-bottom: none;
+  border-radius: 14px 14px 0 0;
+  box-shadow: 0 -8px 40px rgba(0,0,0,0.65);
+  max-height: 46vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+#bd-hud:empty { display: none; }
+
+.bd-sum { display: flex; gap: 6px; }
+.bd-stat {
+  flex: 1;
+  padding: 8px 6px 7px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 8px;
+  text-align: center;
+}
+.bd-stat b { display: block; font-size: 17px; font-weight: normal; color: #5fd968; }
+.bd-stat span { display: block; margin-top: 2px; font-size: 8px; letter-spacing: 0.6px; color: #55606c; }
+.bd-stat.foe b { color: #d94a4a; }
+.bd-stat.dim b { color: #8fa8c4; }
+
+.bd-note {
+  margin-top: 10px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: #8fa8c4;
+}
+
+.bd-card { display: flex; gap: 11px; align-items: flex-start; position: relative; }
+.bd-card-pic {
+  flex: none;
+  width: 58px;
+  height: 58px;
+  border-radius: 9px;
+  overflow: hidden;
+  background: #0a0d14;
+  border: 2px solid #5fd968;
+}
+.bd-card.foe .bd-card-pic { border-color: #d94a4a; }
+.bd-card-pic img { width: 100%; height: 100%; object-fit: cover; object-position: center top; display: block; }
+.bd-card-body { flex: 1; min-width: 0; padding-right: 30px; }
+.bd-card-name { font-size: 13px; letter-spacing: 1.5px; text-transform: uppercase; color: #cfd8dc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bd-card-sub { margin-top: 2px; font-size: 10px; color: #55606c; }
+.bd-card-hp { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 10px; color: #5fd968; }
+.bd-card.foe .bd-card-hp { color: #d94a4a; }
+.bd-card-hp i { flex: 1; height: 5px; background: #10151e; border: 1px solid #1c2530; border-radius: 3px; overflow: hidden; }
+.bd-card-hp b { display: block; height: 100%; background: currentColor; }
+.bd-card-ap { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.bd-dots { display: flex; gap: 4px; }
+.bd-dots i { width: 10px; height: 10px; border-radius: 50%; border: 1px solid #2a3644; background: #10151e; }
+.bd-dots i.on { background: #d9a940; border-color: #d9a940; }
+.bd-card-ap em { font-style: normal; font-size: 9px; letter-spacing: 1px; color: #55606c; }
+
+.bd-x {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 26px;
+  height: 26px;
+  background: none;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  color: #8fa8c4;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.bd-sec {
+  margin: 12px 0 6px;
+  padding-top: 10px;
+  border-top: 1px solid #1c2530;
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #55606c;
+}
+
+.bd-door-row {
+  padding: 8px 9px;
+  margin-bottom: 6px;
+  background: #10151e;
+  border: 1px solid #1c2530;
+  border-radius: 8px;
+}
+.bd-door-row.sel { border-color: #d9a940; }
+.bd-door-name { display: flex; align-items: center; gap: 7px; font-size: 10px; color: #cfd8dc; }
+.bd-door-name em { margin-left: auto; font-style: normal; font-size: 9px; letter-spacing: 1px; color: #8fa8c4; }
+.bd-door-ico { flex: none; width: 14px; height: 4px; border-radius: 2px; background: #5b6b7d; }
+.bd-door-ico.s-closed { background: #8fa8c4; }
+.bd-door-ico.s-locked { background: #d9a940; }
+.bd-door-ico.k-blast.s-locked { background: #e08a2c; }
+.bd-door-ico.k-lock.s-locked { background: #1f9d8a; }
+.bd-door-ico.s-broken { background: repeating-linear-gradient(90deg, #d94a4a 0 3px, transparent 3px 5px); }
+.bd-door-acts { display: flex; gap: 6px; margin-top: 8px; }
+.bd-door-none { font-size: 9px; color: #55606c; }
+
+.bd-btn {
+  flex: 1;
+  padding: 8px 6px;
+  background: #0a0d14;
+  border: 1px solid #2a3644;
+  border-radius: 7px;
+  color: #cfd8dc;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+.bd-btn small { display: block; margin-top: 2px; font-size: 8px; color: #55606c; letter-spacing: 0.5px; }
+.bd-btn.hot { border-color: rgba(217,74,74,0.7); color: #ff9c8f; }
+.bd-btn:active { background: #4a90d9; color: #0a0d14; }
+.bd-btn.hot:active { background: #d94a4a; color: #0a0d14; }
+.bd-btn:disabled { opacity: 0.4; cursor: default; }
+.bd-btn.wide { width: 100%; flex: none; }
+
+.bd-retreat {
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px;
+  background: none;
+  border: 1px dashed rgba(217,74,74,0.55);
+  border-radius: 8px;
+  color: #d98a80;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+.bd-retreat:active { background: rgba(217,74,74,0.15); }
+
+/* ---------- подсказка и итог ---------- */
+
+#bd-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 200px;
+  width: max-content;
+  max-width: calc(100% - 40px);
+  z-index: 3000;
+  max-width: 320px;
+  padding: 9px 14px;
+  transform: translate(-50%, 10px);
+  background: rgba(13,17,25,0.97);
+  border: 1px solid #1c2530;
+  border-left: 3px solid #d9a940;
+  border-radius: 9px;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.55);
+  font-size: 11px;
+  color: #cfd8dc;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.22s ease;
+}
+#bd-toast.show { opacity: 1; transform: translate(-50%, 0); }
+#bd-toast.bad { border-left-color: #d94a4a; color: #ffb3a8; }
+
+#bd-end {
+  position: fixed;
+  inset: 0;
+  z-index: 2500;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(3,4,8,0.72);
+}
+#bd-end.open { display: flex; }
+.bd-end-card {
+  width: 100%;
+  max-width: 340px;
+  padding: 20px 18px 16px;
+  background: linear-gradient(180deg, #0d1119 0%, #080b11 100%);
+  border: 1px solid #1c2530;
+  border-top: 3px solid #d94a4a;
+  border-radius: 12px;
+  box-shadow: 0 18px 50px rgba(0,0,0,0.7);
+  text-align: center;
+}
+.bd-end-card.good { border-top-color: #5fd968; }
+.bd-end-kicker { font-size: 9px; letter-spacing: 3px; text-transform: uppercase; color: #55606c; }
+.bd-end-title { margin: 8px 0 6px; font-size: 18px; letter-spacing: 1.5px; color: #e8d9a8; }
+.bd-end-text { margin-bottom: 14px; font-size: 11px; line-height: 1.5; color: #8fa8c4; }
+
+@media (prefers-reduced-motion: reduce) {
+  .bd-alarm { animation: none; }
+}
