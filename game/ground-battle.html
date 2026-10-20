@@ -2,148 +2,41 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Наземное сражение — Star Wars: Global Conflict</title>
-<link rel="stylesheet" href="../css/ground-battle.css">
-<link rel="stylesheet" href="../css/drop.css">
-<link rel="stylesheet" href="../css/shared-ui.css">
-<link rel="stylesheet" href="../css/quest.css">
-<link rel="stylesheet" href="../css/supply.css">
-<link rel="stylesheet" href="../css/lease.css">
-<link rel="stylesheet" href="../css/overwatch.css">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>Star Wars: Global Conflict — переезд</title>
+<meta http-equiv="refresh" content="6;url=https://c0bectb11.github.io/SW-RPG2.0/game/ground-battle.html">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+         background: #0a0d14; color: #cfd8dc; font-family: 'Courier New', monospace; padding: 20px; }
+  #box { width: 100%; max-width: 380px; border: 1px solid #1c2530; background: #0e131c; padding: 26px 22px; text-align: center; }
+  h1 { font-size: 14px; letter-spacing: 2px; text-transform: uppercase; color: #8fa8c4; margin: 0 0 18px; font-weight: normal; }
+  p { font-size: 13px; line-height: 1.55; margin: 0 0 12px; color: #9fb0bf; }
+  b { color: #cfd8dc; }
+  a.go { display: block; margin-top: 20px; padding: 12px; background: #4a90d9; color: #0a0d14; text-decoration: none;
+         font-size: 13px; letter-spacing: 1px; text-transform: uppercase; font-weight: bold; border-radius: 2px; }
+  .note { margin-top: 14px; font-size: 11px; color: #5d6f80; }
+</style>
 </head>
 <body>
-
-<!-- Экран перехода: закрывает карту, пока она собирается (js/scene-loader.js) -->
-<div id="scene-loader" aria-live="polite">
-  <div class="sl-globe-wrap"><div class="sl-orbit"></div><div class="sl-globe"></div></div>
-  <div class="sl-kicker">Высадка на поверхность</div>
-  <div class="sl-name">…</div>
-  <div class="sl-bar"><i></i></div>
-  <div class="sl-step"></div>
+<div id="box">
+  <h1>Старая версия закрыта</h1>
+  <p>Пошаговые бои <b>версии 1.0</b> отключены. Игра продолжается в <b>версии 2.0</b> — бои в реальном времени.</p>
+  <p>Аккаунт, войска и флот те же: войди тем же email и паролем.</p>
+  <a class="go" id="go" href="https://c0bectb11.github.io/SW-RPG2.0/game/ground-battle.html">Перейти в 2.0</a>
+  <div class="note">Переход произойдёт автоматически через <span id="sec">6</span> с</div>
 </div>
-
-<button id="ground-back-btn">← Галактика</button>
-
-<div id="ground-viewport">
-  <canvas id="ground-canvas"></canvas>
-</div>
-
-<div id="build-panel" style="display:none;">
-  <div id="build-panel-box">
-    <button id="build-panel-close">✕</button>
-    <div class="build-panel-title">Выбери постройку</div>
-    <div id="build-panel-list"></div>
-  </div>
-</div>
-
-<div id="building-info-panel" style="display:none;">
-  <div id="building-info-box">
-    <button id="building-info-close">✕</button>
-    <div id="building-info-name">—</div>
-    <div id="building-info-refund"></div>
-    <div id="building-info-lease" style="display:none;"></div>
-    <button id="building-info-research">Исследования</button>
-    <button id="building-info-demolish">Снести</button>
-  </div>
-</div>
-
-<div id="unit-panel" style="display:none;">
-  <div id="unit-panel-box">
-    <div id="unit-panel-header">
-      <span id="unit-panel-title">Производство</span>
-      <button id="unit-panel-close">✕</button>
-    </div>
-    <div id="unit-panel-slot" class="prod-slot free"></div>
-    <div id="unit-panel-capacity" class="unit-panel-capacity"></div>
-    <div id="unit-panel-list"></div>
-  </div>
-</div>
-
-<div id="order-queue" style="display:none;"></div>
-
-<div id="capture-bar" style="display:none;"></div>
-<div id="scout-bar" style="display:none;"></div>
-
-<div id="research-panel" style="display:none;">
-  <div id="research-box">
-    <div id="research-header">
-      <span id="research-title">Исследования</span>
-      <button id="research-close">✕</button>
-    </div>
-    <div id="research-list"></div>
-    <div id="research-info"></div>
-  </div>
-</div>
-
-<div id="settlement-panel" style="display:none;">
-  <div id="settlement-box">
-    <div id="settlement-header">
-      <span id="settlement-title">Поселение</span>
-      <button id="settlement-close">✕</button>
-    </div>
-    <div id="settlement-body"></div>
-  </div>
-</div>
-
-<div id="logi-panel" style="display:none;">
-  <div id="logi-box">
-    <div id="logi-header">
-      <span id="logi-title">Логистический узел</span>
-      <button id="logi-close">✕</button>
-    </div>
-    <div id="logi-tabs">
-      <button class="logi-tab" data-tab="send">Отправка</button>
-      <button class="logi-tab" data-tab="market">Рынок</button>
-      <button class="logi-tab" data-tab="mine">Мои лоты</button>
-    </div>
-    <div id="logi-body"></div>
-  </div>
-</div>
-
-<div id="tree-panel" style="display:none;">
-  <div id="tree-header">
-    <span id="tree-title">Древо развития</span>
-    <button id="tree-close">✕</button>
-  </div>
-  <div id="tree-viewport">
-    <div id="tree-world">
-      <svg id="tree-links"></svg>
-      <div id="tree-nodes"></div>
-    </div>
-  </div>
-  <div id="tree-info"></div>
-</div>
-
-<button id="drop-btn" type="button" style="visibility:hidden;"><span class="db-ico">⇣</span><span class="db-txt"><b>Десант</b><i id="drop-btn-sub">в трюмах</i></span></button>
-
-<div id="pickup-bar" style="visibility:hidden;"></div>
-
-<div id="drop-panel" style="display:none;">
-  <div id="drop-panel-box">
-    <div id="drop-panel-header">
-      <span id="drop-panel-title">Десант на борту</span>
-      <button id="drop-panel-close">✕</button>
-    </div>
-    <div id="drop-panel-list"></div>
-  </div>
-</div>
-
-<div id="placement-hint" style="display:none;"></div>
-
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="../js/supabase-client.js"></script>
-<script src="../js/scene-loader.js"></script>
-<script src="../js/credits-bar.js"></script>
-<script src="../js/game-confirm.js"></script>
-<script src="../js/drag-command.js"></script>
-<script src="../js/production-lease.js"></script>
-<script src="../js/overwatch.js"></script>
-<script src="../js/ground-battle.js"></script>
-<script src="../js/drop-tray.js"></script>
-<script src="../js/automove-route.js"></script>
-<script src="../js/automove-ground.js"></script>
-<script src="../js/supply.js"></script>
-<script src="../js/quest.js"></script>
+<script>
+(function () {
+  var url = 'https://c0bectb11.github.io/SW-RPG2.0/game/ground-battle.html' + location.search + location.hash;
+  document.getElementById('go').href = url;
+  var n = 6, el = document.getElementById('sec');
+  var t = setInterval(function () {
+    n--; if (el) el.textContent = n;
+    if (n <= 0) { clearInterval(t); location.replace(url); }
+  }, 1000);
+})();
+</script>
 </body>
 </html>
